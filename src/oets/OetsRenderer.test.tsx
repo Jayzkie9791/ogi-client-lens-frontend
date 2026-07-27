@@ -1,14 +1,24 @@
-import { render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { createMemoryRouter, RouterProvider } from "react-router-dom";
+import { act } from "react";
+import {
+  createMemoryRouter,
+  MemoryRouter,
+  Route,
+  RouterProvider,
+  Routes
+} from "react-router-dom";
 import { afterEach, beforeEach, expect, vi } from "vitest";
 
 import { configureApiAuth } from "../api/client";
+import { AuthContext, AuthContextValue } from "../auth/AuthContext";
 import { getRefreshTokenStorageKey } from "../auth/storage";
 import { appRoutes } from "../app/router";
 import { AppProviders } from "../app/providers/AppProviders";
 import { narrowOetsDefinition } from "./definitionGuards";
 import { OetsRenderer } from "./OetsRenderer";
+import { RuntimeTemplatePage } from "./RuntimeTemplatePage";
 import { OetsDefinition, OetsTemplateRuntimeDefinition } from "./types";
 
 const session = {
@@ -40,6 +50,67 @@ function renderWithRoute(initialPath: string) {
   );
 }
 
+function createTestQueryClient() {
+  return new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+        staleTime: Infinity
+      }
+    }
+  });
+}
+
+function renderRuntimeTemplatePageWithSession({
+  initialPath,
+  queryClient,
+  currentSession
+}: {
+  initialPath: string;
+  queryClient: QueryClient;
+  currentSession: typeof session;
+}) {
+  function element(nextSession: typeof session) {
+    return (
+      <QueryClientProvider client={queryClient}>
+        <AuthContext.Provider value={authContextValue(nextSession)}>
+          <MemoryRouter initialEntries={[initialPath]}>
+            <Routes>
+              <Route
+                element={<RuntimeTemplatePage />}
+                path="/workbench/oets/:templateCode"
+              />
+            </Routes>
+          </MemoryRouter>
+        </AuthContext.Provider>
+      </QueryClientProvider>
+    );
+  }
+
+  const view = render(element(currentSession));
+
+  return {
+    ...view,
+    rerenderWithSession(nextSession: typeof session) {
+      view.rerender(element(nextSession));
+    }
+  };
+}
+
+function authContextValue(currentSession: typeof session): AuthContextValue {
+  return {
+    status: "authenticated",
+    session: currentSession,
+    errorMessage: null,
+    login: async () => undefined,
+    logout: () => undefined,
+    clearAuthError: () => undefined,
+    refreshAccessToken: async () => "access-token",
+    canUsePermission: (permission) =>
+      currentSession.permissions.includes(permission)
+  };
+}
+
 function mockFetchQueue(responses: MockResponse[]) {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -69,6 +140,49 @@ function mockFetchQueue(responses: MockResponse[]) {
   vi.stubGlobal("fetch", fetchMock);
 
   return { calls };
+}
+
+function jsonResponse(status: number, body: unknown, statusText = "OK") {
+  return new Response(JSON.stringify(body), {
+    status,
+    statusText,
+    headers: {
+      "Content-Type": "application/json"
+    }
+  });
+}
+
+function evidenceRecord(
+  overrides: Partial<{
+    facility_id: string | null;
+    lifecycle_state: string;
+  }> = {}
+) {
+  return {
+    id: "evidence-record-1",
+    template_provenance: {
+      template_id: "template-1",
+      template_code: runtimeTemplate.template_code,
+      template_version: runtimeTemplate.template_version,
+      template_registry_id: runtimeTemplate.template_registry_id,
+      template_version_id: runtimeTemplate.template_version_id,
+      schema_version: runtimeTemplate.schema_version,
+      checksum: runtimeTemplate.checksum
+    },
+    client_id: session.clientId,
+    facility_id: session.facilityIds[0],
+    lifecycle_state: "SUBMITTED",
+    payload: {
+      sections: {}
+    },
+    payload_checksum: "payload-checksum-1",
+    created_by_user_id: session.id,
+    submitted_by_user_id: session.id,
+    created_at: "2026-07-27T00:00:00.000Z",
+    submitted_at: "2026-07-27T00:00:00.000Z",
+    updated_at: "2026-07-27T00:00:00.000Z",
+    ...overrides
+  };
 }
 
 beforeEach(() => {
@@ -214,6 +328,519 @@ describe("Generic OETS renderer", () => {
     expect(screen.getByRole("button", { name: "Add entry" })).toBeDisabled();
     await user.type(screen.getByLabelText("Text Field"), "Blocked");
     expect(screen.queryByText(/"TEXT_FIELD": "Blocked"/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Submit evidence" })
+    ).not.toBeInTheDocument();
+  });
+
+  it("submits the rendered template provenance, client context, facility context, and sections only", async () => {
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    const { calls } = mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: session },
+      { status: 200, body: { ...runtimeTemplate, definition_jsonb: definition } },
+      { status: 201, body: evidenceRecord() }
+    ]);
+    const user = userEvent.setup();
+
+    renderWithRoute("/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE");
+
+    await user.type(await screen.findByLabelText("Text Field"), "Submitted");
+    await user.click(screen.getByRole("button", { name: "Submit evidence" }));
+
+    expect(
+      await screen.findByText(/Evidence submitted. Record evidence-record-1 is SUBMITTED./)
+    ).toBeInTheDocument();
+
+    const requestBody = JSON.parse(String(calls[3].init?.body));
+
+    expect(calls[3].url).toBe("/api/v1/operational-evidence/records");
+    expect(calls[3].init?.method).toBe("POST");
+    expect(requestBody).toMatchObject({
+      template_code: runtimeTemplate.template_code,
+      template_version_id: runtimeTemplate.template_version_id,
+      checksum: runtimeTemplate.checksum,
+      client_id: session.clientId,
+      facility_id: session.facilityIds[0],
+      payload: {
+        sections: {
+          GENERAL_EVIDENCE: {
+            TEXT_FIELD: "Submitted"
+          }
+        }
+      }
+    });
+    expect(requestBody.payload.template_version).toBeUndefined();
+    expect(requestBody.payload.schema_version).toBeUndefined();
+    expect(requestBody.payload.template_version_id).toBeUndefined();
+    expect(requestBody.payload.checksum).toBeUndefined();
+  });
+
+  it("pins the rendered template provenance and definition for the editing session when query data changes", async () => {
+    const queryClient = createTestQueryClient();
+    const { calls } = mockFetchQueue([
+      { status: 201, body: evidenceRecord() }
+    ]);
+    const user = userEvent.setup();
+
+    queryClient.setQueryData(
+      ["oets-runtime-template", runtimeTemplate.template_code],
+      { ...runtimeTemplate, definition_jsonb: definition }
+    );
+
+    renderRuntimeTemplatePageWithSession({
+      initialPath: "/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE",
+      queryClient,
+      currentSession: session
+    });
+
+    await user.type(await screen.findByLabelText("Text Field"), "Version N");
+
+    await act(async () => {
+      queryClient.setQueryData(
+        ["oets-runtime-template", runtimeTemplate.template_code],
+        { ...versionTwoRuntimeTemplate, definition_jsonb: versionTwoDefinition }
+      );
+    });
+
+    expect(
+      screen.getByRole("heading", { name: "Generic Runtime Template" })
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Newer Runtime Template" })
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Submit evidence" }));
+
+    const requestBody = JSON.parse(String(calls[0].init?.body));
+
+    expect(requestBody.template_version_id).toBe(runtimeTemplate.template_version_id);
+    expect(requestBody.checksum).toBe(runtimeTemplate.checksum);
+    expect(requestBody.payload.sections).toMatchObject({
+      GENERAL_EVIDENCE: {
+        TEXT_FIELD: "Version N"
+      },
+      REPEATABLE_OBSERVATIONS: [
+        {
+          OBSERVATION_TIME: null
+        }
+      ]
+    });
+    expect(requestBody.payload.sections.NEW_SECTION).toBeUndefined();
+  });
+
+  it("omits facility_id when the session has no facility context", async () => {
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    const { calls } = mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: { ...session, facilityIds: [] } },
+      { status: 200, body: { ...runtimeTemplate, definition_jsonb: definition } },
+      { status: 201, body: evidenceRecord({ facility_id: null }) }
+    ]);
+    const user = userEvent.setup();
+
+    renderWithRoute("/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE");
+
+    await user.click(await screen.findByRole("button", { name: "Submit evidence" }));
+
+    const requestBody = JSON.parse(String(calls[3].init?.body));
+
+    expect(requestBody.facility_id).toBeUndefined();
+  });
+
+  it("uses an explicitly selected facility when multiple session facilities exist", async () => {
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    const multiFacilitySession = {
+      ...session,
+      facilityIds: [
+        "00000000-0000-4000-8000-000000000201",
+        "00000000-0000-4000-8000-000000000202"
+      ]
+    };
+    const { calls } = mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: multiFacilitySession },
+      { status: 200, body: { ...runtimeTemplate, definition_jsonb: definition } },
+      { status: 201, body: evidenceRecord({ facility_id: multiFacilitySession.facilityIds[1] }) }
+    ]);
+    const user = userEvent.setup();
+
+    renderWithRoute("/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE");
+
+    await user.selectOptions(
+      await screen.findByLabelText("Facility context"),
+      multiFacilitySession.facilityIds[1]
+    );
+    await user.click(screen.getByRole("button", { name: "Submit evidence" }));
+
+    const requestBody = JSON.parse(String(calls[3].init?.body));
+
+    expect(requestBody.facility_id).toBe(multiFacilitySession.facilityIds[1]);
+  });
+
+  it("blocks submission safely when authenticated session has no client context", async () => {
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    const { calls } = mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: { ...session, clientId: null } },
+      { status: 200, body: { ...runtimeTemplate, definition_jsonb: definition } }
+    ]);
+
+    renderWithRoute("/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE");
+
+    expect(
+      await screen.findByText("Evidence submission requires an assigned client context.")
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Submit evidence" })).toBeDisabled();
+    expect(calls).toHaveLength(3);
+  });
+
+  it("disables the submit button while pending and prevents duplicate concurrent requests", async () => {
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    let resolveSubmit: (response: Response) => void = () => undefined;
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const user = userEvent.setup();
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        calls.push({ url: String(input), init });
+
+        if (calls.length === 1) {
+          return jsonResponse(200, { accessToken: "access-token" });
+        }
+
+        if (calls.length === 2) {
+          return jsonResponse(200, session);
+        }
+
+        if (calls.length === 3) {
+          return jsonResponse(200, { ...runtimeTemplate, definition_jsonb: definition });
+        }
+
+        return new Promise<Response>((resolve) => {
+          resolveSubmit = resolve;
+        });
+      })
+    );
+
+    renderWithRoute("/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE");
+
+    const button = await screen.findByRole("button", { name: "Submit evidence" });
+
+    await user.dblClick(button);
+
+    expect(screen.getByRole("button", { name: "Submitting..." })).toBeDisabled();
+    expect(calls.filter((call) => call.url.endsWith("/records"))).toHaveLength(1);
+
+    resolveSubmit(jsonResponse(201, evidenceRecord()));
+
+    expect(await screen.findByText(/Evidence submitted/)).toBeInTheDocument();
+  });
+
+  it("uses a synchronous lock so immediate submit activations create only one request", async () => {
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    let resolveSubmit: (response: Response) => void = () => undefined;
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        calls.push({ url: String(input), init });
+
+        if (calls.length === 1) {
+          return jsonResponse(200, { accessToken: "access-token" });
+        }
+
+        if (calls.length === 2) {
+          return jsonResponse(200, session);
+        }
+
+        if (calls.length === 3) {
+          return jsonResponse(200, { ...runtimeTemplate, definition_jsonb: definition });
+        }
+
+        return new Promise<Response>((resolve) => {
+          resolveSubmit = resolve;
+        });
+      })
+    );
+
+    renderWithRoute("/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE");
+
+    const button = await screen.findByRole("button", { name: "Submit evidence" });
+
+    act(() => {
+      button.click();
+      button.click();
+    });
+
+    await waitFor(() =>
+      expect(calls.filter((call) => call.url.endsWith("/records"))).toHaveLength(1)
+    );
+
+    resolveSubmit(jsonResponse(201, evidenceRecord()));
+
+    expect(await screen.findByText(/Evidence submitted/)).toBeInTheDocument();
+  });
+
+  it("does not allow the same successful evidence capture to be submitted again", async () => {
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    const { calls } = mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: session },
+      { status: 200, body: { ...runtimeTemplate, definition_jsonb: definition } },
+      { status: 201, body: evidenceRecord() }
+    ]);
+    const user = userEvent.setup();
+
+    renderWithRoute("/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE");
+
+    await user.click(await screen.findByRole("button", { name: "Submit evidence" }));
+
+    expect(await screen.findByText(/Evidence submitted/)).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Submit evidence" })
+    ).not.toBeInTheDocument();
+
+    expect(calls.filter((call) => call.url.endsWith("/records"))).toHaveLength(1);
+  });
+
+  it("presents template integrity conflicts as form-level stale-template messages", async () => {
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: session },
+      { status: 200, body: { ...runtimeTemplate, definition_jsonb: definition } },
+      {
+        status: 409,
+        body: {
+          error: {
+            code: "OEE_TEMPLATE_VERSION_CONFLICT",
+            message: "The Operational Evidence Template version changed."
+          }
+        }
+      }
+    ]);
+    const user = userEvent.setup();
+
+    renderWithRoute("/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE");
+
+    await user.click(await screen.findByRole("button", { name: "Submit evidence" }));
+
+    expect(
+      await screen.findByText(
+        "This operational template changed while you were completing it. Reload the current template before submitting."
+      )
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Backend field issue")).not.toBeInTheDocument();
+  });
+
+  it("maps backend 422 validation details to form, section, field, and repeatable messages", async () => {
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: session },
+      { status: 200, body: { ...runtimeTemplate, definition_jsonb: definition } },
+      {
+        status: 422,
+        body: {
+          error: {
+            code: "OEE_EVIDENCE_VALIDATION_FAILED",
+            message: "Evidence validation failed.",
+            details: [
+              {
+                field: null,
+                instance_path: "/payload",
+                rule: "PAYLOAD_INVALID",
+                message: "Form issue"
+              },
+              {
+                field: null,
+                instance_path: "/payload/sections/GENERAL_EVIDENCE",
+                rule: "SECTION_INVALID",
+                message: "Section issue"
+              },
+              {
+                field: "TEXT_FIELD",
+                instance_path: "/payload/sections/GENERAL_EVIDENCE/TEXT_FIELD",
+                rule: "FIELD_REQUIRED",
+                message: "Backend field issue"
+              },
+              {
+                field: "OBSERVATION_TIME",
+                instance_path:
+                  "/payload/sections/REPEATABLE_OBSERVATIONS/0/OBSERVATION_TIME",
+                rule: "FIELD_REQUIRED",
+                message: "Repeatable field issue"
+              },
+              {
+                field: null,
+                instance_path: "/unexpected",
+                rule: "UNKNOWN",
+                message: "Unrecognized path issue"
+              }
+            ]
+          }
+        }
+      }
+    ]);
+    const user = userEvent.setup();
+
+    renderWithRoute("/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE");
+
+    await user.click(await screen.findByRole("button", { name: "Submit evidence" }));
+
+    expect(
+      await screen.findByText(
+        "The backend rejected this evidence. Review the highlighted validation messages."
+      )
+    ).toBeInTheDocument();
+    expect(screen.getByText("Form issue")).toBeInTheDocument();
+    expect(screen.getByText("Section issue")).toBeInTheDocument();
+    expect(screen.getByText("Backend field issue")).toBeInTheDocument();
+    expect(screen.getByText("Repeatable field issue")).toBeInTheDocument();
+    expect(screen.getByText("Unrecognized path issue")).toBeInTheDocument();
+  });
+
+  it("keeps contradictory backend validation details visible without attaching them to the wrong field", async () => {
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: session },
+      { status: 200, body: { ...runtimeTemplate, definition_jsonb: definition } },
+      {
+        status: 422,
+        body: {
+          error: {
+            code: "OEE_EVIDENCE_VALIDATION_FAILED",
+            message: "Evidence validation failed.",
+            details: [
+              {
+                field: "OBSERVATION_TIME",
+                instance_path: "/payload/sections/GENERAL_EVIDENCE/TEXT_FIELD",
+                rule: "CONFLICTING_FIELD",
+                message: "Conflicting field issue"
+              },
+              {
+                field: "TEXT_FIELD",
+                instance_path: "/payload/sections/GENERAL_EVIDENCE",
+                rule: "SECTION_WITH_FIELD",
+                message: "Section-only path issue"
+              },
+              {
+                field: "TEXT_FIELD",
+                instance_path: "/payload/sections/GENERAL_EVIDENCE/TEXT_FIELD",
+                rule: "CONFLICTING_SECTION",
+                message: "Conflicting section issue",
+                params: {
+                  section_code: "REPEATABLE_OBSERVATIONS"
+                }
+              }
+            ]
+          }
+        }
+      }
+    ]);
+    const user = userEvent.setup();
+
+    renderWithRoute("/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE");
+
+    await user.click(await screen.findByRole("button", { name: "Submit evidence" }));
+
+    expect(await screen.findByText("Conflicting field issue")).toBeInTheDocument();
+    expect(screen.getByText("Section-only path issue")).toBeInTheDocument();
+    expect(screen.getByText("Conflicting section issue")).toBeInTheDocument();
+
+    const textField = screen.getByLabelText("Text Field");
+    expect(textField.parentElement).not.toHaveTextContent("Conflicting field issue");
+    expect(textField.parentElement).not.toHaveTextContent("Section-only path issue");
+    expect(textField.parentElement).not.toHaveTextContent("Conflicting section issue");
+  });
+
+  it("clears a selected facility when the authenticated facility context changes", async () => {
+    const queryClient = createTestQueryClient();
+    const multiFacilitySession = {
+      ...session,
+      facilityIds: [
+        "00000000-0000-4000-8000-000000000201",
+        "00000000-0000-4000-8000-000000000202"
+      ]
+    };
+    const changedFacilitySession = {
+      ...session,
+      facilityIds: ["00000000-0000-4000-8000-000000000203"]
+    };
+    const { calls } = mockFetchQueue([
+      { status: 201, body: evidenceRecord({ facility_id: changedFacilitySession.facilityIds[0] }) }
+    ]);
+    const user = userEvent.setup();
+
+    queryClient.setQueryData(
+      ["oets-runtime-template", runtimeTemplate.template_code],
+      { ...runtimeTemplate, definition_jsonb: definition }
+    );
+
+    const view = renderRuntimeTemplatePageWithSession({
+      initialPath: "/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE",
+      queryClient,
+      currentSession: multiFacilitySession
+    });
+
+    await user.selectOptions(
+      await screen.findByLabelText("Facility context"),
+      multiFacilitySession.facilityIds[1]
+    );
+
+    view.rerenderWithSession(changedFacilitySession);
+
+    await waitFor(() =>
+      expect(screen.queryByLabelText("Facility context")).not.toBeInTheDocument()
+    );
+
+    await user.click(screen.getByRole("button", { name: "Submit evidence" }));
+
+    const requestBody = JSON.parse(String(calls[0].init?.body));
+
+    expect(requestBody.facility_id).toBe(changedFacilitySession.facilityIds[0]);
+  });
+
+  it("presents authorization and general API failures as safe form-level errors", async () => {
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: session },
+      { status: 200, body: { ...runtimeTemplate, definition_jsonb: definition } },
+      {
+        status: 403,
+        body: {
+          error: {
+            code: "OEE_AUTHORIZATION_DENIED",
+            message: "Forbidden."
+          }
+        }
+      },
+      {
+        status: 500,
+        body: {
+          error: {
+            code: "OEE_INTERNAL_ERROR",
+            message: "Server failed."
+          }
+        }
+      }
+    ]);
+    const user = userEvent.setup();
+
+    renderWithRoute("/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE");
+
+    await user.click(await screen.findByRole("button", { name: "Submit evidence" }));
+    expect(
+      await screen.findByText("You are not authorized to submit this operational evidence.")
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Submit evidence" }));
+    expect(await screen.findByText("Server failed.")).toBeInTheDocument();
   });
 
   it("fails visibly for malformed definitions and unsupported metadata", () => {
@@ -342,6 +969,13 @@ const runtimeTemplate: OetsTemplateRuntimeDefinition = {
   definition_jsonb: undefined
 };
 
+const versionTwoRuntimeTemplate: OetsTemplateRuntimeDefinition = {
+  ...runtimeTemplate,
+  template_version_id: "version-2",
+  template_version: "2.0",
+  checksum: "checksum-2"
+};
+
 const definition: OetsDefinition = {
   schema_version: "1.0",
   template_metadata: {
@@ -395,6 +1029,37 @@ const definition: OetsDefinition = {
         textField("SIGNATURE_FIELD", "Signature Field", "SIGNATURE", 13),
         textField("TIME_FIELD", "Time Field", "TIME", 14),
         textField("URL_FIELD", "Url Field", "URL", 15)
+      ]
+    }
+  ]
+};
+
+const versionTwoDefinition: OetsDefinition = {
+  ...definition,
+  template_metadata: {
+    ...definition.template_metadata,
+    template_name: "Newer Runtime Template",
+    version: "2.0"
+  },
+  sections: [
+    {
+      section_id: "section-new",
+      section_code: "NEW_SECTION",
+      title: "New Section",
+      sequence: 1,
+      repeatable: false,
+      visible: true,
+      fields: [
+        {
+          field_id: "field-new",
+          field_code: "NEW_FIELD",
+          label: "New Field",
+          field_type: "TEXT",
+          required: false,
+          readonly: false,
+          visible: true,
+          sequence: 1
+        }
       ]
     }
   ]

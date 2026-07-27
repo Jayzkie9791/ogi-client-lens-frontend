@@ -13,10 +13,15 @@ import {
 import { isSupportedOetsFieldType } from "./definitionGuards";
 import {
   OetsDefinition,
+  OetsEvidencePayload,
   OetsField,
   OetsFieldValue,
   OetsTemplateRuntimeDefinition
 } from "./types";
+import {
+  fieldErrorKey,
+  OetsValidationSummary
+} from "./evidenceValidation";
 
 type RepeatableSectionCounters = Record<string, number>;
 
@@ -24,12 +29,27 @@ interface OetsRendererProps {
   runtimeTemplate: OetsTemplateRuntimeDefinition;
   definition: OetsDefinition;
   readOnly?: boolean;
+  backendValidation?: OetsValidationSummary | null;
+  formMessage?: string | null;
+  isSubmitting?: boolean;
+  onSubmit?: (payload: OetsEvidencePayload) => void;
+  submitDisabledReason?: string | null;
+  submitSuccess?: {
+    evidenceRecordId: string;
+    lifecycleState: string;
+  } | null;
 }
 
 export function OetsRenderer({
   runtimeTemplate,
   definition,
-  readOnly = false
+  readOnly = false,
+  backendValidation,
+  formMessage,
+  isSubmitting = false,
+  onSubmit,
+  submitDisabledReason,
+  submitSuccess
 }: OetsRendererProps) {
   const [state, setState] = useState(() => createInitialEvidenceState(definition));
   const [repeatableCounters, setRepeatableCounters] =
@@ -61,6 +81,45 @@ export function OetsRenderer({
             </span>
           ) : null}
         </div>
+        {!readOnly && onSubmit ? (
+          <div className="mt-4 flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-sm text-text-muted">
+              {submitDisabledReason ?? "Submit this evidence to the backend for authoritative validation."}
+            </div>
+            <Button
+              disabled={isSubmitting || Boolean(submitDisabledReason)}
+              onClick={() => onSubmit(payload)}
+            >
+              {isSubmitting ? "Submitting..." : "Submit evidence"}
+            </Button>
+          </div>
+        ) : null}
+        {submitSuccess ? (
+          <div
+            className="mt-4 rounded-component border border-state-success bg-elevated p-3 text-sm text-text-primary"
+            role="status"
+          >
+            Evidence submitted. Record {submitSuccess.evidenceRecordId} is{" "}
+            {submitSuccess.lifecycleState}.
+          </div>
+        ) : null}
+        {formMessage ? (
+          <div
+            className="mt-4 rounded-component border border-state-error bg-elevated p-3 text-sm text-text-primary"
+            role="alert"
+          >
+            {formMessage}
+          </div>
+        ) : null}
+        {backendValidation?.formMessages.map((message) => (
+          <div
+            className="mt-4 rounded-component border border-state-error bg-elevated p-3 text-sm text-text-primary"
+            key={message}
+            role="alert"
+          >
+            {message}
+          </div>
+        ))}
       </Surface>
 
       {orderedSections(definition).map((section) => {
@@ -138,6 +197,7 @@ export function OetsRenderer({
               }}
               readOnly={readOnly}
               section={section}
+              validation={backendValidation ?? null}
             />
           );
         }
@@ -164,6 +224,7 @@ export function OetsRenderer({
             }}
             readOnly={readOnly}
             section={section}
+            validation={backendValidation ?? null}
             values={!Array.isArray(sectionState) && sectionState ? sectionState : {}}
           />
         );
@@ -187,6 +248,7 @@ interface OetsSectionCardProps {
   section: Section;
   values: Record<string, OetsFieldValue>;
   readOnly: boolean;
+  validation: OetsValidationSummary | null;
   onValueChange: (fieldCode: string, value: OetsFieldValue) => void;
 }
 
@@ -194,14 +256,21 @@ function OetsSectionCard({
   section,
   values,
   readOnly,
+  validation,
   onValueChange
 }: OetsSectionCardProps) {
   return (
     <Surface className="space-y-4">
       <SectionHeader section={section} />
+      <ValidationMessages messages={validation?.sectionMessages[section.section_code]} />
       <div className="grid gap-4 md:grid-cols-2">
         {orderedFields(section.fields).map((field) => (
           <OetsFieldControl
+            errors={
+              validation?.fieldMessages[
+                fieldErrorKey(section.section_code, field.field_code)
+              ]
+            }
             field={field}
             key={field.field_id}
             onChange={(value) => onValueChange(field.field_code, value)}
@@ -218,6 +287,7 @@ interface RepeatableSectionProps {
   section: Section;
   instances: RepeatableSectionInstance[];
   readOnly: boolean;
+  validation: OetsValidationSummary | null;
   onAdd: () => void;
   onRemove: (key: string) => void;
   onValueChange: (
@@ -231,6 +301,7 @@ function RepeatableSection({
   section,
   instances,
   readOnly,
+  validation,
   onAdd,
   onRemove,
   onValueChange
@@ -245,6 +316,7 @@ function RepeatableSection({
       </div>
 
       <div className="space-y-4">
+        <ValidationMessages messages={validation?.sectionMessages[section.section_code]} />
         {instances.map((instance, index) => (
           <div
             className="rounded-component border border-border bg-canvas p-4"
@@ -269,6 +341,11 @@ function RepeatableSection({
                   key={field.field_id}
                   onChange={(value) =>
                     onValueChange(instance.key, field.field_code, value)
+                  }
+                  errors={
+                    validation?.fieldMessages[
+                      fieldErrorKey(section.section_code, field.field_code, index)
+                    ]
                   }
                   readOnly={readOnly || field.readonly}
                   value={instance.values[field.field_code]}
@@ -300,6 +377,7 @@ interface OetsFieldControlProps {
   field: OetsField;
   value: OetsFieldValue | undefined;
   readOnly: boolean;
+  errors?: string[];
   onChange: (value: OetsFieldValue) => void;
 }
 
@@ -307,6 +385,7 @@ function OetsFieldControl({
   field,
   value,
   readOnly,
+  errors,
   onChange
 }: OetsFieldControlProps) {
   if (!isSupportedOetsFieldType(field.field_type)) {
@@ -333,7 +412,24 @@ function OetsFieldControl({
           {field.description}
         </span>
       ) : null}
+      <ValidationMessages messages={errors} />
     </label>
+  );
+}
+
+function ValidationMessages({ messages }: { messages?: string[] }) {
+  if (!messages?.length) {
+    return null;
+  }
+
+  return (
+    <span className="mt-2 block space-y-1 text-sm font-semibold text-state-error">
+      {messages.map((message) => (
+        <span className="block" key={message}>
+          {message}
+        </span>
+      ))}
+    </span>
   );
 }
 
