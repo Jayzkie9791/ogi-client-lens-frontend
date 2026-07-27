@@ -6,6 +6,7 @@ import { LoginPage } from "./routes/LoginPage";
 import { NotFoundPage } from "./routes/NotFoundPage";
 import { WorkbenchPage } from "./routes/WorkbenchPage";
 import { routes } from "./routePaths";
+import { RuntimeTemplatePage } from "../oets/RuntimeTemplatePage";
 
 export const appRoutes: RouteObject[] = [
   {
@@ -31,6 +32,10 @@ export const appRoutes: RouteObject[] = [
           {
             path: "workbench",
             element: <WorkbenchPage />
+          },
+          {
+            path: "workbench/oets/:templateCode",
+            element: <RuntimeTemplatePage />
           },
           {
             path: "*",
