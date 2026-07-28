@@ -45,7 +45,7 @@ function mockFetchQueue(responses: MockResponse[]) {
     const next = responses.shift();
 
     calls.push({
-      url: String(input),
+      url: readRequestPath(input),
       init
     });
 
@@ -71,6 +71,18 @@ function mockFetchQueue(responses: MockResponse[]) {
     calls,
     fetchMock
   };
+}
+
+function readRequestPath(input: RequestInfo | URL) {
+  const value = String(input);
+
+  if (!value.startsWith("http")) {
+    return value;
+  }
+
+  const url = new URL(value);
+
+  return `${url.pathname}${url.search}`;
 }
 
 function authHeaders(calls: Array<{ init?: RequestInit }>) {

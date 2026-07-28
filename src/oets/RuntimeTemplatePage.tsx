@@ -9,6 +9,12 @@ import { useParams, useSearchParams } from "react-router-dom";
 import { isApiError } from "../api/errors";
 import { useAuth } from "../auth/useAuth";
 import { Surface } from "../ui/components/Surface";
+import {
+  ClientContextClient,
+  ClientContextFacility,
+  getAuthorizedClientContexts,
+  getAuthorizedClientFacilities
+} from "./clientContextApi";
 import { narrowOetsDefinition } from "./definitionGuards";
 import {
   createOperationalEvidenceRecord,
@@ -39,6 +45,9 @@ export function RuntimeTemplatePage() {
   const { templateCode } = useParams();
   const [searchParams] = useSearchParams();
   const readOnly = searchParams.get("mode") === "readonly";
+  const [selectedClientId, setSelectedClientId] = useState(
+    readStoredClientContext
+  );
   const [selectedFacilityId, setSelectedFacilityId] = useState("");
   const [formMessage, setFormMessage] = useState<string | null>(null);
   const [backendValidation, setBackendValidation] =
@@ -53,6 +62,18 @@ export function RuntimeTemplatePage() {
     enabled: Boolean(templateCode),
     queryKey: ["oets-runtime-template", templateCode],
     queryFn: () => getCurrentRuntimeTemplate(templateCode ?? "")
+  });
+  const needsExplicitClientContext = Boolean(session && !session.clientId);
+  const clientContextsQuery = useQuery({
+    enabled: !readOnly && needsExplicitClientContext,
+    queryKey: ["client-context", "clients"],
+    queryFn: getAuthorizedClientContexts
+  });
+  const effectiveClientId = session?.clientId ?? (selectedClientId || null);
+  const facilitiesQuery = useQuery({
+    enabled: !readOnly && needsExplicitClientContext && Boolean(effectiveClientId),
+    queryKey: ["client-context", "facilities", effectiveClientId],
+    queryFn: () => getAuthorizedClientFacilities(effectiveClientId ?? "")
   });
   useEffect(() => {
     setEditingSession(null);
@@ -91,14 +112,48 @@ export function RuntimeTemplatePage() {
       return;
     }
 
-    if (!session?.facilityIds.includes(selectedFacilityId)) {
+    if (
+      !readAvailableFacilityIds(
+        session?.facilityIds ?? [],
+        facilitiesQuery.data?.facilities,
+        needsExplicitClientContext
+      ).includes(selectedFacilityId)
+    ) {
       setSelectedFacilityId("");
     }
-  }, [selectedFacilityId, session?.facilityIds]);
-  const facilityId = resolveFacilityId(
+  }, [
+    facilitiesQuery.data?.facilities,
+    needsExplicitClientContext,
+    selectedFacilityId,
+    session?.facilityIds
+  ]);
+  useEffect(() => {
+    if (!needsExplicitClientContext || clientContextsQuery.isLoading) {
+      return;
+    }
+
+    const authorizedClientIds =
+      clientContextsQuery.data?.clients.map((client) => client.id) ?? [];
+
+    if (selectedClientId && !authorizedClientIds.includes(selectedClientId)) {
+      setSelectedClientId("");
+      window.sessionStorage.removeItem(clientContextStorageKey);
+    }
+  }, [
+    clientContextsQuery.data?.clients,
+    clientContextsQuery.isLoading,
+    needsExplicitClientContext,
+    selectedClientId
+  ]);
+  useEffect(() => {
+    setSelectedFacilityId("");
+  }, [effectiveClientId]);
+  const availableFacilityIds = readAvailableFacilityIds(
     session?.facilityIds ?? [],
-    selectedFacilityId
+    facilitiesQuery.data?.facilities,
+    needsExplicitClientContext
   );
+  const facilityId = resolveFacilityId(availableFacilityIds, selectedFacilityId);
   const activeEditingSession =
     editingSession?.routeTemplateCode === templateCode ? editingSession : null;
   const mutation = useMutation({
@@ -165,7 +220,30 @@ export function RuntimeTemplatePage() {
           </ul>
         </Surface>
       ) : null}
-      {!readOnly && session && session.facilityIds.length > 1 ? (
+      {!readOnly && session ? (
+        <ClientContextPanel
+          clients={clientContextsQuery.data?.clients ?? []}
+          currentClientId={effectiveClientId}
+          error={clientContextsQuery.isError}
+          isLoading={clientContextsQuery.isLoading}
+          needsExplicitClientContext={needsExplicitClientContext}
+          onClientChange={(clientId) => {
+            setSelectedClientId(clientId);
+            setSelectedFacilityId("");
+
+            if (clientId) {
+              window.sessionStorage.setItem(clientContextStorageKey, clientId);
+            } else {
+              window.sessionStorage.removeItem(clientContextStorageKey);
+            }
+          }}
+          sessionClientId={session.clientId}
+        />
+      ) : null}
+      {!readOnly &&
+      session &&
+      !needsExplicitClientContext &&
+      session.facilityIds.length > 1 ? (
         <Surface>
           <label className="block text-sm font-semibold text-text-primary">
             Facility context
@@ -184,6 +262,16 @@ export function RuntimeTemplatePage() {
           </label>
         </Surface>
       ) : null}
+      {!readOnly &&
+      needsExplicitClientContext &&
+      effectiveClientId &&
+      (facilitiesQuery.data?.facilities.length ?? 0) > 0 ? (
+        <FacilityContextPanel
+          facilities={facilitiesQuery.data?.facilities ?? []}
+          onFacilityChange={setSelectedFacilityId}
+          selectedFacilityId={selectedFacilityId}
+        />
+      ) : null}
       <OetsRenderer
         backendValidation={backendValidation}
         definition={activeEditingSession.definition}
@@ -195,7 +283,7 @@ export function RuntimeTemplatePage() {
             : (payload) =>
                 handleEvidenceSubmit({
                   payload,
-                  clientId: session?.clientId ?? null,
+                  clientId: effectiveClientId,
                   facilityId,
                   isPending: mutation.isPending,
                   mutate: mutation.mutate,
@@ -208,7 +296,7 @@ export function RuntimeTemplatePage() {
         readOnly={readOnly}
         runtimeTemplate={activeEditingSession.runtimeTemplate}
         submitDisabledReason={readSubmissionDisabledReason(
-          session?.clientId ?? null,
+          effectiveClientId,
           successRecord
         )}
         submitSuccess={
@@ -326,7 +414,7 @@ function readSubmissionDisabledReason(
     return "This evidence capture has already been submitted.";
   }
 
-  return clientId ? null : "Evidence submission requires an assigned client context.";
+  return clientId ? null : "You must first select a Client before submitting Operational Evidence.";
 }
 
 function resolveFacilityId(facilityIds: string[], selectedFacilityId: string) {
@@ -336,6 +424,117 @@ function resolveFacilityId(facilityIds: string[], selectedFacilityId: string) {
 
   return selectedFacilityId || undefined;
 }
+
+function readAvailableFacilityIds(
+  sessionFacilityIds: string[],
+  contextFacilities: ClientContextFacility[] | undefined,
+  needsExplicitClientContext: boolean
+) {
+  if (needsExplicitClientContext) {
+    return contextFacilities?.map((facility) => facility.id) ?? [];
+  }
+
+  return sessionFacilityIds;
+}
+
+function readStoredClientContext() {
+  return window.sessionStorage.getItem(clientContextStorageKey) ?? "";
+}
+
+function ClientContextPanel({
+  clients,
+  currentClientId,
+  error,
+  isLoading,
+  needsExplicitClientContext,
+  onClientChange,
+  sessionClientId
+}: {
+  clients: ClientContextClient[];
+  currentClientId: string | null;
+  error: boolean;
+  isLoading: boolean;
+  needsExplicitClientContext: boolean;
+  onClientChange: (clientId: string) => void;
+  sessionClientId: string | null;
+}) {
+  if (!needsExplicitClientContext) {
+    return (
+      <Surface>
+        <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+          Client context
+        </p>
+        <p className="mt-1 text-sm text-text-primary">
+          Current client: {sessionClientId}
+        </p>
+      </Surface>
+    );
+  }
+
+  return (
+    <Surface>
+      <label className="block text-sm font-semibold text-text-primary">
+        Client context
+        <select
+          className="mt-2 min-h-10 w-full rounded-component border border-border bg-surface px-3 py-2 text-sm text-text-primary outline-none focus:border-focus focus:ring-2 focus:ring-focus"
+          disabled={isLoading || error}
+          onChange={(event) => onClientChange(event.target.value)}
+          value={currentClientId ?? ""}
+        >
+          <option value="">Select a client</option>
+          {clients.map((client) => (
+            <option key={client.id} value={client.id}>
+              {client.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <p className="mt-2 text-sm text-text-muted">
+        {error
+          ? "Authorized clients could not be loaded."
+          : currentClientId
+            ? `Current client: ${readClientName(clients, currentClientId)}`
+            : "You must first select a Client before submitting Operational Evidence."}
+      </p>
+    </Surface>
+  );
+}
+
+function FacilityContextPanel({
+  facilities,
+  onFacilityChange,
+  selectedFacilityId
+}: {
+  facilities: ClientContextFacility[];
+  onFacilityChange: (facilityId: string) => void;
+  selectedFacilityId: string;
+}) {
+  return (
+    <Surface>
+      <label className="block text-sm font-semibold text-text-primary">
+        Facility context
+        <select
+          className="mt-2 min-h-10 w-full rounded-component border border-border bg-surface px-3 py-2 text-sm text-text-primary outline-none focus:border-focus focus:ring-2 focus:ring-focus"
+          onChange={(event) => onFacilityChange(event.target.value)}
+          value={selectedFacilityId}
+        >
+          <option value="">No facility context</option>
+          {facilities.map((facility) => (
+            <option key={facility.id} value={facility.id}>
+              {facility.name}
+            </option>
+          ))}
+        </select>
+      </label>
+    </Surface>
+  );
+}
+
+function readClientName(clients: ClientContextClient[], clientId: string) {
+  return clients.find((client) => client.id === clientId)?.name ?? clientId;
+}
+
+const clientContextStorageKey = "client-lens:selected-client-context";
 
 function SafeState({
   title,
