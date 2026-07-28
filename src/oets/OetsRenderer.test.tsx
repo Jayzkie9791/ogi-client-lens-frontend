@@ -117,7 +117,7 @@ function mockFetchQueue(responses: MockResponse[]) {
     const next = responses.shift();
 
     calls.push({
-      url: String(input),
+      url: readRequestPath(input),
       init
     });
 
@@ -140,6 +140,18 @@ function mockFetchQueue(responses: MockResponse[]) {
   vi.stubGlobal("fetch", fetchMock);
 
   return { calls };
+}
+
+function readRequestPath(input: RequestInfo | URL) {
+  const value = String(input);
+
+  if (!value.startsWith("http")) {
+    return value;
+  }
+
+  const url = new URL(value);
+
+  return `${url.pathname}${url.search}`;
 }
 
 function jsonResponse(status: number, body: unknown, statusText = "OK") {
@@ -182,6 +194,14 @@ function evidenceRecord(
     submitted_at: "2026-07-27T00:00:00.000Z",
     updated_at: "2026-07-27T00:00:00.000Z",
     ...overrides
+  };
+}
+
+function clientContext() {
+  return {
+    id: session.clientId,
+    name: "Bahama Bay Resort",
+    status: "ACTIVE"
   };
 }
 
@@ -483,16 +503,58 @@ describe("Generic OETS renderer", () => {
     const { calls } = mockFetchQueue([
       { status: 200, body: { accessToken: "access-token" } },
       { status: 200, body: { ...session, clientId: null } },
-      { status: 200, body: { ...runtimeTemplate, definition_jsonb: definition } }
+      { status: 200, body: { ...runtimeTemplate, definition_jsonb: definition } },
+      { status: 200, body: { clients: [clientContext()] } }
     ]);
 
     renderWithRoute("/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE");
 
     expect(
-      await screen.findByText("Evidence submission requires an assigned client context.")
-    ).toBeInTheDocument();
+      await screen.findAllByText("You must first select a Client before submitting Operational Evidence.")
+    ).toHaveLength(2);
     expect(screen.getByRole("button", { name: "Submit evidence" })).toBeDisabled();
-    expect(calls).toHaveLength(3);
+    expect(calls).toHaveLength(4);
+  });
+
+  it("submits OGI bootstrap evidence using explicitly selected client context", async () => {
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    const { calls } = mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: { ...session, clientId: null, facilityIds: [] } },
+      { status: 200, body: { ...runtimeTemplate, definition_jsonb: definition } },
+      { status: 200, body: { clients: [clientContext()] } },
+      { status: 200, body: { facilities: [] } },
+      { status: 201, body: evidenceRecord({ facility_id: null }) }
+    ]);
+    const user = userEvent.setup();
+
+    renderWithRoute("/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE");
+
+    await user.selectOptions(
+      await screen.findByLabelText("Client context"),
+      session.clientId
+    );
+    await user.type(await screen.findByLabelText("Text Field"), "Submitted");
+    await user.click(screen.getByRole("button", { name: "Submit evidence" }));
+
+    expect(
+      await screen.findByText(/Evidence submitted. Record evidence-record-1 is SUBMITTED./)
+    ).toBeInTheDocument();
+
+    const requestBody = JSON.parse(String(calls[5].init?.body));
+
+    expect(calls[5].url).toBe("/api/v1/operational-evidence/records");
+    expect(requestBody).toMatchObject({
+      client_id: session.clientId,
+      payload: {
+        sections: {
+          GENERAL_EVIDENCE: {
+            TEXT_FIELD: "Submitted"
+          }
+        }
+      }
+    });
+    expect(requestBody.facility_id).toBeUndefined();
   });
 
   it("disables the submit button while pending and prevents duplicate concurrent requests", async () => {
@@ -504,7 +566,7 @@ describe("Generic OETS renderer", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        calls.push({ url: String(input), init });
+        calls.push({ url: readRequestPath(input), init });
 
         if (calls.length === 1) {
           return jsonResponse(200, { accessToken: "access-token" });
@@ -546,7 +608,7 @@ describe("Generic OETS renderer", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        calls.push({ url: String(input), init });
+        calls.push({ url: readRequestPath(input), init });
 
         if (calls.length === 1) {
           return jsonResponse(200, { accessToken: "access-token" });
