@@ -1,10 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { useEffect, useState } from "react";
-
 import { useParams } from "react-router-dom";
 
 import { isApiError } from "../api/errors";
+import { useAuth } from "../auth/useAuth";
 import { Button } from "../ui/components/Button";
 import { Surface } from "../ui/components/Surface";
 import { narrowOetsDefinition } from "./definitionGuards";
@@ -16,7 +15,9 @@ import {
 import { resolveGovernanceAuthorityCode } from "./governanceAuthorityResolver";
 import {
   claimGovernanceReview,
+  GovernanceQueueItem,
   GovernanceReviewClaim,
+  listGovernanceQueue,
   releaseGovernanceReviewClaim,
   transitionClaimedGovernanceReview
 } from "./governanceApi";
@@ -32,8 +33,18 @@ interface WorkflowTransition {
   label: string;
 }
 
+interface GovernanceWorkflowTransition extends WorkflowTransition {
+  governanceAuthorityCode: string;
+}
+
+interface GovernanceReviewActionState {
+  transition: GovernanceWorkflowTransition;
+  activeClaim: GovernanceReviewClaim | null;
+}
+
 export function OperationalEvidenceRecordPage() {
   const { recordId } = useParams();
+  const auth = useAuth();
   const queryClient = useQueryClient();
   const recordQuery = useQuery({
     enabled: Boolean(recordId),
@@ -58,18 +69,54 @@ export function OperationalEvidenceRecordPage() {
   const directTransitions = availableTransitions.filter(
     (transition) => !resolveGovernanceAuthorityCode(transition.to)
   );
-  const governanceTransitions = availableTransitions.filter((transition) =>
-    Boolean(resolveGovernanceAuthorityCode(transition.to))
-  );
-  const [activeClaim, setActiveClaim] = useState<GovernanceReviewClaim | null>(
-    null
-  );
+  const governanceTransitions = availableTransitions.flatMap((transition) => {
+    const governanceAuthorityCode = resolveGovernanceAuthorityCode(
+      transition.to
+    );
 
-  useEffect(() => {
-    setActiveClaim(null);
-  }, [recordId, record?.lifecycle_state]);
+    return governanceAuthorityCode
+      ? [{ ...transition, governanceAuthorityCode }]
+      : [];
+  });
+  const governanceClaimQueryKey = [
+    "operational-evidence-governance-claim-state",
+    record?.id,
+    record?.lifecycle_state,
+    governanceTransitions.map((transition) => [
+      transition.governanceAuthorityCode,
+      transition.trigger,
+      transition.to
+    ])
+  ] as const;
+  const governanceQueueQuery = useQuery({
+    enabled: Boolean(record && governanceTransitions.length > 0),
+    queryKey: governanceClaimQueryKey,
+    queryFn: () => {
+      if (!record) {
+        throw new Error("Evidence record is required before loading governance claims.");
+      }
 
-
+      return listGovernanceQueue({
+        claim_status: "ANY",
+        client_id: record.client_id,
+        facility_id: record.facility_id ?? undefined,
+        governance_authority_code:
+          governanceTransitions.length === 1
+            ? governanceTransitions[0].governanceAuthorityCode
+            : undefined,
+        lifecycle_state: record.lifecycle_state
+      });
+    }
+  });
+  const governanceActionStates = governanceTransitions.map((transition) => ({
+    transition,
+    activeClaim:
+      findQueueItemForTransition(
+        governanceQueueQuery.data ?? [],
+        record?.id,
+        transition
+      )?.active_claim ?? null
+  }));
   const transitionMutation = useMutation({
     mutationFn: (transition: WorkflowTransition) =>
       transitionOperationalEvidenceRecord(recordId ?? "", {
@@ -83,41 +130,49 @@ export function OperationalEvidenceRecordPage() {
   });
 
   const claimMutation = useMutation({
-    mutationFn: (transition: WorkflowTransition) => {
+    mutationFn: (transition: GovernanceWorkflowTransition) => {
       if (!record) {
         throw new Error("Evidence record is required before claiming review.");
       }
 
-      const governanceAuthorityCode = resolveGovernanceAuthorityCode(
-        transition.to
-      );
-
-      if (!governanceAuthorityCode) {
-        throw new Error("Transition is not a governance review transition.");
-      }
-
       return claimGovernanceReview({
         evidence_record_id: record.id,
-        governance_authority_code: governanceAuthorityCode,
+        governance_authority_code: transition.governanceAuthorityCode,
         transition_trigger: transition.trigger
       });
     },
+    onError(error) {
+      if (isApiError(error) && error.status === 409) {
+        void queryClient.invalidateQueries({
+          queryKey: governanceClaimQueryKey
+        });
+      }
+    },
     onSuccess(claim) {
-      setActiveClaim(claim);
+      setClaimStateInCache(
+        queryClient,
+        governanceClaimQueryKey,
+        record?.id,
+        claim
+      );
     }
   });
   const releaseClaimMutation = useMutation({
     mutationFn: (claim: GovernanceReviewClaim) =>
       releaseGovernanceReviewClaim(claim.id),
-    onSuccess() {
-      setActiveClaim(null);
+    onSuccess(claim) {
+      setClaimStateInCache(
+        queryClient,
+        governanceClaimQueryKey,
+        record?.id,
+        claim
+      );
     }
   });
   const claimedTransitionMutation = useMutation({
     mutationFn: (claim: GovernanceReviewClaim) =>
       transitionClaimedGovernanceReview(claim.id),
     onSuccess() {
-      setActiveClaim(null);
       void queryClient.invalidateQueries({
         queryKey: ["operational-evidence-record", recordId]
       });
@@ -228,18 +283,19 @@ export function OperationalEvidenceRecordPage() {
       />
 
       <GovernanceReviewActions
-        activeClaim={activeClaim}
+        actionStates={governanceActionStates}
         claimError={claimMutation.error}
         claimPending={claimMutation.isPending}
         claimedTransitionError={claimedTransitionMutation.error}
         claimedTransitionPending={claimedTransitionMutation.isPending}
+        currentUserId={auth.session?.id ?? null}
+        isLoadingClaimState={governanceQueueQuery.isLoading}
+        loadClaimStateError={governanceQueueQuery.error}
         onClaim={(transition) => claimMutation.mutate(transition)}
         onRelease={(claim) => releaseClaimMutation.mutate(claim)}
         onTransition={(claim) => claimedTransitionMutation.mutate(claim)}
         releaseError={releaseClaimMutation.error}
         releasePending={releaseClaimMutation.isPending}
-        transitions={governanceTransitions}
-
       />
 
       {narrowing.warnings.length > 0 ? (
@@ -265,6 +321,57 @@ export function OperationalEvidenceRecordPage() {
   );
 }
 
+function findQueueItemForTransition(
+  items: GovernanceQueueItem[],
+  evidenceRecordId: string | undefined,
+  transition: GovernanceWorkflowTransition
+) {
+  if (!evidenceRecordId) {
+    return undefined;
+  }
+
+  return items.find(
+    (item) =>
+      item.evidence_record.id === evidenceRecordId &&
+      item.governance_authority_code === transition.governanceAuthorityCode &&
+      item.lifecycle_state === transition.from &&
+      item.transition_trigger === transition.trigger
+  );
+}
+
+function setClaimStateInCache(
+  queryClient: ReturnType<typeof useQueryClient>,
+  queryKey: readonly unknown[],
+  evidenceRecordId: string | undefined,
+  claim: GovernanceReviewClaim
+) {
+  queryClient.setQueryData<GovernanceQueueItem[]>(queryKey, (items) => {
+    if (!items || !evidenceRecordId) {
+      return items;
+    }
+
+    return items.map((item) => {
+      const isClaimScope =
+        item.evidence_record.id === evidenceRecordId &&
+        item.governance_authority_code === claim.governance_authority_code &&
+        item.lifecycle_state === claim.lifecycle_state &&
+        item.transition_trigger === claim.transition_trigger;
+
+      if (!isClaimScope) {
+        return item;
+      }
+
+      return {
+        ...item,
+        active_claim: claim.claim_status === "ACTIVE" ? claim : null
+      };
+    });
+  });
+}
+
+function transitionKey(transition: GovernanceWorkflowTransition) {
+  return `${transition.from}:${transition.trigger}:${transition.to}`;
+}
 function WorkflowActions({
   error,
   isPending,
@@ -318,33 +425,37 @@ function WorkflowActions({
 
 
 function GovernanceReviewActions({
-  activeClaim,
+  actionStates,
   claimError,
   claimPending,
   claimedTransitionError,
   claimedTransitionPending,
+  currentUserId,
+  isLoadingClaimState,
+  loadClaimStateError,
   onClaim,
   onRelease,
   onTransition,
   releaseError,
-  releasePending,
-  transitions
+  releasePending
 }: {
-  activeClaim: GovernanceReviewClaim | null;
+  actionStates: GovernanceReviewActionState[];
   claimError: Error | null;
   claimPending: boolean;
   claimedTransitionError: Error | null;
   claimedTransitionPending: boolean;
-  onClaim: (transition: WorkflowTransition) => void;
+  currentUserId: string | null;
+  isLoadingClaimState: boolean;
+  loadClaimStateError: Error | null;
+  onClaim: (transition: GovernanceWorkflowTransition) => void;
   onRelease: (claim: GovernanceReviewClaim) => void;
   onTransition: (claim: GovernanceReviewClaim) => void;
   releaseError: Error | null;
   releasePending: boolean;
-  transitions: WorkflowTransition[];
 }) {
   const error = claimError ?? releaseError ?? claimedTransitionError;
 
-  if (transitions.length === 0 && !activeClaim && !error) {
+  if (actionStates.length === 0 && !error && !loadClaimStateError) {
     return null;
   }
 
@@ -359,43 +470,69 @@ function GovernanceReviewActions({
         </h2>
       </div>
 
-      {activeClaim ? (
-        <div className="flex flex-wrap gap-3">
-          <Button
-            disabled={claimedTransitionPending || releasePending}
-            onClick={() => onTransition(activeClaim)}
-            variant="secondary"
-          >
-            {claimedTransitionPending ? "Beginning review..." : "Begin review"}
-          </Button>
-          <Button
-            disabled={claimedTransitionPending || releasePending}
-            onClick={() => onRelease(activeClaim)}
-            variant="secondary"
-          >
-            {releasePending ? "Releasing..." : "Release claim"}
-          </Button>
+      {isLoadingClaimState ? (
+        <p className="text-sm text-text-muted">Loading review ownership.</p>
+      ) : loadClaimStateError ? (
+        <div
+          className="rounded-component border border-state-error bg-elevated p-3 text-sm text-text-primary"
+          role="alert"
+        >
+          Governance review ownership could not be loaded.
         </div>
-      ) : transitions.length > 0 ? (
+      ) : (
         <div className="flex flex-wrap gap-3">
-          {transitions.map((transition) => {
-            const authorityCode = resolveGovernanceAuthorityCode(transition.to);
+          {actionStates.map(({ transition, activeClaim }) => {
+            if (activeClaim) {
+              const isOwnedByCurrentUser =
+                currentUserId !== null &&
+                activeClaim.claimed_by_user_id === currentUserId;
+
+              if (!isOwnedByCurrentUser) {
+                return (
+                  <p
+                    className="rounded-component border border-border bg-canvas px-3 py-2 text-sm text-text-muted"
+                    key={transitionKey(transition)}
+                  >
+                    {transition.governanceAuthorityCode} review is already claimed.
+                  </p>
+                );
+              }
+
+              return (
+                <div className="flex flex-wrap gap-3" key={transitionKey(transition)}>
+                  <Button
+                    disabled={claimedTransitionPending || releasePending}
+                    onClick={() => onTransition(activeClaim)}
+                    variant="secondary"
+                  >
+                    {claimedTransitionPending ? "Beginning review..." : "Begin review"}
+                  </Button>
+                  <Button
+                    disabled={claimedTransitionPending || releasePending}
+                    onClick={() => onRelease(activeClaim)}
+                    variant="secondary"
+                  >
+                    {releasePending ? "Releasing..." : "Release claim"}
+                  </Button>
+                </div>
+              );
+            }
 
             return (
               <Button
                 disabled={claimPending}
-                key={`${transition.from}:${transition.trigger}:${transition.to}`}
+                key={transitionKey(transition)}
                 onClick={() => onClaim(transition)}
                 variant="secondary"
               >
                 {claimPending
                   ? "Claiming..."
-                  : `Claim ${authorityCode ?? "governance"} review`}
+                  : `Claim ${transition.governanceAuthorityCode} review`}
               </Button>
             );
           })}
         </div>
-      ) : null}
+      )}
 
       {error ? (
         <div
@@ -408,7 +545,6 @@ function GovernanceReviewActions({
     </Surface>
   );
 }
-
 
 function RecordErrorState({ error }: { error: Error }) {
   if (isApiError(error) && [401, 403, 404].includes(error.status)) {
@@ -498,7 +634,11 @@ function transitionErrorMessage(error: Error) {
       return "You are not authorized to perform this workflow action.";
     }
 
-    if ([409, 422].includes(error.status)) {
+    if (error.status === 409) {
+      return "This review is already claimed. The latest review ownership state is shown.";
+    }
+
+    if (error.status === 422) {
       return "The workflow action was rejected by the backend. Reload the record and try again.";
     }
   }
