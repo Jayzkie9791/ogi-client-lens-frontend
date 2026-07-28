@@ -108,9 +108,73 @@ function orderedFieldValues(
   return Object.fromEntries(
     orderedFields(fields).map((field) => [
       field.field_code,
-      values[field.field_code] ?? defaultFieldValue(field)
+      typedFieldValue(field, values[field.field_code] ?? defaultFieldValue(field))
     ])
   );
+}
+
+export function createEvidenceStateFromPayload(
+  definition: OetsDefinition,
+  payload: Pick<OetsEvidencePayload, "sections">
+): EditableOetsState {
+  return Object.fromEntries(
+    orderedSections(definition).map((section) => {
+      const sectionPayload = payload.sections[section.section_code];
+
+      if (section.repeatable) {
+        const instances = Array.isArray(sectionPayload) ? sectionPayload : [];
+
+        return [
+          section.section_code,
+          instances.map((values, index) => ({
+            key: `${section.section_code}-${index + 1}`,
+            values: {
+              ...createFieldValues(section.fields),
+              ...values
+            }
+          }))
+        ];
+      }
+
+      return [
+        section.section_code,
+        {
+          ...createFieldValues(section.fields),
+          ...(!Array.isArray(sectionPayload) && sectionPayload
+            ? sectionPayload
+            : {})
+        }
+      ];
+    })
+  );
+}
+
+function typedFieldValue(field: OetsField, value: OetsFieldValue): OetsFieldValue {
+  if (field.field_type !== "NUMBER" && field.field_type !== "DECIMAL") {
+    return value;
+  }
+
+  if (value === null || value === "") {
+    return null;
+  }
+
+  if (typeof value === "number") {
+    return value;
+  }
+
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  const trimmedValue = value.trim();
+
+  if (trimmedValue.length === 0) {
+    return null;
+  }
+
+  const numericValue = Number(trimmedValue);
+
+  return Number.isFinite(numericValue) ? numericValue : value;
 }
 
 function defaultFieldValue(field: OetsField): OetsFieldValue {
