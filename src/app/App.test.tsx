@@ -129,7 +129,7 @@ describe("Client Lens authentication foundation", () => {
     ).resolves.toHaveAttribute("src", "/brand/client-lens-logo.png");
   });
 
-  it("renders the primary navigation and permission-aware Phase 0 placeholder", async () => {
+  it("renders the primary navigation and permission-aware governance queue link", async () => {
     window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
     mockFetchQueue([
       { status: 200, body: { accessToken: "access-token" } },
@@ -142,8 +142,8 @@ describe("Client Lens authentication foundation", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Workbench" })).toBeInTheDocument();
     expect(
-      screen.getByRole("link", { name: /Operational Evidence/i })
-    ).toHaveAttribute("aria-disabled", "true");
+      screen.getByRole("link", { name: "Governance Queue" })
+    ).toHaveAttribute("href", routes.governanceQueue);
   });
 
   it("hides permission-gated navigation when /me lacks permission", async () => {
@@ -158,7 +158,7 @@ describe("Client Lens authentication foundation", () => {
       await screen.findByRole("heading", { name: "Operational Governance Workbench" })
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("link", { name: /Operational Evidence/i })
+      screen.queryByRole("link", { name: "Governance Queue" })
     ).not.toBeInTheDocument();
   });
 
@@ -385,21 +385,22 @@ describe("Client Lens authentication foundation", () => {
     expect(screen.getByText("Enter your email and password.")).toBeInTheDocument();
   });
 
-  it("keeps unimplemented navigation placeholders on the current route", async () => {
+  it("opens the governance queue from primary navigation", async () => {
     const user = userEvent.setup();
     window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
     mockFetchQueue([
       { status: 200, body: { accessToken: "access-token" } },
-      { status: 200, body: session }
+      { status: 200, body: session },
+      { status: 200, body: [] }
     ]);
     renderWithRoute(routes.workbench);
 
     await user.click(
-      await screen.findByRole("link", { name: /Operational Evidence/i })
+      await screen.findByRole("link", { name: "Governance Queue" })
     );
 
     expect(
-      screen.getByRole("heading", { name: "Operational Governance Workbench" })
+      await screen.findByRole("heading", { name: "Governance Queue" })
     ).toBeInTheDocument();
   });
 

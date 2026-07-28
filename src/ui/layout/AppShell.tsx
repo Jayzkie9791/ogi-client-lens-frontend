@@ -1,4 +1,4 @@
-import { NavLink, Outlet } from "react-router-dom";
+﻿import { NavLink, Outlet } from "react-router-dom";
 
 import { routes } from "../../app/routePaths";
 import { PermissionGate } from "../../auth/PermissionGate";
@@ -11,9 +11,9 @@ const navigationItems = [
     implemented: true
   },
   {
-    label: "Operational Evidence",
-    to: routes.workbench,
-    implemented: false
+    label: "Governance Queue",
+    to: routes.governanceQueue,
+    implemented: true
   }
 ] as const;
 
@@ -40,7 +40,7 @@ export function AppShell() {
             <nav aria-label="Primary navigation">
               <ul className="flex flex-wrap gap-2">
                 {navigationItems.map((item) => {
-                  if (item.label === "Operational Evidence") {
+                  if (item.label === "Governance Queue") {
                     return (
                       <PermissionGate
                         key={item.label}

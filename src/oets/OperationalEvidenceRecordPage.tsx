@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 
 import { isApiError } from "../api/errors";
@@ -9,6 +10,13 @@ import {
   getOperationalEvidenceRecord,
   transitionOperationalEvidenceRecord
 } from "./evidenceSubmissionApi";
+import { resolveGovernanceAuthorityCode } from "./governanceAuthorityResolver";
+import {
+  claimGovernanceReview,
+  GovernanceReviewClaim,
+  releaseGovernanceReviewClaim,
+  transitionClaimedGovernanceReview
+} from "./governanceApi";
 import { OetsRenderer } from "./OetsRenderer";
 import { getRuntimeTemplateVersion } from "./runtimeTemplateApi";
 import { OetsDefinition } from "./types";
@@ -42,12 +50,67 @@ export function OperationalEvidenceRecordPage() {
     record && narrowing?.definition
       ? findAvailableTransitions(narrowing.definition, record.lifecycle_state)
       : [];
+  const directTransitions = availableTransitions.filter(
+    (transition) => !resolveGovernanceAuthorityCode(transition.to)
+  );
+  const governanceTransitions = availableTransitions.filter((transition) =>
+    Boolean(resolveGovernanceAuthorityCode(transition.to))
+  );
+  const [activeClaim, setActiveClaim] = useState<GovernanceReviewClaim | null>(
+    null
+  );
+
+  useEffect(() => {
+    setActiveClaim(null);
+  }, [recordId, record?.lifecycle_state]);
+
   const transitionMutation = useMutation({
     mutationFn: (transition: WorkflowTransition) =>
       transitionOperationalEvidenceRecord(recordId ?? "", {
         transition_trigger: transition.trigger
       }),
     onSuccess() {
+      void queryClient.invalidateQueries({
+        queryKey: ["operational-evidence-record", recordId]
+      });
+    }
+  });
+  const claimMutation = useMutation({
+    mutationFn: (transition: WorkflowTransition) => {
+      if (!record) {
+        throw new Error("Evidence record is required before claiming review.");
+      }
+
+      const governanceAuthorityCode = resolveGovernanceAuthorityCode(
+        transition.to
+      );
+
+      if (!governanceAuthorityCode) {
+        throw new Error("Transition is not a governance review transition.");
+      }
+
+      return claimGovernanceReview({
+        evidence_record_id: record.id,
+        governance_authority_code: governanceAuthorityCode,
+        transition_trigger: transition.trigger
+      });
+    },
+    onSuccess(claim) {
+      setActiveClaim(claim);
+    }
+  });
+  const releaseClaimMutation = useMutation({
+    mutationFn: (claim: GovernanceReviewClaim) =>
+      releaseGovernanceReviewClaim(claim.id),
+    onSuccess() {
+      setActiveClaim(null);
+    }
+  });
+  const claimedTransitionMutation = useMutation({
+    mutationFn: (claim: GovernanceReviewClaim) =>
+      transitionClaimedGovernanceReview(claim.id),
+    onSuccess() {
+      setActiveClaim(null);
       void queryClient.invalidateQueries({
         queryKey: ["operational-evidence-record", recordId]
       });
@@ -152,7 +215,21 @@ export function OperationalEvidenceRecordPage() {
         error={transitionMutation.error}
         isPending={transitionMutation.isPending}
         onTransition={(transition) => transitionMutation.mutate(transition)}
-        transitions={availableTransitions}
+        transitions={directTransitions}
+      />
+
+      <GovernanceReviewActions
+        activeClaim={activeClaim}
+        claimError={claimMutation.error}
+        claimPending={claimMutation.isPending}
+        claimedTransitionError={claimedTransitionMutation.error}
+        claimedTransitionPending={claimedTransitionMutation.isPending}
+        onClaim={(transition) => claimMutation.mutate(transition)}
+        onRelease={(claim) => releaseClaimMutation.mutate(claim)}
+        onTransition={(claim) => claimedTransitionMutation.mutate(claim)}
+        releaseError={releaseClaimMutation.error}
+        releasePending={releaseClaimMutation.isPending}
+        transitions={governanceTransitions}
       />
 
       {narrowing.warnings.length > 0 ? (
@@ -217,6 +294,98 @@ function WorkflowActions({
           ))}
         </div>
       ) : null}
+      {error ? (
+        <div
+          className="rounded-component border border-state-error bg-elevated p-3 text-sm text-text-primary"
+          role="alert"
+        >
+          {transitionErrorMessage(error)}
+        </div>
+      ) : null}
+    </Surface>
+  );
+}
+
+function GovernanceReviewActions({
+  activeClaim,
+  claimError,
+  claimPending,
+  claimedTransitionError,
+  claimedTransitionPending,
+  onClaim,
+  onRelease,
+  onTransition,
+  releaseError,
+  releasePending,
+  transitions
+}: {
+  activeClaim: GovernanceReviewClaim | null;
+  claimError: Error | null;
+  claimPending: boolean;
+  claimedTransitionError: Error | null;
+  claimedTransitionPending: boolean;
+  onClaim: (transition: WorkflowTransition) => void;
+  onRelease: (claim: GovernanceReviewClaim) => void;
+  onTransition: (claim: GovernanceReviewClaim) => void;
+  releaseError: Error | null;
+  releasePending: boolean;
+  transitions: WorkflowTransition[];
+}) {
+  const error = claimError ?? releaseError ?? claimedTransitionError;
+
+  if (transitions.length === 0 && !activeClaim && !error) {
+    return null;
+  }
+
+  return (
+    <Surface className="space-y-3">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+          Governance Review
+        </p>
+        <h2 className="mt-1 text-base font-semibold text-text-primary">
+          Claimed Review Actions
+        </h2>
+      </div>
+
+      {activeClaim ? (
+        <div className="flex flex-wrap gap-3">
+          <Button
+            disabled={claimedTransitionPending || releasePending}
+            onClick={() => onTransition(activeClaim)}
+            variant="secondary"
+          >
+            {claimedTransitionPending ? "Beginning review..." : "Begin review"}
+          </Button>
+          <Button
+            disabled={claimedTransitionPending || releasePending}
+            onClick={() => onRelease(activeClaim)}
+            variant="secondary"
+          >
+            {releasePending ? "Releasing..." : "Release claim"}
+          </Button>
+        </div>
+      ) : transitions.length > 0 ? (
+        <div className="flex flex-wrap gap-3">
+          {transitions.map((transition) => {
+            const authorityCode = resolveGovernanceAuthorityCode(transition.to);
+
+            return (
+              <Button
+                disabled={claimPending}
+                key={`${transition.from}:${transition.trigger}:${transition.to}`}
+                onClick={() => onClaim(transition)}
+                variant="secondary"
+              >
+                {claimPending
+                  ? "Claiming..."
+                  : `Claim ${authorityCode ?? "governance"} review`}
+              </Button>
+            );
+          })}
+        </div>
+      ) : null}
+
       {error ? (
         <div
           className="rounded-component border border-state-error bg-elevated p-3 text-sm text-text-primary"
