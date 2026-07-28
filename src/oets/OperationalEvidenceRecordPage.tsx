@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+
 import { useEffect, useState } from "react";
+
 import { useParams } from "react-router-dom";
 
 import { isApiError } from "../api/errors";
@@ -10,6 +12,7 @@ import {
   getOperationalEvidenceRecord,
   transitionOperationalEvidenceRecord
 } from "./evidenceSubmissionApi";
+
 import { resolveGovernanceAuthorityCode } from "./governanceAuthorityResolver";
 import {
   claimGovernanceReview,
@@ -17,6 +20,7 @@ import {
   releaseGovernanceReviewClaim,
   transitionClaimedGovernanceReview
 } from "./governanceApi";
+
 import { OetsRenderer } from "./OetsRenderer";
 import { getRuntimeTemplateVersion } from "./runtimeTemplateApi";
 import { OetsDefinition } from "./types";
@@ -50,6 +54,7 @@ export function OperationalEvidenceRecordPage() {
     record && narrowing?.definition
       ? findAvailableTransitions(narrowing.definition, record.lifecycle_state)
       : [];
+
   const directTransitions = availableTransitions.filter(
     (transition) => !resolveGovernanceAuthorityCode(transition.to)
   );
@@ -64,6 +69,7 @@ export function OperationalEvidenceRecordPage() {
     setActiveClaim(null);
   }, [recordId, record?.lifecycle_state]);
 
+
   const transitionMutation = useMutation({
     mutationFn: (transition: WorkflowTransition) =>
       transitionOperationalEvidenceRecord(recordId ?? "", {
@@ -75,6 +81,7 @@ export function OperationalEvidenceRecordPage() {
       });
     }
   });
+
   const claimMutation = useMutation({
     mutationFn: (transition: WorkflowTransition) => {
       if (!record) {
@@ -116,6 +123,7 @@ export function OperationalEvidenceRecordPage() {
       });
     }
   });
+
 
   if (!recordId) {
     return (
@@ -215,6 +223,7 @@ export function OperationalEvidenceRecordPage() {
         error={transitionMutation.error}
         isPending={transitionMutation.isPending}
         onTransition={(transition) => transitionMutation.mutate(transition)}
+
         transitions={directTransitions}
       />
 
@@ -230,6 +239,7 @@ export function OperationalEvidenceRecordPage() {
         releaseError={releaseClaimMutation.error}
         releasePending={releaseClaimMutation.isPending}
         transitions={governanceTransitions}
+
       />
 
       {narrowing.warnings.length > 0 ? (
@@ -305,6 +315,7 @@ function WorkflowActions({
     </Surface>
   );
 }
+
 
 function GovernanceReviewActions({
   activeClaim,
@@ -397,6 +408,7 @@ function GovernanceReviewActions({
     </Surface>
   );
 }
+
 
 function RecordErrorState({ error }: { error: Error }) {
   if (isApiError(error) && [401, 403, 404].includes(error.status)) {

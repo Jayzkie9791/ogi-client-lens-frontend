@@ -10,6 +10,7 @@ import { LoginPage } from "./routes/LoginPage";
 import { NotFoundPage } from "./routes/NotFoundPage";
 import { WorkbenchPage } from "./routes/WorkbenchPage";
 
+
 export const appRoutes: RouteObject[] = [
   {
     element: <PublicOnlyRoute />,

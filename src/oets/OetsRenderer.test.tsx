@@ -439,6 +439,7 @@ describe("Generic OETS renderer", () => {
     expect(calls.some((call) => call.init?.method === "PATCH")).toBe(false);
   });
 
+
   it("claims governance review before beginning a review workflow transition", async () => {
     const user = userEvent.setup();
     const queryClient = createTestQueryClient();
@@ -506,6 +507,7 @@ describe("Generic OETS renderer", () => {
       call.url.endsWith("/records/evidence-record-1/transitions")
     )).toBe(false);
   });
+
 
   it("uses generic workflow metadata labels for arbitrary states", async () => {
     const queryClient = createTestQueryClient();
@@ -1548,6 +1550,7 @@ const workflowDefinition: OetsDefinition = {
   }
 };
 
+
 const ogiReviewWorkflowDefinition: OetsDefinition = {
   ...definition,
   workflow: {
@@ -1571,6 +1574,7 @@ const ogiReviewWorkflowDefinition: OetsDefinition = {
     ]
   }
 };
+
 
 const alternateWorkflowDefinition: OetsDefinition = {
   ...definition,
