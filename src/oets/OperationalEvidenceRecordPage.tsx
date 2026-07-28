@@ -1,0 +1,388 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useParams } from "react-router-dom";
+
+import { isApiError } from "../api/errors";
+import { Button } from "../ui/components/Button";
+import { Surface } from "../ui/components/Surface";
+import { narrowOetsDefinition } from "./definitionGuards";
+import {
+  getOperationalEvidenceRecord,
+  transitionOperationalEvidenceRecord
+} from "./evidenceSubmissionApi";
+import { OetsRenderer } from "./OetsRenderer";
+import { getRuntimeTemplateVersion } from "./runtimeTemplateApi";
+import { OetsDefinition } from "./types";
+
+interface WorkflowTransition {
+  from: string;
+  to: string;
+  trigger: string;
+  label: string;
+}
+
+export function OperationalEvidenceRecordPage() {
+  const { recordId } = useParams();
+  const queryClient = useQueryClient();
+  const recordQuery = useQuery({
+    enabled: Boolean(recordId),
+    queryKey: ["operational-evidence-record", recordId],
+    queryFn: () => getOperationalEvidenceRecord(recordId ?? "")
+  });
+  const record = recordQuery.data;
+  const templateVersionId = record?.template_provenance.template_version_id;
+  const templateQuery = useQuery({
+    enabled: Boolean(templateVersionId),
+    queryKey: ["oets-runtime-template-version", templateVersionId],
+    queryFn: () => getRuntimeTemplateVersion(templateVersionId ?? "")
+  });
+  const narrowing = templateQuery.data
+    ? narrowOetsDefinition(templateQuery.data.definition_jsonb)
+    : undefined;
+  const availableTransitions =
+    record && narrowing?.definition
+      ? findAvailableTransitions(narrowing.definition, record.lifecycle_state)
+      : [];
+  const transitionMutation = useMutation({
+    mutationFn: (transition: WorkflowTransition) =>
+      transitionOperationalEvidenceRecord(recordId ?? "", {
+        transition_trigger: transition.trigger
+      }),
+    onSuccess() {
+      void queryClient.invalidateQueries({
+        queryKey: ["operational-evidence-record", recordId]
+      });
+    }
+  });
+
+  if (!recordId) {
+    return (
+      <SafeState title="Evidence record ID is required.">
+        Open an Operational Evidence record route with a record ID.
+      </SafeState>
+    );
+  }
+
+  if (recordQuery.isLoading) {
+    return <SafeState title="Loading evidence record.">Please wait.</SafeState>;
+  }
+
+  if (recordQuery.isError) {
+    return <RecordErrorState error={recordQuery.error} />;
+  }
+
+  if (!record) {
+    return (
+      <SafeState title="Evidence record could not be loaded.">
+        The backend did not return an Operational Evidence record.
+      </SafeState>
+    );
+  }
+
+  if (templateQuery.isLoading) {
+    return (
+      <SafeState title="Loading governing OETS template version.">
+        Please wait.
+      </SafeState>
+    );
+  }
+
+  if (templateQuery.isError) {
+    return (
+      <SafeState title="Evidence record could not be rendered.">
+        The governing OETS template version is unavailable.
+      </SafeState>
+    );
+  }
+
+  if (!templateQuery.data || !narrowing?.definition) {
+    return (
+      <SafeState title="Evidence record could not be rendered.">
+        {(narrowing?.errors ?? ["definition_jsonb was not returned."]).join(" ")}
+      </SafeState>
+    );
+  }
+
+  if (!templateMatchesRecord(record, templateQuery.data)) {
+    return (
+      <SafeState title="Evidence record could not be rendered.">
+        The governing template version does not match the record provenance.
+      </SafeState>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <Surface className="space-y-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+              Operational Evidence Record
+            </p>
+            <h1 className="mt-1 break-all text-2xl font-semibold text-text-primary">
+              {record.id}
+            </h1>
+          </div>
+          <span className="inline-flex w-fit rounded-component border border-border px-3 py-1 text-xs font-semibold uppercase text-text-muted">
+            {record.lifecycle_state}
+          </span>
+        </div>
+        <MetadataGrid
+          entries={[
+            ["Template code", record.template_provenance.template_code],
+            ["Template version", record.template_provenance.template_version],
+            [
+              "Template version ID",
+              record.template_provenance.template_version_id
+            ],
+            ["Schema version", record.template_provenance.schema_version],
+            ["Client ID", record.client_id],
+            ["Facility ID", record.facility_id ?? "No facility context"],
+            ["Payload checksum", record.payload_checksum],
+            ["Template checksum", record.template_provenance.checksum],
+            ["Created by", record.created_by_user_id],
+            ["Submitted by", record.submitted_by_user_id],
+            ["Created at", record.created_at],
+            ["Submitted at", record.submitted_at],
+            ["Updated at", record.updated_at]
+          ]}
+        />
+      </Surface>
+
+      <WorkflowActions
+        error={transitionMutation.error}
+        isPending={transitionMutation.isPending}
+        onTransition={(transition) => transitionMutation.mutate(transition)}
+        transitions={availableTransitions}
+      />
+
+      {narrowing.warnings.length > 0 ? (
+        <Surface className="border-state-warning">
+          <h2 className="text-base font-semibold text-text-primary">
+            Unsupported renderer metadata
+          </h2>
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-text-muted">
+            {narrowing.warnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+        </Surface>
+      ) : null}
+
+      <OetsRenderer
+        definition={narrowing.definition}
+        initialPayload={record.payload}
+        readOnly
+        runtimeTemplate={templateQuery.data}
+      />
+    </div>
+  );
+}
+
+function WorkflowActions({
+  error,
+  isPending,
+  onTransition,
+  transitions
+}: {
+  error: Error | null;
+  isPending: boolean;
+  onTransition: (transition: WorkflowTransition) => void;
+  transitions: WorkflowTransition[];
+}) {
+  if (transitions.length === 0 && !error) {
+    return null;
+  }
+
+  return (
+    <Surface className="space-y-3">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+          Workflow
+        </p>
+        <h2 className="mt-1 text-base font-semibold text-text-primary">
+          Available Actions
+        </h2>
+      </div>
+      {transitions.length > 0 ? (
+        <div className="flex flex-wrap gap-3">
+          {transitions.map((transition) => (
+            <Button
+              disabled={isPending}
+              key={`${transition.from}:${transition.trigger}:${transition.to}`}
+              onClick={() => onTransition(transition)}
+              variant="secondary"
+            >
+              {isPending ? "Updating..." : transition.label}
+            </Button>
+          ))}
+        </div>
+      ) : null}
+      {error ? (
+        <div
+          className="rounded-component border border-state-error bg-elevated p-3 text-sm text-text-primary"
+          role="alert"
+        >
+          {transitionErrorMessage(error)}
+        </div>
+      ) : null}
+    </Surface>
+  );
+}
+
+function RecordErrorState({ error }: { error: Error }) {
+  if (isApiError(error) && [401, 403, 404].includes(error.status)) {
+    return (
+      <SafeState title="Evidence record is not available.">
+        The record could not be opened with the current authorization context.
+      </SafeState>
+    );
+  }
+
+  return (
+    <SafeState title="Evidence record could not be loaded.">
+      The backend record endpoint returned an error.
+    </SafeState>
+  );
+}
+
+function findAvailableTransitions(
+  definition: OetsDefinition,
+  lifecycleState: string
+): WorkflowTransition[] {
+  const workflow = definition.workflow;
+
+  if (!isRecord(workflow) || !Array.isArray(workflow.transitions)) {
+    return [];
+  }
+
+  const stateLabels = readWorkflowStateLabels(workflow.states);
+
+  return workflow.transitions.flatMap((value) => {
+    if (!isRecord(value)) {
+      return [];
+    }
+
+    const from = readNonEmptyString(value.from);
+    const to = readNonEmptyString(value.to);
+    const trigger = readNonEmptyString(value.trigger);
+
+    if (!from || !to || !trigger || from !== lifecycleState) {
+      return [];
+    }
+
+    return [
+      {
+        from,
+        to,
+        trigger,
+        label: readTransitionLabel(value) ?? `Move to ${stateLabels[to] ?? humanizeCode(to)}`
+      }
+    ];
+  });
+}
+
+function readWorkflowStateLabels(value: unknown) {
+  if (!Array.isArray(value)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    value.flatMap((state) => {
+      if (!isRecord(state)) {
+        return [];
+      }
+
+      const stateCode = readNonEmptyString(state.state_code);
+      const label =
+        readNonEmptyString(state.label) ??
+        readNonEmptyString(state.name) ??
+        (stateCode ? humanizeCode(stateCode) : undefined);
+
+      return stateCode && label ? [[stateCode, label]] : [];
+    })
+  );
+}
+
+function readTransitionLabel(value: Record<string, unknown>) {
+  return (
+    readNonEmptyString(value.label) ??
+    readNonEmptyString(value.name) ??
+    readNonEmptyString(value.title)
+  );
+}
+
+function transitionErrorMessage(error: Error) {
+  if (isApiError(error)) {
+    if ([401, 403].includes(error.status)) {
+      return "You are not authorized to perform this workflow action.";
+    }
+
+    if ([409, 422].includes(error.status)) {
+      return "The workflow action was rejected by the backend. Reload the record and try again.";
+    }
+  }
+
+  return "The workflow action could not be completed.";
+}
+
+function humanizeCode(value: string) {
+  return value
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+}
+
+function readNonEmptyString(value: unknown) {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function MetadataGrid({ entries }: { entries: Array<[string, string]> }) {
+  return (
+    <dl className="grid gap-3 md:grid-cols-2">
+      {entries.map(([label, value]) => (
+        <div className="rounded-component border border-border bg-canvas p-3" key={label}>
+          <dt className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+            {label}
+          </dt>
+          <dd className="mt-1 break-all text-sm text-text-primary">{value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function templateMatchesRecord(
+  record: Awaited<ReturnType<typeof getOperationalEvidenceRecord>>,
+  template: Awaited<ReturnType<typeof getRuntimeTemplateVersion>>
+) {
+  return (
+    template.template_registry_id ===
+      record.template_provenance.template_registry_id &&
+    template.template_version_id ===
+      record.template_provenance.template_version_id &&
+    template.template_code === record.template_provenance.template_code &&
+    template.template_version === record.template_provenance.template_version &&
+    template.schema_version === record.template_provenance.schema_version &&
+    template.checksum === record.template_provenance.checksum
+  );
+}
+
+function SafeState({
+  title,
+  children
+}: {
+  title: string;
+  children: string;
+}) {
+  return (
+    <Surface>
+      <h1 className="text-xl font-semibold text-text-primary">{title}</h1>
+      <p className="mt-2 text-sm text-text-muted">{children}</p>
+    </Surface>
+  );
+}

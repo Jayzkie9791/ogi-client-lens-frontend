@@ -82,7 +82,7 @@ export interface OetsTemplateRuntimeDefinition {
   definition_jsonb: unknown;
 }
 
-export type OetsFieldValue = string | boolean | string[] | null;
+export type OetsFieldValue = string | number | boolean | string[] | null;
 
 export type OetsSectionValues =
   | Record<string, OetsFieldValue>

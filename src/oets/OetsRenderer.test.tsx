@@ -17,9 +17,14 @@ import { getRefreshTokenStorageKey } from "../auth/storage";
 import { appRoutes } from "../app/router";
 import { AppProviders } from "../app/providers/AppProviders";
 import { narrowOetsDefinition } from "./definitionGuards";
+import {
+  getOperationalEvidenceRecord,
+  transitionOperationalEvidenceRecord
+} from "./evidenceSubmissionApi";
 import { OetsRenderer } from "./OetsRenderer";
+import { OperationalEvidenceRecordPage } from "./OperationalEvidenceRecordPage";
 import { RuntimeTemplatePage } from "./RuntimeTemplatePage";
-import { OetsDefinition, OetsTemplateRuntimeDefinition } from "./types";
+import { OetsDefinition, OetsEvidencePayload, OetsTemplateRuntimeDefinition } from "./types";
 
 const session = {
   id: "user-1",
@@ -168,6 +173,7 @@ function evidenceRecord(
   overrides: Partial<{
     facility_id: string | null;
     lifecycle_state: string;
+    payload: Pick<OetsEvidencePayload, "sections">;
   }> = {}
 ) {
   return {
@@ -195,6 +201,31 @@ function evidenceRecord(
     updated_at: "2026-07-27T00:00:00.000Z",
     ...overrides
   };
+}
+
+function renderOperationalEvidenceRecordPageWithSession({
+  initialPath,
+  queryClient,
+  currentSession
+}: {
+  initialPath: string;
+  queryClient: QueryClient;
+  currentSession: typeof session;
+}) {
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <AuthContext.Provider value={authContextValue(currentSession)}>
+        <MemoryRouter initialEntries={[initialPath]}>
+          <Routes>
+            <Route
+              element={<OperationalEvidenceRecordPage />}
+              path="/workbench/evidence/:recordId"
+            />
+          </Routes>
+        </MemoryRouter>
+      </AuthContext.Provider>
+    </QueryClientProvider>
+  );
 }
 
 function clientContext() {
@@ -236,6 +267,274 @@ describe("Generic OETS renderer", () => {
     ]);
   });
 
+  it("retrieves an Operational Evidence record by ID through the authenticated API boundary", async () => {
+    const { calls } = mockFetchQueue([
+      { status: 200, body: evidenceRecord({ lifecycle_state: "DRAFT" }) }
+    ]);
+
+    configureApiAuth({
+      getAccessToken: () => "access-token",
+      refreshAccessToken: async () => "access-token",
+      onAuthFailure: () => undefined
+    });
+
+    const record = await getOperationalEvidenceRecord("evidence-record-1");
+
+    expect(record.id).toBe("evidence-record-1");
+    expect(record.lifecycle_state).toBe("DRAFT");
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe(
+      "/api/v1/operational-evidence/records/evidence-record-1"
+    );
+    expect(calls[0].init?.method).toBe("GET");
+  });
+
+  it("posts a workflow transition through the authenticated API boundary", async () => {
+    const { calls } = mockFetchQueue([
+      { status: 200, body: evidenceRecord({ lifecycle_state: "SUBMITTED" }) }
+    ]);
+
+    configureApiAuth({
+      getAccessToken: () => "access-token",
+      refreshAccessToken: async () => "access-token",
+      onAuthFailure: () => undefined
+    });
+
+    const record = await transitionOperationalEvidenceRecord(
+      "evidence-record-1",
+      {
+        transition_trigger: "submit_intake_request"
+      }
+    );
+    const requestBody = JSON.parse(String(calls[0].init?.body));
+
+    expect(record.lifecycle_state).toBe("SUBMITTED");
+    expect(calls[0].url).toBe(
+      "/api/v1/operational-evidence/records/evidence-record-1/transitions"
+    );
+    expect(calls[0].init?.method).toBe("POST");
+    expect(requestBody).toEqual({
+      transition_trigger: "submit_intake_request"
+    });
+    expect(requestBody.target_state).toBeUndefined();
+  });
+
+  it("loads a persisted Operational Evidence record and renders its payload read-only", async () => {
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    const persistedRecord = evidenceRecord({
+      lifecycle_state: "DRAFT",
+      payload: {
+        sections: {
+          GENERAL_EVIDENCE: {
+            TEXT_FIELD: "Persisted evidence",
+            NUMBER_FIELD: 7,
+            SELECT_FIELD: "OPTION_A"
+          },
+          REPEATABLE_OBSERVATIONS: [
+            {
+              OBSERVATION_TIME: "10:30"
+            }
+          ]
+        }
+      }
+    });
+    const queryClient = createTestQueryClient();
+    const { calls } = mockFetchQueue([
+      { status: 200, body: persistedRecord },
+      { status: 200, body: { ...runtimeTemplate, definition_jsonb: definition } }
+    ]);
+
+    renderOperationalEvidenceRecordPageWithSession({
+      initialPath: "/workbench/evidence/evidence-record-1",
+      queryClient,
+      currentSession: session
+    });
+
+    expect(
+      await screen.findByRole("heading", { name: "evidence-record-1" })
+    ).toBeInTheDocument();
+    expect(screen.getByText("DRAFT")).toBeInTheDocument();
+    expect(screen.getByText(runtimeTemplate.template_code)).toBeInTheDocument();
+    expect(screen.getAllByText(runtimeTemplate.template_version).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText(runtimeTemplate.template_version_id)).toBeInTheDocument();
+    expect(screen.getByText("payload-checksum-1")).toBeInTheDocument();
+    expect(screen.getByLabelText("Text Field")).toHaveValue("Persisted evidence");
+    expect(screen.getByLabelText("Text Field")).toBeDisabled();
+    expect(screen.getByLabelText("Number Field")).toHaveValue(7);
+    expect(screen.getByLabelText("Select Field")).toHaveValue("OPTION_A");
+    expect(screen.getByLabelText("Observation Time")).toHaveValue("10:30");
+    expect(screen.queryByRole("button", { name: "Submit evidence" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /save/i })).not.toBeInTheDocument();
+    expect(calls.map(({ url }) => url)).toEqual([
+      "/api/v1/operational-evidence/records/evidence-record-1",
+      "/api/v1/operational-evidence/template-versions/version-1"
+    ]);
+  });
+
+  it("derives available workflow actions from the governing template and transitions successfully", async () => {
+    const user = userEvent.setup();
+    const queryClient = createTestQueryClient();
+    const draftRecord = evidenceRecord({
+      lifecycle_state: "DRAFT",
+      payload: {
+        sections: {
+          GENERAL_EVIDENCE: {
+            TEXT_FIELD: "Transition candidate"
+          }
+        }
+      }
+    });
+    const submittedRecord = evidenceRecord({
+      lifecycle_state: "SUBMITTED",
+      payload: draftRecord.payload
+    });
+    const { calls } = mockFetchQueue([
+      { status: 200, body: draftRecord },
+      {
+        status: 200,
+        body: { ...runtimeTemplate, definition_jsonb: workflowDefinition }
+      },
+      { status: 200, body: submittedRecord },
+      { status: 200, body: submittedRecord }
+    ]);
+
+    renderOperationalEvidenceRecordPageWithSession({
+      initialPath: "/workbench/evidence/evidence-record-1",
+      queryClient,
+      currentSession: session
+    });
+
+    expect(
+      await screen.findByRole("button", { name: "Submit Intake Request" })
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Archive Evidence" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Text Field")).toHaveValue("Transition candidate");
+    expect(screen.getByLabelText("Text Field")).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "Submit Intake Request" }));
+
+    await waitFor(() =>
+      expect(screen.getByText("SUBMITTED")).toBeInTheDocument()
+    );
+    expect(
+      screen.queryByRole("button", { name: "Submit Intake Request" })
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Submit evidence" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /save/i })).not.toBeInTheDocument();
+
+    const transitionCall = calls.find((call) =>
+      call.url.endsWith("/records/evidence-record-1/transitions")
+    );
+    const requestBody = JSON.parse(String(transitionCall?.init?.body));
+
+    expect(requestBody).toEqual({
+      transition_trigger: "submit_intake_request"
+    });
+    expect(calls.map(({ init }) => init?.method ?? "GET")).toEqual([
+      "GET",
+      "GET",
+      "POST",
+      "GET"
+    ]);
+    expect(calls.some((call) => call.init?.method === "PATCH")).toBe(false);
+  });
+
+  it("uses generic workflow metadata labels for arbitrary states", async () => {
+    const queryClient = createTestQueryClient();
+    const { calls } = mockFetchQueue([
+      { status: 200, body: evidenceRecord({ lifecycle_state: "ALPHA_STATE" }) },
+      {
+        status: 200,
+        body: { ...runtimeTemplate, definition_jsonb: alternateWorkflowDefinition }
+      }
+    ]);
+
+    renderOperationalEvidenceRecordPageWithSession({
+      initialPath: "/workbench/evidence/evidence-record-1",
+      queryClient,
+      currentSession: session
+    });
+
+    expect(
+      await screen.findByRole("button", { name: "Promote Alpha Evidence" })
+    ).toBeInTheDocument();
+    expect(screen.queryByText("submit_intake_request")).not.toBeInTheDocument();
+    expect(calls.map(({ url }) => url)).toEqual([
+      "/api/v1/operational-evidence/records/evidence-record-1",
+      "/api/v1/operational-evidence/template-versions/version-1"
+    ]);
+  });
+
+  it("surfaces rejected workflow transitions without mutating evidence payload", async () => {
+    const user = userEvent.setup();
+    const queryClient = createTestQueryClient();
+    const { calls } = mockFetchQueue([
+      { status: 200, body: evidenceRecord({ lifecycle_state: "DRAFT" }) },
+      {
+        status: 200,
+        body: { ...runtimeTemplate, definition_jsonb: workflowDefinition }
+      },
+      {
+        status: 422,
+        statusText: "Unprocessable Entity",
+        body: {
+          error: {
+            code: "OEE_ILLEGAL_WORKFLOW_TRANSITION",
+            message: "Workflow transition is not declared."
+          }
+        }
+      }
+    ]);
+
+    renderOperationalEvidenceRecordPageWithSession({
+      initialPath: "/workbench/evidence/evidence-record-1",
+      queryClient,
+      currentSession: session
+    });
+
+    await user.click(
+      await screen.findByRole("button", { name: "Submit Intake Request" })
+    );
+
+    expect(
+      await screen.findByRole("alert")
+    ).toHaveTextContent(
+      "The workflow action was rejected by the backend. Reload the record and try again."
+    );
+    expect(screen.getByText("DRAFT")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Submit Intake Request" })).toBeInTheDocument();
+    expect(calls.some((call) => call.init?.method === "PATCH")).toBe(false);
+  });
+
+  it("surfaces forbidden record retrieval without leaking record details", async () => {
+    const queryClient = createTestQueryClient();
+    mockFetchQueue([
+      {
+        status: 403,
+        statusText: "Forbidden",
+        body: {
+          error: {
+            code: "OEE_AUTHORIZATION_DENIED",
+            message: "Forbidden"
+          }
+        }
+      }
+    ]);
+
+    renderOperationalEvidenceRecordPageWithSession({
+      initialPath: "/workbench/evidence/restricted-record",
+      queryClient,
+      currentSession: session
+    });
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Evidence record is not available."
+      })
+    ).toBeInTheDocument();
+    expect(screen.queryByText("restricted-record")).not.toBeInTheDocument();
+  });
+
   it("renders ordered sections and every Phase 2 supported field type generically", () => {
     render(
       <OetsRenderer definition={definition} runtimeTemplate={runtimeTemplate} />
@@ -274,6 +573,42 @@ describe("Generic OETS renderer", () => {
     expect(
       screen.getByText(/Signature capture is not available in Phase 2/)
     ).toBeInTheDocument();
+  });
+
+  it("serializes typed NUMBER and DECIMAL controls as JSON numbers in the local payload", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <OetsRenderer definition={definition} runtimeTemplate={runtimeTemplate} />
+    );
+
+    await user.type(screen.getByLabelText("Number Field"), "5");
+    await user.type(screen.getByLabelText("Decimal Field"), "12.5");
+
+    expect(screen.getByText(/"NUMBER_FIELD": 5/)).toBeInTheDocument();
+    expect(screen.queryByText(/"NUMBER_FIELD": "5"/)).not.toBeInTheDocument();
+    expect(screen.getByText(/"DECIMAL_FIELD": 12.5/)).toBeInTheDocument();
+    expect(screen.queryByText(/"DECIMAL_FIELD": "12.5"/)).not.toBeInTheDocument();
+  });
+
+  it("preserves zero as evidence and keeps untouched or cleared numeric fields empty", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <OetsRenderer definition={definition} runtimeTemplate={runtimeTemplate} />
+    );
+
+    expect(screen.getByText(/"NUMBER_FIELD": null/)).toBeInTheDocument();
+    expect(screen.getByText(/"DECIMAL_FIELD": null/)).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Number Field"), "0");
+
+    expect(screen.getByText(/"NUMBER_FIELD": 0/)).toBeInTheDocument();
+    expect(screen.queryByText(/"NUMBER_FIELD": "0"/)).not.toBeInTheDocument();
+
+    await user.clear(screen.getByLabelText("Number Field"));
+
+    expect(screen.getByText(/"NUMBER_FIELD": null/)).toBeInTheDocument();
   });
 
   it("handles select, radio, and multiselect options from field metadata", async () => {
@@ -366,11 +701,17 @@ describe("Generic OETS renderer", () => {
     renderWithRoute("/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE");
 
     await user.type(await screen.findByLabelText("Text Field"), "Submitted");
+    await user.type(screen.getByLabelText("Number Field"), "5");
+    await user.type(screen.getByLabelText("Decimal Field"), "12.5");
     await user.click(screen.getByRole("button", { name: "Submit evidence" }));
 
     expect(
-      await screen.findByText(/Evidence submitted. Record evidence-record-1 is SUBMITTED./)
+      await screen.findByText(/Evidence record created. Record evidence-record-1 is SUBMITTED./)
     ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open record" })).toHaveAttribute(
+      "href",
+      "/workbench/evidence/evidence-record-1"
+    );
 
     const requestBody = JSON.parse(String(calls[3].init?.body));
 
@@ -535,10 +876,12 @@ describe("Generic OETS renderer", () => {
       session.clientId
     );
     await user.type(await screen.findByLabelText("Text Field"), "Submitted");
+    await user.type(screen.getByLabelText("Number Field"), "5");
+    await user.type(screen.getByLabelText("Decimal Field"), "12.5");
     await user.click(screen.getByRole("button", { name: "Submit evidence" }));
 
     expect(
-      await screen.findByText(/Evidence submitted. Record evidence-record-1 is SUBMITTED./)
+      await screen.findByText(/Evidence record created. Record evidence-record-1 is SUBMITTED./)
     ).toBeInTheDocument();
 
     const requestBody = JSON.parse(String(calls[5].init?.body));
@@ -549,11 +892,17 @@ describe("Generic OETS renderer", () => {
       payload: {
         sections: {
           GENERAL_EVIDENCE: {
-            TEXT_FIELD: "Submitted"
+            TEXT_FIELD: "Submitted",
+            NUMBER_FIELD: 5,
+            DECIMAL_FIELD: 12.5
           }
         }
       }
     });
+    expect(requestBody.payload.sections.GENERAL_EVIDENCE.TEXT_FIELD).toBe("Submitted");
+    expect(typeof requestBody.payload.sections.GENERAL_EVIDENCE.TEXT_FIELD).toBe("string");
+    expect(typeof requestBody.payload.sections.GENERAL_EVIDENCE.NUMBER_FIELD).toBe("number");
+    expect(typeof requestBody.payload.sections.GENERAL_EVIDENCE.DECIMAL_FIELD).toBe("number");
     expect(requestBody.facility_id).toBeUndefined();
   });
 
@@ -597,7 +946,7 @@ describe("Generic OETS renderer", () => {
 
     resolveSubmit(jsonResponse(201, evidenceRecord()));
 
-    expect(await screen.findByText(/Evidence submitted/)).toBeInTheDocument();
+    expect(await screen.findByText(/Evidence record created/)).toBeInTheDocument();
   });
 
   it("uses a synchronous lock so immediate submit activations create only one request", async () => {
@@ -643,7 +992,7 @@ describe("Generic OETS renderer", () => {
 
     resolveSubmit(jsonResponse(201, evidenceRecord()));
 
-    expect(await screen.findByText(/Evidence submitted/)).toBeInTheDocument();
+    expect(await screen.findByText(/Evidence record created/)).toBeInTheDocument();
   });
 
   it("does not allow the same successful evidence capture to be submitted again", async () => {
@@ -660,7 +1009,7 @@ describe("Generic OETS renderer", () => {
 
     await user.click(await screen.findByRole("button", { name: "Submit evidence" }));
 
-    expect(await screen.findByText(/Evidence submitted/)).toBeInTheDocument();
+    expect(await screen.findByText(/Evidence record created/)).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Submit evidence" })
     ).not.toBeInTheDocument();
@@ -1094,6 +1443,66 @@ const definition: OetsDefinition = {
       ]
     }
   ]
+};
+
+const workflowDefinition: OetsDefinition = {
+  ...definition,
+  workflow: {
+    initial_state: "DRAFT",
+    states: [
+      {
+        state_code: "DRAFT",
+        name: "Draft"
+      },
+      {
+        state_code: "SUBMITTED",
+        name: "Submitted"
+      },
+      {
+        state_code: "ARCHIVED",
+        name: "Archived"
+      }
+    ],
+    transitions: [
+      {
+        from: "DRAFT",
+        to: "SUBMITTED",
+        trigger: "submit_intake_request",
+        label: "Submit Intake Request"
+      },
+      {
+        from: "SUBMITTED",
+        to: "ARCHIVED",
+        trigger: "archive_evidence",
+        label: "Archive Evidence"
+      }
+    ]
+  }
+};
+
+const alternateWorkflowDefinition: OetsDefinition = {
+  ...definition,
+  workflow: {
+    initial_state: "ALPHA_STATE",
+    states: [
+      {
+        state_code: "ALPHA_STATE",
+        name: "Alpha State"
+      },
+      {
+        state_code: "BETA_STATE",
+        name: "Beta State"
+      }
+    ],
+    transitions: [
+      {
+        from: "ALPHA_STATE",
+        to: "BETA_STATE",
+        trigger: "promote_alpha",
+        label: "Promote Alpha Evidence"
+      }
+    ]
+  }
 };
 
 const versionTwoDefinition: OetsDefinition = {

@@ -42,6 +42,11 @@ export interface OperationalEvidenceRecord {
   updated_at: string;
 }
 
+export interface OperationalEvidenceTransitionRequest {
+  transition_trigger: string;
+  correlation_id?: string;
+}
+
 export function createOperationalEvidenceRecord(
   request: OperationalEvidenceCreateRequest
 ) {
@@ -50,6 +55,31 @@ export function createOperationalEvidenceRecord(
     {
       method: "POST",
       body: request,
+      validate: isOperationalEvidenceRecord
+    }
+  );
+}
+
+export function transitionOperationalEvidenceRecord(
+  recordId: string,
+  request: OperationalEvidenceTransitionRequest
+) {
+  return apiRequest<OperationalEvidenceRecord>(
+    `/api/v1/operational-evidence/records/${encodeURIComponent(
+      recordId
+    )}/transitions`,
+    {
+      method: "POST",
+      body: request,
+      validate: isOperationalEvidenceRecord
+    }
+  );
+}
+
+export function getOperationalEvidenceRecord(recordId: string) {
+  return apiRequest<OperationalEvidenceRecord>(
+    `/api/v1/operational-evidence/records/${encodeURIComponent(recordId)}`,
+    {
       validate: isOperationalEvidenceRecord
     }
   );

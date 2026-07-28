@@ -1,9 +1,11 @@
 import { ChangeEvent, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 
 import { Button } from "../ui/components/Button";
 import { Surface } from "../ui/components/Surface";
 import {
   assembleEvidencePayload,
+  createEvidenceStateFromPayload,
   createFieldValues,
   createInitialEvidenceState,
   orderedFields,
@@ -31,12 +33,14 @@ interface OetsRendererProps {
   readOnly?: boolean;
   backendValidation?: OetsValidationSummary | null;
   formMessage?: string | null;
+  initialPayload?: Pick<OetsEvidencePayload, "sections">;
   isSubmitting?: boolean;
   onSubmit?: (payload: OetsEvidencePayload) => void;
   submitDisabledReason?: string | null;
   submitSuccess?: {
     evidenceRecordId: string;
     lifecycleState: string;
+    recordHref?: string;
   } | null;
 }
 
@@ -46,12 +50,17 @@ export function OetsRenderer({
   readOnly = false,
   backendValidation,
   formMessage,
+  initialPayload,
   isSubmitting = false,
   onSubmit,
   submitDisabledReason,
   submitSuccess
 }: OetsRendererProps) {
-  const [state, setState] = useState(() => createInitialEvidenceState(definition));
+  const [state, setState] = useState(() =>
+    initialPayload
+      ? createEvidenceStateFromPayload(definition, initialPayload)
+      : createInitialEvidenceState(definition)
+  );
   const [repeatableCounters, setRepeatableCounters] =
     useState<RepeatableSectionCounters>(() => createInitialRepeatableCounters(definition));
   const payload = useMemo(
@@ -96,11 +105,21 @@ export function OetsRenderer({
         ) : null}
         {submitSuccess ? (
           <div
-            className="mt-4 rounded-component border border-state-success bg-elevated p-3 text-sm text-text-primary"
+            className="mt-4 space-y-2 rounded-component border border-state-success bg-elevated p-3 text-sm text-text-primary"
             role="status"
           >
-            Evidence submitted. Record {submitSuccess.evidenceRecordId} is{" "}
-            {submitSuccess.lifecycleState}.
+            <p>
+              Evidence record created. Record {submitSuccess.evidenceRecordId} is{" "}
+              {submitSuccess.lifecycleState}.
+            </p>
+            {submitSuccess.recordHref ? (
+              <Link
+                className="inline-flex font-semibold text-primary-blue underline-offset-2 hover:underline"
+                to={submitSuccess.recordHref}
+              >
+                Open record
+              </Link>
+            ) : null}
           </div>
         ) : null}
         {formMessage ? (
@@ -453,7 +472,8 @@ function renderControl(
   readOnly: boolean,
   onChange: (value: OetsFieldValue) => void
 ) {
-  const stringValue = typeof value === "string" ? value : "";
+  const stringValue =
+    typeof value === "string" || typeof value === "number" ? String(value) : "";
 
   switch (field.field_type) {
     case "TEXTAREA":
