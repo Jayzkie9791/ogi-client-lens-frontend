@@ -2,5 +2,8 @@ export const routes = {
   home: "/",
   login: "/login",
   workbench: "/workbench",
-  oetsTemplate: "/workbench/oets/:templateCode"
+  oetsTemplate: "/workbench/oets/:templateCode",
+  evidenceRecord: "/workbench/evidence/:recordId",
+  evidenceRecordPath: (recordId: string) =>
+    `/workbench/evidence/${encodeURIComponent(recordId)}`
 } as const;

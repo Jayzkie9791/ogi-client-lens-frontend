@@ -12,3 +12,14 @@ export function getCurrentRuntimeTemplate(templateCode: string) {
     }
   );
 }
+
+export function getRuntimeTemplateVersion(templateVersionId: string) {
+  return apiRequest<OetsTemplateRuntimeDefinition>(
+    `/api/v1/operational-evidence/template-versions/${encodeURIComponent(
+      templateVersionId
+    )}`,
+    {
+      validate: isOetsTemplateRuntimeDefinition
+    }
+  );
+}

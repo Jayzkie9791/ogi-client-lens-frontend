@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 
 import { isApiError } from "../api/errors";
+import { routes } from "../app/routePaths";
 import { useAuth } from "../auth/useAuth";
 import { Surface } from "../ui/components/Surface";
 import {
@@ -303,7 +304,8 @@ export function RuntimeTemplatePage() {
           successRecord
             ? {
                 evidenceRecordId: successRecord.id,
-                lifecycleState: successRecord.lifecycle_state
+                lifecycleState: successRecord.lifecycle_state,
+                recordHref: routes.evidenceRecordPath(successRecord.id)
               }
             : null
         }
