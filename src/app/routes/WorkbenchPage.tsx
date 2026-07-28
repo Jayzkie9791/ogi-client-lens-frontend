@@ -1,3 +1,7 @@
+﻿import { Link } from "react-router-dom";
+
+import { routes } from "../routePaths";
+import { Button } from "../../ui/components/Button";
 import { Surface } from "../../ui/components/Surface";
 
 export function WorkbenchPage() {
@@ -5,7 +9,7 @@ export function WorkbenchPage() {
     <section aria-labelledby="workbench-heading" className="space-y-4">
       <div>
         <p className="text-xs font-semibold uppercase tracking-wide text-primary-blue">
-          Phase 0 foundation
+          Operational Evidence
         </p>
         <h1
           id="workbench-heading"
@@ -14,9 +18,8 @@ export function WorkbenchPage() {
           Operational Governance Workbench
         </h1>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-text-muted">
-          Client Lens is ready for the authenticated Operational Evidence
-          vertical slice. No backend-dependent feature behavior is active in
-          this foundation.
+          Client Lens is ready for authenticated Operational Evidence submission
+          and governed review queue workflows.
         </p>
       </div>
 
@@ -26,8 +29,14 @@ export function WorkbenchPage() {
         </h2>
         <p className="mt-2 text-sm leading-6 text-text-muted">
           Routing, provider composition, design tokens, responsive shell, and
-          frontend test infrastructure are established for later phases.
+          frontend test infrastructure are active for the Operational Evidence
+          vertical slice.
         </p>
+        <div className="mt-4">
+          <Button asChild variant="secondary">
+            <Link to={routes.governanceQueue}>Open governance queue</Link>
+          </Button>
+        </div>
       </Surface>
     </section>
   );

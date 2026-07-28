@@ -1,13 +1,15 @@
-import { createBrowserRouter, Navigate, RouteObject } from "react-router-dom";
+﻿import { createBrowserRouter, Navigate, RouteObject } from "react-router-dom";
 
 import { PublicOnlyRoute, RequireAuth } from "../auth/AuthGuards";
+import { GovernanceQueuePage } from "../oets/GovernanceQueuePage";
+import { OperationalEvidenceRecordPage } from "../oets/OperationalEvidenceRecordPage";
+import { RuntimeTemplatePage } from "../oets/RuntimeTemplatePage";
 import { AppShell } from "../ui/layout/AppShell";
+import { routes } from "./routePaths";
 import { LoginPage } from "./routes/LoginPage";
 import { NotFoundPage } from "./routes/NotFoundPage";
 import { WorkbenchPage } from "./routes/WorkbenchPage";
-import { routes } from "./routePaths";
-import { OperationalEvidenceRecordPage } from "../oets/OperationalEvidenceRecordPage";
-import { RuntimeTemplatePage } from "../oets/RuntimeTemplatePage";
+
 
 export const appRoutes: RouteObject[] = [
   {
@@ -33,6 +35,10 @@ export const appRoutes: RouteObject[] = [
           {
             path: "workbench",
             element: <WorkbenchPage />
+          },
+          {
+            path: "workbench/governance/queue",
+            element: <GovernanceQueuePage />
           },
           {
             path: "workbench/oets/:templateCode",

@@ -439,6 +439,76 @@ describe("Generic OETS renderer", () => {
     expect(calls.some((call) => call.init?.method === "PATCH")).toBe(false);
   });
 
+
+  it("claims governance review before beginning a review workflow transition", async () => {
+    const user = userEvent.setup();
+    const queryClient = createTestQueryClient();
+    const submittedRecord = evidenceRecord({ lifecycle_state: "SUBMITTED" });
+    const reviewRecord = evidenceRecord({ lifecycle_state: "UNDER_OGI_REVIEW" });
+    const claim = {
+      id: "claim-1",
+      evidence_record_id: "evidence-record-1",
+      template_version_id: "version-1",
+      governance_authority_code: "OGI",
+      lifecycle_state: "SUBMITTED",
+      transition_trigger: "begin_ogi_review",
+      claim_status: "ACTIVE",
+      claimed_by_user_id: session.id,
+      claimed_at: "2026-07-27T00:00:00.000Z",
+      released_at: null,
+      completed_at: null,
+      created_at: "2026-07-27T00:00:00.000Z",
+      updated_at: "2026-07-27T00:00:00.000Z"
+    };
+    const { calls } = mockFetchQueue([
+      { status: 200, body: submittedRecord },
+      {
+        status: 200,
+        body: { ...runtimeTemplate, definition_jsonb: ogiReviewWorkflowDefinition }
+      },
+      { status: 201, body: claim },
+      { status: 200, body: reviewRecord },
+      { status: 200, body: reviewRecord }
+    ]);
+
+    renderOperationalEvidenceRecordPageWithSession({
+      initialPath: "/workbench/evidence/evidence-record-1",
+      queryClient,
+      currentSession: session
+    });
+
+    await user.click(
+      await screen.findByRole("button", { name: "Claim OGI review" })
+    );
+    expect(
+      await screen.findByRole("button", { name: "Begin review" })
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Begin review" }));
+
+    await waitFor(() =>
+      expect(screen.getByText("UNDER_OGI_REVIEW")).toBeInTheDocument()
+    );
+
+    const claimCall = calls.find((call) =>
+      call.url.endsWith("/governance/review-claims")
+    );
+    const transitionCall = calls.find((call) =>
+      call.url.endsWith("/governance/review-claims/claim-1/transitions")
+    );
+
+    expect(JSON.parse(String(claimCall?.init?.body))).toEqual({
+      evidence_record_id: "evidence-record-1",
+      governance_authority_code: "OGI",
+      transition_trigger: "begin_ogi_review"
+    });
+    expect(JSON.parse(String(transitionCall?.init?.body))).toEqual({});
+    expect(calls.some((call) =>
+      call.url.endsWith("/records/evidence-record-1/transitions")
+    )).toBe(false);
+  });
+
+
   it("uses generic workflow metadata labels for arbitrary states", async () => {
     const queryClient = createTestQueryClient();
     const { calls } = mockFetchQueue([
@@ -1479,6 +1549,32 @@ const workflowDefinition: OetsDefinition = {
     ]
   }
 };
+
+
+const ogiReviewWorkflowDefinition: OetsDefinition = {
+  ...definition,
+  workflow: {
+    initial_state: "SUBMITTED",
+    states: [
+      {
+        state_code: "SUBMITTED",
+        name: "Submitted"
+      },
+      {
+        state_code: "UNDER_OGI_REVIEW",
+        name: "Under OGI Review"
+      }
+    ],
+    transitions: [
+      {
+        from: "SUBMITTED",
+        to: "UNDER_OGI_REVIEW",
+        trigger: "begin_ogi_review"
+      }
+    ]
+  }
+};
+
 
 const alternateWorkflowDefinition: OetsDefinition = {
   ...definition,
