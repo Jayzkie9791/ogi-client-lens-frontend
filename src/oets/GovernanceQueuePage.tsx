@@ -5,6 +5,10 @@ import { routes } from "../app/routePaths";
 import { Surface } from "../ui/components/Surface";
 import { Button } from "../ui/components/Button";
 import { isApiError } from "../api/errors";
+import {
+  displayLifecycleStatus,
+  displayReviewAuthority
+} from "./displayLabels";
 import { listGovernanceQueue } from "./governanceApi";
 
 export function GovernanceQueuePage() {
@@ -18,7 +22,7 @@ export function GovernanceQueuePage() {
 
   if (queueQuery.isLoading) {
     return (
-      <SafeState title="Loading governance queue.">Please wait.</SafeState>
+      <SafeState title="Loading review queue.">Please wait.</SafeState>
     );
   }
 
@@ -32,17 +36,17 @@ export function GovernanceQueuePage() {
     <section aria-labelledby="governance-queue-heading" className="space-y-4">
       <div>
         <p className="text-xs font-semibold uppercase tracking-wide text-primary-blue">
-          Operational Evidence
+          Audit Review
         </p>
         <h1
           className="mt-2 text-2xl font-semibold text-text-primary"
           id="governance-queue-heading"
         >
-          Governance Queue
+          Review Queue
         </h1>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-text-muted">
-          Review-ready Operational Evidence Records are listed from the backend
-          governance queue using the governing OETS workflow metadata.
+          Audit records ready for review are listed from the backend review
+          queue using the approved template rules.
         </p>
       </div>
 
@@ -52,8 +56,8 @@ export function GovernanceQueuePage() {
             No review-ready evidence
           </h2>
           <p className="mt-2 text-sm leading-6 text-text-muted">
-            There are no Operational Evidence Records currently eligible for
-            governance review in your authorized scope.
+            There are no audit records currently ready for review in your
+            authorized scope.
           </p>
         </Surface>
       ) : (
@@ -64,9 +68,9 @@ export function GovernanceQueuePage() {
                 <tr>
                   <th className="px-4 py-3" scope="col">Record</th>
                   <th className="px-4 py-3" scope="col">Template</th>
-                  <th className="px-4 py-3" scope="col">State</th>
-                  <th className="px-4 py-3" scope="col">Authority</th>
-                  <th className="px-4 py-3" scope="col">Claim</th>
+                  <th className="px-4 py-3" scope="col">Status</th>
+                  <th className="px-4 py-3" scope="col">Reviewer</th>
+                  <th className="px-4 py-3" scope="col">Assignment</th>
                   <th className="px-4 py-3" scope="col">Action</th>
                 </tr>
               </thead>
@@ -80,18 +84,18 @@ export function GovernanceQueuePage() {
                       {item.evidence_record.template_provenance.template_code}
                     </td>
                     <td className="px-4 py-3 text-text-muted">
-                      {item.lifecycle_state}
+                      {displayLifecycleStatus(item.lifecycle_state)}
                     </td>
                     <td className="px-4 py-3 text-text-muted">
-                      {item.governance_authority_code}
+                      {displayReviewAuthority(item.governance_authority_code)}
                     </td>
                     <td className="px-4 py-3 text-text-muted">
-                      {item.active_claim ? "Claimed" : "Unclaimed"}
+                      {item.active_claim ? "Assigned" : "Unassigned"}
                     </td>
                     <td className="px-4 py-3">
                       <Button asChild variant="secondary">
                         <Link to={routes.evidenceRecordPath(item.evidence_record.id)}>
-                          Open record
+                          Open audit
                         </Link>
                       </Button>
                     </td>
@@ -109,15 +113,15 @@ export function GovernanceQueuePage() {
 function QueueErrorState({ error }: { error: Error }) {
   if (isApiError(error) && [401, 403].includes(error.status)) {
     return (
-      <SafeState title="Governance queue is not available.">
+      <SafeState title="Review queue is not available.">
         The queue could not be opened with the current authorization context.
       </SafeState>
     );
   }
 
   return (
-    <SafeState title="Governance queue could not be loaded.">
-      The backend governance queue endpoint returned an error.
+    <SafeState title="Review queue could not be loaded.">
+      The backend review queue endpoint returned an error.
     </SafeState>
   );
 }

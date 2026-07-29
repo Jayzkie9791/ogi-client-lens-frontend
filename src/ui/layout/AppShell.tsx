@@ -11,7 +11,7 @@ const navigationItems = [
     implemented: true
   },
   {
-    label: "Governance Queue",
+    label: "Review Queue",
     to: routes.governanceQueue,
     implemented: true
   }
@@ -40,7 +40,7 @@ export function AppShell() {
             <nav aria-label="Primary navigation">
               <ul className="flex flex-wrap gap-2">
                 {navigationItems.map((item) => {
-                  if (item.label === "Governance Queue") {
+                  if (item.to === routes.governanceQueue) {
                     return (
                       <PermissionGate
                         key={item.label}

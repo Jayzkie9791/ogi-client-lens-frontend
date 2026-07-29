@@ -108,7 +108,7 @@ describe("Client Lens authentication foundation", () => {
     renderWithRoute(routes.workbench);
 
     expect(
-      screen.queryByRole("heading", { name: "Operational Governance Workbench" })
+      screen.queryByRole("heading", { name: "Audit Review Workbench" })
     ).not.toBeInTheDocument();
     expect(
       await screen.findByRole("heading", { name: "Sign in to Client Lens" })
@@ -129,7 +129,7 @@ describe("Client Lens authentication foundation", () => {
     ).resolves.toHaveAttribute("src", "/brand/client-lens-logo.png");
   });
 
-  it("renders the primary navigation and permission-aware governance queue link", async () => {
+  it("renders the primary navigation and permission-aware review queue link", async () => {
     window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
     mockFetchQueue([
       { status: 200, body: { accessToken: "access-token" } },
@@ -142,7 +142,7 @@ describe("Client Lens authentication foundation", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Workbench" })).toBeInTheDocument();
     expect(
-      screen.getByRole("link", { name: "Governance Queue" })
+      screen.getByRole("link", { name: "Review Queue" })
     ).toHaveAttribute("href", routes.governanceQueue);
   });
 
@@ -155,10 +155,10 @@ describe("Client Lens authentication foundation", () => {
     renderWithRoute(routes.workbench);
 
     expect(
-      await screen.findByRole("heading", { name: "Operational Governance Workbench" })
+      await screen.findByRole("heading", { name: "Audit Review Workbench" })
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("link", { name: "Governance Queue" })
+      screen.queryByRole("link", { name: "Review Queue" })
     ).not.toBeInTheDocument();
   });
 
@@ -188,7 +188,7 @@ describe("Client Lens authentication foundation", () => {
     await user.click(screen.getByRole("button", { name: "Sign in" }));
 
     expect(
-      await screen.findByRole("heading", { name: "Operational Governance Workbench" })
+      await screen.findByRole("heading", { name: "Audit Review Workbench" })
     ).toBeInTheDocument();
     expect(window.sessionStorage.getItem(getRefreshTokenStorageKey())).toBe(
       "login-refresh-token"
@@ -356,7 +356,7 @@ describe("Client Lens authentication foundation", () => {
     renderWithRoute(routes.login);
 
     expect(
-      await screen.findByRole("heading", { name: "Operational Governance Workbench" })
+      await screen.findByRole("heading", { name: "Audit Review Workbench" })
     ).toBeInTheDocument();
   });
 
@@ -385,7 +385,7 @@ describe("Client Lens authentication foundation", () => {
     expect(screen.getByText("Enter your email and password.")).toBeInTheDocument();
   });
 
-  it("opens the governance queue from primary navigation", async () => {
+  it("opens the review queue from primary navigation", async () => {
     const user = userEvent.setup();
     window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
     mockFetchQueue([
@@ -396,11 +396,11 @@ describe("Client Lens authentication foundation", () => {
     renderWithRoute(routes.workbench);
 
     await user.click(
-      await screen.findByRole("link", { name: "Governance Queue" })
+      await screen.findByRole("link", { name: "Review Queue" })
     );
 
     expect(
-      await screen.findByRole("heading", { name: "Governance Queue" })
+      await screen.findByRole("heading", { name: "Review Queue" })
     ).toBeInTheDocument();
   });
 

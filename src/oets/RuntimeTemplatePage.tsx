@@ -175,7 +175,7 @@ export function RuntimeTemplatePage() {
       }
 
       setBackendValidation(null);
-      setFormMessage("Evidence submission failed. Try again later.");
+      setFormMessage("Audit draft creation failed. Try again later.");
     }
   });
 
@@ -350,7 +350,7 @@ function handleEvidenceSubmit({
 
   if (!clientId) {
     setBackendValidation(null);
-    setFormMessage("Evidence submission requires an assigned client context.");
+    setFormMessage("Creating an audit draft requires an assigned client context.");
     return;
   }
 
@@ -377,35 +377,35 @@ function handleSubmissionError(
   if (error.status === 409 && error.code === "OEE_TEMPLATE_VERSION_CONFLICT") {
     setBackendValidation(null);
     setFormMessage(
-      "This operational template changed while you were completing it. Reload the current template before submitting."
+      "This audit template changed while you were completing it. Reload the current template before submitting."
     );
     return;
   }
 
   if (error.status === 422 && error.code === "OEE_EVIDENCE_VALIDATION_FAILED") {
     setBackendValidation(mapBackendValidationDetails(error.details));
-    setFormMessage("The backend rejected this evidence. Review the highlighted validation messages.");
+    setFormMessage("The backend rejected this audit. Review the highlighted validation messages.");
     return;
   }
 
   setBackendValidation(null);
 
   if (error.status === 403) {
-    setFormMessage("You are not authorized to submit this operational evidence.");
+    setFormMessage("You are not authorized to create this audit draft.");
     return;
   }
 
   if (error.status === 400) {
-    setFormMessage("The evidence submission request was malformed.");
+    setFormMessage("The audit draft creation request was malformed.");
     return;
   }
 
   if (error.status === 404) {
-    setFormMessage("The operational template or evidence resource is unavailable.");
+    setFormMessage("The audit template or record is unavailable.");
     return;
   }
 
-  setFormMessage(error.message || "Evidence submission failed. Try again later.");
+  setFormMessage(error.message || "Audit draft creation failed. Try again later.");
 }
 
 function readSubmissionDisabledReason(
@@ -413,10 +413,10 @@ function readSubmissionDisabledReason(
   successRecord: OperationalEvidenceRecord | null
 ) {
   if (successRecord) {
-    return "This evidence capture has already been submitted.";
+    return "This audit draft has already been created.";
   }
 
-  return clientId ? null : "You must first select a Client before submitting Operational Evidence.";
+  return clientId ? null : "You must first select a client before creating an audit draft.";
 }
 
 function resolveFacilityId(facilityIds: string[], selectedFacilityId: string) {
@@ -496,7 +496,7 @@ function ClientContextPanel({
           ? "Authorized clients could not be loaded."
           : currentClientId
             ? `Current client: ${readClientName(clients, currentClientId)}`
-            : "You must first select a Client before submitting Operational Evidence."}
+            : "You must first select a client before creating an audit draft."}
       </p>
     </Surface>
   );

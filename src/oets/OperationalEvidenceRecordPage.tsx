@@ -8,6 +8,11 @@ import { Button } from "../ui/components/Button";
 import { Surface } from "../ui/components/Surface";
 import { narrowOetsDefinition } from "./definitionGuards";
 import {
+  displayLifecycleStatus,
+  displayReviewAuthority,
+  displayWorkflowActionLabel
+} from "./displayLabels";
+import {
   getOperationalEvidenceRecord,
   transitionOperationalEvidenceRecord
 } from "./evidenceSubmissionApi";
@@ -93,7 +98,7 @@ export function OperationalEvidenceRecordPage() {
     queryKey: governanceClaimQueryKey,
     queryFn: () => {
       if (!record) {
-        throw new Error("Evidence record is required before loading governance claims.");
+        throw new Error("Audit record is required before loading review assignments.");
       }
 
       return listGovernanceQueue({
@@ -132,7 +137,7 @@ export function OperationalEvidenceRecordPage() {
   const claimMutation = useMutation({
     mutationFn: (transition: GovernanceWorkflowTransition) => {
       if (!record) {
-        throw new Error("Evidence record is required before claiming review.");
+        throw new Error("Audit record is required before assigning review.");
       }
 
       return claimGovernanceReview({
@@ -182,14 +187,14 @@ export function OperationalEvidenceRecordPage() {
 
   if (!recordId) {
     return (
-      <SafeState title="Evidence record ID is required.">
-        Open an Operational Evidence record route with a record ID.
+      <SafeState title="Audit record ID is required.">
+        Open an audit record route with a record ID.
       </SafeState>
     );
   }
 
   if (recordQuery.isLoading) {
-    return <SafeState title="Loading evidence record.">Please wait.</SafeState>;
+    return <SafeState title="Loading audit record.">Please wait.</SafeState>;
   }
 
   if (recordQuery.isError) {
@@ -198,15 +203,15 @@ export function OperationalEvidenceRecordPage() {
 
   if (!record) {
     return (
-      <SafeState title="Evidence record could not be loaded.">
-        The backend did not return an Operational Evidence record.
+      <SafeState title="Audit record could not be loaded.">
+        The backend did not return an audit record.
       </SafeState>
     );
   }
 
   if (templateQuery.isLoading) {
     return (
-      <SafeState title="Loading governing OETS template version.">
+      <SafeState title="Loading audit template.">
         Please wait.
       </SafeState>
     );
@@ -214,15 +219,15 @@ export function OperationalEvidenceRecordPage() {
 
   if (templateQuery.isError) {
     return (
-      <SafeState title="Evidence record could not be rendered.">
-        The governing OETS template version is unavailable.
+      <SafeState title="Audit record could not be displayed.">
+        The audit template is unavailable.
       </SafeState>
     );
   }
 
   if (!templateQuery.data || !narrowing?.definition) {
     return (
-      <SafeState title="Evidence record could not be rendered.">
+      <SafeState title="Audit record could not be displayed.">
         {(narrowing?.errors ?? ["definition_jsonb was not returned."]).join(" ")}
       </SafeState>
     );
@@ -230,8 +235,8 @@ export function OperationalEvidenceRecordPage() {
 
   if (!templateMatchesRecord(record, templateQuery.data)) {
     return (
-      <SafeState title="Evidence record could not be rendered.">
-        The governing template version does not match the record provenance.
+      <SafeState title="Audit record could not be displayed.">
+        The audit template version does not match this record.
       </SafeState>
     );
   }
@@ -242,14 +247,14 @@ export function OperationalEvidenceRecordPage() {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
-              Operational Evidence Record
+              Audit Record
             </p>
             <h1 className="mt-1 break-all text-2xl font-semibold text-text-primary">
               {record.id}
             </h1>
           </div>
           <span className="inline-flex w-fit rounded-component border border-border px-3 py-1 text-xs font-semibold uppercase text-text-muted">
-            {record.lifecycle_state}
+            {displayLifecycleStatus(record.lifecycle_state)}
           </span>
         </div>
         <MetadataGrid
@@ -391,7 +396,7 @@ function WorkflowActions({
     <Surface className="space-y-3">
       <div>
         <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
-          Workflow
+          Review
         </p>
         <h2 className="mt-1 text-base font-semibold text-text-primary">
           Available Actions
@@ -406,7 +411,7 @@ function WorkflowActions({
               onClick={() => onTransition(transition)}
               variant="secondary"
             >
-              {isPending ? "Updating..." : transition.label}
+              {isPending ? "Updating..." : displayWorkflowActionLabel(transition)}
             </Button>
           ))}
         </div>
@@ -463,21 +468,21 @@ function GovernanceReviewActions({
     <Surface className="space-y-3">
       <div>
         <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
-          Governance Review
+          Review Assignment
         </p>
         <h2 className="mt-1 text-base font-semibold text-text-primary">
-          Claimed Review Actions
+          Assigned Review Actions
         </h2>
       </div>
 
       {isLoadingClaimState ? (
-        <p className="text-sm text-text-muted">Loading review ownership.</p>
+        <p className="text-sm text-text-muted">Loading review assignment.</p>
       ) : loadClaimStateError ? (
         <div
           className="rounded-component border border-state-error bg-elevated p-3 text-sm text-text-primary"
           role="alert"
         >
-          Governance review ownership could not be loaded.
+          Review assignment could not be loaded.
         </div>
       ) : (
         <div className="flex flex-wrap gap-3">
@@ -493,7 +498,7 @@ function GovernanceReviewActions({
                     className="rounded-component border border-border bg-canvas px-3 py-2 text-sm text-text-muted"
                     key={transitionKey(transition)}
                   >
-                    {transition.governanceAuthorityCode} review is already claimed.
+                    {displayReviewAuthority(transition.governanceAuthorityCode)} review is already assigned.
                   </p>
                 );
               }
@@ -505,14 +510,14 @@ function GovernanceReviewActions({
                     onClick={() => onTransition(activeClaim)}
                     variant="secondary"
                   >
-                    {claimedTransitionPending ? "Beginning review..." : "Begin review"}
+                    {claimedTransitionPending ? "Starting review..." : "Start Review"}
                   </Button>
                   <Button
                     disabled={claimedTransitionPending || releasePending}
                     onClick={() => onRelease(activeClaim)}
                     variant="secondary"
                   >
-                    {releasePending ? "Releasing..." : "Release claim"}
+                    {releasePending ? "Returning..." : "Return to Queue"}
                   </Button>
                 </div>
               );
@@ -526,8 +531,8 @@ function GovernanceReviewActions({
                 variant="secondary"
               >
                 {claimPending
-                  ? "Claiming..."
-                  : `Claim ${transition.governanceAuthorityCode} review`}
+                  ? "Assigning..."
+                  : "Assign to Me"}
               </Button>
             );
           })}
@@ -549,14 +554,14 @@ function GovernanceReviewActions({
 function RecordErrorState({ error }: { error: Error }) {
   if (isApiError(error) && [401, 403, 404].includes(error.status)) {
     return (
-      <SafeState title="Evidence record is not available.">
+      <SafeState title="Audit record is not available.">
         The record could not be opened with the current authorization context.
       </SafeState>
     );
   }
 
   return (
-    <SafeState title="Evidence record could not be loaded.">
+    <SafeState title="Audit record could not be loaded.">
       The backend record endpoint returned an error.
     </SafeState>
   );
@@ -631,19 +636,19 @@ function readTransitionLabel(value: Record<string, unknown>) {
 function transitionErrorMessage(error: Error) {
   if (isApiError(error)) {
     if ([401, 403].includes(error.status)) {
-      return "You are not authorized to perform this workflow action.";
+      return "You are not authorized to perform this review action.";
     }
 
     if (error.status === 409) {
-      return "This review is already claimed. The latest review ownership state is shown.";
+      return "This review is already assigned. The latest assignment is shown.";
     }
 
     if (error.status === 422) {
-      return "The workflow action was rejected by the backend. Reload the record and try again.";
+      return "The review action was rejected by the backend. Reload the record and try again.";
     }
   }
 
-  return "The workflow action could not be completed.";
+  return "The review action could not be completed.";
 }
 
 function humanizeCode(value: string) {

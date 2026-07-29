@@ -404,7 +404,7 @@ describe("Generic OETS renderer", () => {
     expect(
       await screen.findByRole("heading", { name: "evidence-record-1" })
     ).toBeInTheDocument();
-    expect(screen.getByText("DRAFT")).toBeInTheDocument();
+    expect(screen.getByText("Draft")).toBeInTheDocument();
     expect(screen.getByText(runtimeTemplate.template_code)).toBeInTheDocument();
     expect(screen.getAllByText(runtimeTemplate.template_version).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText(runtimeTemplate.template_version_id)).toBeInTheDocument();
@@ -414,7 +414,7 @@ describe("Generic OETS renderer", () => {
     expect(screen.getByLabelText("Number Field")).toHaveValue(7);
     expect(screen.getByLabelText("Select Field")).toHaveValue("OPTION_A");
     expect(screen.getByLabelText("Observation Time")).toHaveValue("10:30");
-    expect(screen.queryByRole("button", { name: "Submit evidence" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Submit Audit" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /save/i })).not.toBeInTheDocument();
     expect(calls.map(({ url }) => url)).toEqual([
       "/api/v1/operational-evidence/records/evidence-record-1",
@@ -456,21 +456,21 @@ describe("Generic OETS renderer", () => {
     });
 
     expect(
-      await screen.findByRole("button", { name: "Submit Intake Request" })
+      await screen.findByRole("button", { name: "Submit Audit" })
     ).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Archive Evidence" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Archive" })).not.toBeInTheDocument();
     expect(screen.getByLabelText("Text Field")).toHaveValue("Transition candidate");
     expect(screen.getByLabelText("Text Field")).toBeDisabled();
 
-    await user.click(screen.getByRole("button", { name: "Submit Intake Request" }));
+    await user.click(screen.getByRole("button", { name: "Submit Audit" }));
 
     await waitFor(() =>
-      expect(screen.getByText("SUBMITTED")).toBeInTheDocument()
+      expect(screen.getByText("Awaiting Review")).toBeInTheDocument()
     );
     expect(
-      screen.queryByRole("button", { name: "Submit Intake Request" })
+      screen.queryByRole("button", { name: "Create Audit Draft" })
     ).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Submit evidence" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Submit Audit" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /save/i })).not.toBeInTheDocument();
 
     const transitionCall = calls.find((call) =>
@@ -516,16 +516,16 @@ describe("Generic OETS renderer", () => {
     });
 
     await user.click(
-      await screen.findByRole("button", { name: "Claim OGI review" })
+      await screen.findByRole("button", { name: "Assign to Me" })
     );
     expect(
-      await screen.findByRole("button", { name: "Begin review" })
+      await screen.findByRole("button", { name: "Start Review" })
     ).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Begin review" }));
+    await user.click(screen.getByRole("button", { name: "Start Review" }));
 
     await waitFor(() =>
-      expect(screen.getByText("UNDER_OGI_REVIEW")).toBeInTheDocument()
+      expect(screen.getByText("Under Review")).toBeInTheDocument()
     );
 
     const claimCall = calls.find((call) =>
@@ -572,20 +572,20 @@ describe("Generic OETS renderer", () => {
     });
 
     expect(
-      await screen.findByRole("button", { name: "Move to Intake Approved" })
+      await screen.findByRole("button", { name: "Approve Audit" })
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Move to Returned for Clarification" })
+      screen.getByRole("button", { name: "Return for Clarification" })
     ).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Move to Intake Approved" }));
+    await user.click(screen.getByRole("button", { name: "Approve Audit" }));
 
     await waitFor(() =>
-      expect(screen.getByText("INTAKE_APPROVED")).toBeInTheDocument()
+      expect(screen.getByText("Audit Approved")).toBeInTheDocument()
     );
     expect(
       await screen.findByRole("button", {
-        name: "Move to Routed for Assessment or Audit"
+        name: "Send to Risk Assessment"
       })
     ).toBeInTheDocument();
 
@@ -617,13 +617,37 @@ describe("Generic OETS renderer", () => {
       currentSession: session
     });
 
-    expect(await screen.findByText("INTAKE_APPROVED")).toBeInTheDocument();
+    expect(await screen.findByText("Audit Approved")).toBeInTheDocument();
     expect(
       await screen.findByRole("button", {
-        name: "Move to Routed for Assessment or Audit"
+        name: "Send to Risk Assessment"
       })
     ).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Claim OGI review" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Assign to Me" })).not.toBeInTheDocument();
+  });
+
+  it("shows risk assessment approval language only after the routing transition state", async () => {
+    const queryClient = createTestQueryClient();
+    mockFetchQueue([
+      {
+        status: 200,
+        body: evidenceRecord({ lifecycle_state: "ROUTED_FOR_ASSESSMENT_OR_AUDIT" })
+      },
+      {
+        status: 200,
+        body: { ...runtimeTemplate, definition_jsonb: f01IntakeWorkflowDefinition }
+      }
+    ]);
+
+    renderOperationalEvidenceRecordPageWithSession({
+      initialPath: "/workbench/evidence/evidence-record-1",
+      queryClient,
+      currentSession: session
+    });
+
+    expect(
+      await screen.findByText("Approved for Risk Assessment")
+    ).toBeInTheDocument();
   });
 
   it("keeps returned-for-clarification as a direct workflow transition from OGI review", async () => {
@@ -650,12 +674,12 @@ describe("Generic OETS renderer", () => {
 
     await user.click(
       await screen.findByRole("button", {
-        name: "Move to Returned for Clarification"
+        name: "Return for Clarification"
       })
     );
 
     await waitFor(() =>
-      expect(screen.getByText("RETURNED_FOR_CLARIFICATION")).toBeInTheDocument()
+      expect(screen.getByText("Returned For Clarification")).toBeInTheDocument()
     );
 
     const transitionCall = calls.find((call) =>
@@ -725,16 +749,16 @@ describe("Generic OETS renderer", () => {
     });
 
     await user.click(
-      await screen.findByRole("button", { name: "Submit Intake Request" })
+      await screen.findByRole("button", { name: "Submit Audit" })
     );
 
     expect(
       await screen.findByRole("alert")
     ).toHaveTextContent(
-      "The workflow action was rejected by the backend. Reload the record and try again."
+      "The review action was rejected by the backend. Reload the record and try again."
     );
-    expect(screen.getByText("DRAFT")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Submit Intake Request" })).toBeInTheDocument();
+    expect(screen.getByText("Draft")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Submit Audit" })).toBeInTheDocument();
     expect(calls.some((call) => call.init?.method === "PATCH")).toBe(false);
   });
 
@@ -761,7 +785,7 @@ describe("Generic OETS renderer", () => {
 
     expect(
       await screen.findByRole("heading", {
-        name: "Evidence record is not available."
+        name: "Audit record is not available."
       })
     ).toBeInTheDocument();
     expect(screen.queryByText("restricted-record")).not.toBeInTheDocument();
@@ -777,7 +801,7 @@ describe("Generic OETS renderer", () => {
     expect(headings.map((heading) => heading.textContent)).toEqual([
       "General Evidence",
       "Repeatable Observations",
-      "Local Evidence Payload"
+      "Current Audit Payload"
     ]);
     expect(screen.getByLabelText("Text Field")).toHaveAttribute("type", "text");
     expect(screen.getByLabelText("Textarea Field").tagName).toBe("TEXTAREA");
@@ -916,7 +940,7 @@ describe("Generic OETS renderer", () => {
     await user.type(screen.getByLabelText("Text Field"), "Blocked");
     expect(screen.queryByText(/"TEXT_FIELD": "Blocked"/)).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "Submit evidence" })
+      screen.queryByRole("button", { name: "Submit Audit" })
     ).not.toBeInTheDocument();
   });
 
@@ -935,12 +959,12 @@ describe("Generic OETS renderer", () => {
     await user.type(await screen.findByLabelText("Text Field"), "Submitted");
     await user.type(screen.getByLabelText("Number Field"), "5");
     await user.type(screen.getByLabelText("Decimal Field"), "12.5");
-    await user.click(screen.getByRole("button", { name: "Submit evidence" }));
+    await user.click(screen.getByRole("button", { name: "Create Audit Draft" }));
 
     expect(
-      await screen.findByText(/Evidence record created. Record evidence-record-1 is SUBMITTED./)
+      await screen.findByText("Draft audit created successfully.")
     ).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Open record" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Open Audit" })).toHaveAttribute(
       "href",
       "/workbench/evidence/evidence-record-1"
     );
@@ -1003,7 +1027,7 @@ describe("Generic OETS renderer", () => {
       screen.queryByRole("heading", { name: "Newer Runtime Template" })
     ).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Submit evidence" }));
+    await user.click(screen.getByRole("button", { name: "Create Audit Draft" }));
 
     const requestBody = JSON.parse(String(calls[0].init?.body));
 
@@ -1034,7 +1058,7 @@ describe("Generic OETS renderer", () => {
 
     renderWithRoute("/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE");
 
-    await user.click(await screen.findByRole("button", { name: "Submit evidence" }));
+    await user.click(await screen.findByRole("button", { name: "Create Audit Draft" }));
 
     const requestBody = JSON.parse(String(calls[3].init?.body));
 
@@ -1064,7 +1088,7 @@ describe("Generic OETS renderer", () => {
       await screen.findByLabelText("Facility context"),
       multiFacilitySession.facilityIds[1]
     );
-    await user.click(screen.getByRole("button", { name: "Submit evidence" }));
+    await user.click(screen.getByRole("button", { name: "Create Audit Draft" }));
 
     const requestBody = JSON.parse(String(calls[3].init?.body));
 
@@ -1083,9 +1107,9 @@ describe("Generic OETS renderer", () => {
     renderWithRoute("/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE");
 
     expect(
-      await screen.findAllByText("You must first select a Client before submitting Operational Evidence.")
+      await screen.findAllByText("You must first select a client before creating an audit draft.")
     ).toHaveLength(2);
-    expect(screen.getByRole("button", { name: "Submit evidence" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Create Audit Draft" })).toBeDisabled();
     expect(calls).toHaveLength(4);
   });
 
@@ -1110,10 +1134,10 @@ describe("Generic OETS renderer", () => {
     await user.type(await screen.findByLabelText("Text Field"), "Submitted");
     await user.type(screen.getByLabelText("Number Field"), "5");
     await user.type(screen.getByLabelText("Decimal Field"), "12.5");
-    await user.click(screen.getByRole("button", { name: "Submit evidence" }));
+    await user.click(screen.getByRole("button", { name: "Create Audit Draft" }));
 
     expect(
-      await screen.findByText(/Evidence record created. Record evidence-record-1 is SUBMITTED./)
+      await screen.findByText("Draft audit created successfully.")
     ).toBeInTheDocument();
 
     const requestBody = JSON.parse(String(calls[5].init?.body));
@@ -1169,16 +1193,16 @@ describe("Generic OETS renderer", () => {
 
     renderWithRoute("/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE");
 
-    const button = await screen.findByRole("button", { name: "Submit evidence" });
+    const button = await screen.findByRole("button", { name: "Create Audit Draft" });
 
     await user.dblClick(button);
 
-    expect(screen.getByRole("button", { name: "Submitting..." })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Creating..." })).toBeDisabled();
     expect(calls.filter((call) => call.url.endsWith("/records"))).toHaveLength(1);
 
     resolveSubmit(jsonResponse(201, evidenceRecord()));
 
-    expect(await screen.findByText(/Evidence record created/)).toBeInTheDocument();
+    expect(await screen.findByText("Draft audit created successfully.")).toBeInTheDocument();
   });
 
   it("uses a synchronous lock so immediate submit activations create only one request", async () => {
@@ -1211,7 +1235,7 @@ describe("Generic OETS renderer", () => {
 
     renderWithRoute("/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE");
 
-    const button = await screen.findByRole("button", { name: "Submit evidence" });
+    const button = await screen.findByRole("button", { name: "Create Audit Draft" });
 
     act(() => {
       button.click();
@@ -1224,7 +1248,7 @@ describe("Generic OETS renderer", () => {
 
     resolveSubmit(jsonResponse(201, evidenceRecord()));
 
-    expect(await screen.findByText(/Evidence record created/)).toBeInTheDocument();
+    expect(await screen.findByText("Draft audit created successfully.")).toBeInTheDocument();
   });
 
   it("does not allow the same successful evidence capture to be submitted again", async () => {
@@ -1239,11 +1263,11 @@ describe("Generic OETS renderer", () => {
 
     renderWithRoute("/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE");
 
-    await user.click(await screen.findByRole("button", { name: "Submit evidence" }));
+    await user.click(await screen.findByRole("button", { name: "Create Audit Draft" }));
 
-    expect(await screen.findByText(/Evidence record created/)).toBeInTheDocument();
+    expect(await screen.findByText("Draft audit created successfully.")).toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "Submit evidence" })
+      screen.queryByRole("button", { name: "Create Audit Draft" })
     ).not.toBeInTheDocument();
 
     expect(calls.filter((call) => call.url.endsWith("/records"))).toHaveLength(1);
@@ -1269,11 +1293,11 @@ describe("Generic OETS renderer", () => {
 
     renderWithRoute("/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE");
 
-    await user.click(await screen.findByRole("button", { name: "Submit evidence" }));
+    await user.click(await screen.findByRole("button", { name: "Create Audit Draft" }));
 
     expect(
       await screen.findByText(
-        "This operational template changed while you were completing it. Reload the current template before submitting."
+        "This audit template changed while you were completing it. Reload the current template before submitting."
       )
     ).toBeInTheDocument();
     expect(screen.queryByText("Backend field issue")).not.toBeInTheDocument();
@@ -1332,11 +1356,11 @@ describe("Generic OETS renderer", () => {
 
     renderWithRoute("/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE");
 
-    await user.click(await screen.findByRole("button", { name: "Submit evidence" }));
+    await user.click(await screen.findByRole("button", { name: "Create Audit Draft" }));
 
     expect(
       await screen.findByText(
-        "The backend rejected this evidence. Review the highlighted validation messages."
+        "The backend rejected this audit. Review the highlighted validation messages."
       )
     ).toBeInTheDocument();
     expect(screen.getByText("Form issue")).toBeInTheDocument();
@@ -1389,7 +1413,7 @@ describe("Generic OETS renderer", () => {
 
     renderWithRoute("/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE");
 
-    await user.click(await screen.findByRole("button", { name: "Submit evidence" }));
+    await user.click(await screen.findByRole("button", { name: "Create Audit Draft" }));
 
     expect(await screen.findByText("Conflicting field issue")).toBeInTheDocument();
     expect(screen.getByText("Section-only path issue")).toBeInTheDocument();
@@ -1441,7 +1465,7 @@ describe("Generic OETS renderer", () => {
       expect(screen.queryByLabelText("Facility context")).not.toBeInTheDocument()
     );
 
-    await user.click(screen.getByRole("button", { name: "Submit evidence" }));
+    await user.click(screen.getByRole("button", { name: "Create Audit Draft" }));
 
     const requestBody = JSON.parse(String(calls[0].init?.body));
 
@@ -1477,12 +1501,12 @@ describe("Generic OETS renderer", () => {
 
     renderWithRoute("/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE");
 
-    await user.click(await screen.findByRole("button", { name: "Submit evidence" }));
+    await user.click(await screen.findByRole("button", { name: "Create Audit Draft" }));
     expect(
-      await screen.findByText("You are not authorized to submit this operational evidence.")
+      await screen.findByText("You are not authorized to create this audit draft.")
     ).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Submit evidence" }));
+    await user.click(screen.getByRole("button", { name: "Create Audit Draft" }));
     expect(await screen.findByText("Server failed.")).toBeInTheDocument();
   });
 
@@ -1700,13 +1724,13 @@ const workflowDefinition: OetsDefinition = {
         from: "DRAFT",
         to: "SUBMITTED",
         trigger: "submit_intake_request",
-        label: "Submit Intake Request"
+        label: "Submit Audit"
       },
       {
         from: "SUBMITTED",
         to: "ARCHIVED",
         trigger: "archive_evidence",
-        label: "Archive Evidence"
+        label: "Archive"
       }
     ]
   }
@@ -1766,7 +1790,7 @@ const ogiReviewThenArchiveWorkflowDefinition: OetsDefinition = {
         from: "UNDER_OGI_REVIEW",
         to: "ARCHIVED",
         trigger: "archive_evidence",
-        label: "Archive Evidence"
+        label: "Archive"
       }
     ]
   }
@@ -1962,9 +1986,9 @@ function optionField(
     });
 
     expect(
-      await screen.findByRole("button", { name: "Claim OGI review" })
+      await screen.findByRole("button", { name: "Assign to Me" })
     ).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Begin review" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Start Review" })).not.toBeInTheDocument();
   });
 
   it("restores current user's active governance claim on initial load", async () => {
@@ -1989,9 +2013,9 @@ function optionField(
       currentSession: session
     });
 
-    expect(await screen.findByRole("button", { name: "Begin review" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Release claim" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Claim OGI review" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Start Review" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Return to Queue" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Assign to Me" })).not.toBeInTheDocument();
   });
 
   it("shows non-actionable claimed state when another reviewer owns the active claim", async () => {
@@ -2016,10 +2040,10 @@ function optionField(
       currentSession: session
     });
 
-    expect(await screen.findByText("OGI review is already claimed.")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Claim OGI review" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Begin review" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Release claim" })).not.toBeInTheDocument();
+    expect(await screen.findByText("OGI review is already assigned.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Assign to Me" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Start Review" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Return to Queue" })).not.toBeInTheDocument();
   });
 
   it("releases a restored active governance claim and returns to claimable state", async () => {
@@ -2049,12 +2073,12 @@ function optionField(
       currentSession: session
     });
 
-    await user.click(await screen.findByRole("button", { name: "Release claim" }));
+    await user.click(await screen.findByRole("button", { name: "Return to Queue" }));
 
     expect(
-      await screen.findByRole("button", { name: "Claim OGI review" })
+      await screen.findByRole("button", { name: "Assign to Me" })
     ).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Begin review" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Start Review" })).not.toBeInTheDocument();
   });
 
   it("begins review from a restored active claim and renders next workflow actions", async () => {
@@ -2083,10 +2107,10 @@ function optionField(
       currentSession: session
     });
 
-    await user.click(await screen.findByRole("button", { name: "Begin review" }));
+    await user.click(await screen.findByRole("button", { name: "Start Review" }));
 
-    expect(await screen.findByText("UNDER_OGI_REVIEW")).toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: "Archive Evidence" })).toBeInTheDocument();
+    expect(await screen.findByText("Under Review")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Archive" })).toBeInTheDocument();
   });
 
   it("reconciles active claim state after duplicate claim conflict", async () => {
@@ -2123,11 +2147,11 @@ function optionField(
       currentSession: session
     });
 
-    await user.click(await screen.findByRole("button", { name: "Claim OGI review" }));
+    await user.click(await screen.findByRole("button", { name: "Assign to Me" }));
 
-    expect(await screen.findByText("OGI review is already claimed.")).toBeInTheDocument();
+    expect(await screen.findByText("OGI review is already assigned.")).toBeInTheDocument();
     expect(
-      screen.getByText("This review is already claimed. The latest review ownership state is shown.")
+      screen.getByText("This review is already assigned. The latest assignment is shown.")
     ).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Claim OGI review" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Assign to Me" })).not.toBeInTheDocument();
   });

@@ -72,7 +72,7 @@ export function OetsRenderer({
     <div className="space-y-5">
       <Surface className="space-y-2">
         <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
-          Runtime OETS Template
+          Audit Template
         </p>
         <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
           <div>
@@ -93,13 +93,13 @@ export function OetsRenderer({
         {!readOnly && onSubmit ? (
           <div className="mt-4 flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-sm text-text-muted">
-              {submitDisabledReason ?? "Submit this evidence to the backend for authoritative validation."}
+              {submitDisabledReason ?? "Create a draft audit record."}
             </div>
             <Button
               disabled={isSubmitting || Boolean(submitDisabledReason)}
               onClick={() => onSubmit(payload)}
             >
-              {isSubmitting ? "Submitting..." : "Submit evidence"}
+              {isSubmitting ? "Creating..." : "Create Audit Draft"}
             </Button>
           </div>
         ) : null}
@@ -109,15 +109,14 @@ export function OetsRenderer({
             role="status"
           >
             <p>
-              Evidence record created. Record {submitSuccess.evidenceRecordId} is{" "}
-              {submitSuccess.lifecycleState}.
+              Draft audit created successfully.
             </p>
             {submitSuccess.recordHref ? (
               <Link
                 className="inline-flex font-semibold text-primary-blue underline-offset-2 hover:underline"
                 to={submitSuccess.recordHref}
               >
-                Open record
+                Open Audit
               </Link>
             ) : null}
           </div>
@@ -251,7 +250,7 @@ export function OetsRenderer({
 
       <Surface>
         <h2 className="text-base font-semibold text-text-primary">
-          Local Evidence Payload
+          Current Audit Payload
         </h2>
         <pre className="mt-3 max-h-96 overflow-auto rounded-component bg-elevated p-3 text-xs text-text-primary">
           {JSON.stringify(payload, null, 2)}
