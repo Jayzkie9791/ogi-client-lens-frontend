@@ -1,4 +1,4 @@
-﻿import { useState } from "react";
+import { useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 
 import { routes } from "../../app/routePaths";
@@ -12,7 +12,14 @@ const navigationItems = [
     implemented: true
   },
   {
+    label: "Operations",
+    permission: "view_operational_evidence",
+    to: routes.operations,
+    implemented: true
+  },
+  {
     label: "Reviews",
+    permission: "view_operational_evidence",
     to: routes.governanceQueue,
     implemented: true
   }
@@ -57,11 +64,11 @@ export function AppShell() {
             >
               <ul className="flex flex-wrap gap-2">
                 {navigationItems.map((item) => {
-                  if (item.to === routes.governanceQueue) {
+                  if ("permission" in item) {
                     return (
                       <PermissionGate
                         key={item.label}
-                        permission="view_operational_evidence"
+                        permission={item.permission}
                       >
                         <NavigationListItem item={item} />
                       </PermissionGate>
@@ -122,6 +129,7 @@ function NavigationListItem({ item }: { item: NavigationItem }) {
             event.preventDefault();
           }
         }}
+        end={item.to === routes.workbench}
         to={item.to}
       >
         {item.label}

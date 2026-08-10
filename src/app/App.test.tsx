@@ -21,6 +21,70 @@ const session = {
   permissions: ["view_operational_evidence"]
 };
 
+const submitCapableSession = {
+  ...session,
+  permissions: ["view_operational_evidence", "submit_operational_evidence"]
+};
+
+const catalogResponse = {
+  templates: [
+    {
+      template_registry_id: "00000000-0000-4000-8000-000000000301",
+      template_version_id: "00000000-0000-4000-8000-000000000401",
+      template_code: "OGI_F001_WEEKLY_SAFETY_AUDIT_CHECKLIST",
+      template_name: "Weekly Safety Audit Checklist",
+      template_archetype: "CHECKLIST_INSPECTION",
+      module: "MODULE_A",
+      template_version: "1.0.0",
+      schema_version: "1.0",
+      checksum: "checksum-a",
+      registry_status: "ACTIVE",
+      version_status: "ACTIVE",
+      description: "Capture weekly operational safety audit evidence.",
+      business_context: {
+        enterprise_capability: "Operational Governance",
+        supporting_capabilities: ["Audit Management"],
+        operational_domain: "Safety Operations",
+        business_process: "Weekly safety audit",
+        evidence_type: "INSPECTION",
+        governance_scope: "Operational evidence",
+        description: "Business context description"
+      },
+      document_number: "OGI-F001",
+      document_revision: "Rev A",
+      registered_at: "2026-08-01T00:00:00.000Z",
+      last_synchronized_at: "2026-08-01T00:00:00.000Z"
+    },
+    {
+      template_registry_id: "00000000-0000-4000-8000-000000000302",
+      template_version_id: "00000000-0000-4000-8000-000000000402",
+      template_code: "OGI_F903_RISK_REGISTER",
+      template_name: "Risk Register",
+      template_archetype: "OPERATIONAL_REGISTER",
+      module: "MODULE_B",
+      template_version: "1.0.0",
+      schema_version: "1.0",
+      checksum: "checksum-b",
+      registry_status: "ACTIVE",
+      version_status: "ACTIVE",
+      description: null,
+      business_context: {
+        enterprise_capability: "Operational Governance",
+        supporting_capabilities: null,
+        operational_domain: "Risk Management",
+        business_process: "Risk register maintenance",
+        evidence_type: "REGISTER",
+        governance_scope: "Operational evidence",
+        description: "Maintain risk register evidence."
+      },
+      document_number: null,
+      document_revision: "Rev B",
+      registered_at: "2026-08-01T00:00:00.000Z",
+      last_synchronized_at: null
+    }
+  ]
+};
+
 interface MockResponse {
   status: number;
   body?: unknown;
@@ -145,10 +209,12 @@ describe("Client Lens authentication foundation", () => {
       screen.getByRole("link", { name: "Reviews" })
     ).toHaveAttribute("href", routes.governanceQueue);
     expect(screen.queryByRole("link", { name: "Workbench" })).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Operations" })
+    ).toHaveAttribute("href", routes.operations);
     expect(screen.queryByRole("link", { name: "Assessments" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Operational Risk" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Administration" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Operations" })).not.toBeInTheDocument();
   });
 
   it("hides permission-gated navigation when /me lacks permission", async () => {
@@ -424,6 +490,160 @@ describe("Client Lens authentication foundation", () => {
     expect(screen.queryByRole("link", { name: "Operations" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Assessments" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Operational Risk" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Administration" })).not.toBeInTheDocument();
+  });
+
+  it("opens Operations from primary navigation and loads the canonical catalog", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: submitCapableSession },
+      { status: 200, body: catalogResponse }
+    ]);
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    renderWithRoute(routes.workbench);
+
+    await user.click(await screen.findByRole("button", { name: "Menu" }));
+    await user.click(await screen.findByRole("link", { name: "Operations" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Forms & Audits" })
+    ).toBeInTheDocument();
+    expect(screen.getByText("Choose an operational form or audit to open.")).toBeInTheDocument();
+    expect(screen.getByText("Weekly Safety Audit Checklist")).toBeInTheDocument();
+    expect(screen.getByText("Capture weekly operational safety audit evidence.")).toBeInTheDocument();
+    expect(screen.getAllByText("MODULE_A").length).toBeGreaterThan(0);
+    expect(screen.getByText("OGI_F001_WEEKLY_SAFETY_AUDIT_CHECKLIST")).toBeInTheDocument();
+    expect(screen.getByText("OGI-F001 / Rev A")).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "Open Form" })[0]).toHaveAttribute(
+      "href",
+      routes.oetsTemplatePath("OGI_F001_WEEKLY_SAFETY_AUDIT_CHECKLIST")
+    );
+    expect(screen.queryByText("checksum-a")).not.toBeInTheDocument();
+    expect(screen.queryByText("00000000-0000-4000-8000-000000000301")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Records" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "My Work" })).not.toBeInTheDocument();
+    expect(calls.map(({ url }) => url)).toEqual([
+      "/api/v1/auth/refresh",
+      "/api/v1/auth/me",
+      "/api/v1/operational-evidence/templates"
+    ]);
+  });
+
+  it("renders the Operations catalog loading state", async () => {
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: session },
+      { status: 200, body: catalogResponse }
+    ]);
+    renderWithRoute(routes.operations);
+
+    expect(
+      await screen.findByText("Loading forms and audits.")
+    ).toBeInTheDocument();
+  });
+
+  it("renders the Operations catalog empty state without assignment language", async () => {
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: session },
+      { status: 200, body: { templates: [] } }
+    ]);
+    renderWithRoute(routes.operations);
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "No forms or audits are currently available."
+      })
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/assigned/i)).not.toBeInTheDocument();
+  });
+
+  it("renders the Operations catalog authorization state", async () => {
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: session },
+      {
+        status: 403,
+        body: {
+          error: {
+            code: "FORBIDDEN",
+            message: "Forbidden"
+          }
+        }
+      }
+    ]);
+    renderWithRoute(routes.operations);
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Forms and audits are not available with your current authorization."
+      })
+    ).toBeInTheDocument();
+  });
+
+  it("filters the Operations catalog by module without client or facility availability", async () => {
+    const user = userEvent.setup();
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: session },
+      { status: 200, body: catalogResponse }
+    ]);
+    renderWithRoute(routes.operations);
+
+    await screen.findByRole("heading", { name: "Forms & Audits" });
+    await user.selectOptions(screen.getByLabelText("Module"), "MODULE_B");
+
+    expect(screen.queryByText("Weekly Safety Audit Checklist")).not.toBeInTheDocument();
+    expect(screen.getByText("Risk Register")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("combobox", { name: /client/i })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("combobox", { name: /facility/i })
+    ).not.toBeInTheDocument();
+  });
+
+  it("routes view-only actors to the existing read-only runtime form", async () => {
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: session },
+      { status: 200, body: catalogResponse }
+    ]);
+    renderWithRoute(routes.operations);
+
+    const viewActions = await screen.findAllByRole("link", { name: "View Form" });
+
+    expect(viewActions[0]).toHaveAttribute(
+      "href",
+      `${routes.oetsTemplatePath("OGI_F001_WEEKLY_SAFETY_AUDIT_CHECKLIST")}?mode=readonly`
+    );
+    expect(screen.queryByRole("link", { name: "Open Form" })).not.toBeInTheDocument();
+  });
+
+  it("does not reveal Operations from role names without the required permission", async () => {
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      {
+        status: 200,
+        body: {
+          ...session,
+          permissions: [],
+          roles: ["Operations", "Administrator"]
+        }
+      }
+    ]);
+    renderWithRoute(routes.workbench);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Menu" }));
+
+    expect(screen.queryByRole("link", { name: "Operations" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Administration" })).not.toBeInTheDocument();
   });
 

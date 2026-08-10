@@ -8,6 +8,7 @@ import { AppShell } from "../ui/layout/AppShell";
 import { routes } from "./routePaths";
 import { LoginPage } from "./routes/LoginPage";
 import { NotFoundPage } from "./routes/NotFoundPage";
+import { OperationsPage } from "./routes/OperationsPage";
 import { WorkbenchPage } from "./routes/WorkbenchPage";
 
 
@@ -35,6 +36,10 @@ export const appRoutes: RouteObject[] = [
           {
             path: "workbench",
             element: <WorkbenchPage />
+          },
+          {
+            path: "workbench/operations",
+            element: <OperationsPage />
           },
           {
             path: "workbench/governance/queue",
