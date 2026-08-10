@@ -26,6 +26,28 @@ const submitCapableSession = {
   permissions: ["view_operational_evidence", "submit_operational_evidence"]
 };
 
+const administrationSession = {
+  ...session,
+  roles: ["Administration Viewer"],
+  permissions: ["view_operational_evidence", "view_users"]
+};
+
+const administrationUsersResponse = [
+  {
+    id: "00000000-0000-4000-8000-000000000901",
+    email: "marvin.alcantara@ogiofficial.com",
+    full_name: "Marvin Alcantara",
+    status: "ACTIVE",
+    created_at: "2026-08-01T00:00:00.000Z"
+  },
+  {
+    id: "00000000-0000-4000-8000-000000000902",
+    email: "braven.burrows@ogiofficial.com",
+    full_name: "Braven Burrows",
+    status: "INVITED",
+    created_at: "2026-08-02T00:00:00.000Z"
+  }
+];
 const catalogResponse = {
   templates: [
     {
@@ -333,6 +355,164 @@ describe("Client Lens authentication foundation", () => {
     expect(screen.queryByRole("link", { name: "Administration" })).not.toBeInTheDocument();
   });
 
+  it("opens Administration from primary navigation and loads authorized users", async () => {
+    const user = userEvent.setup();
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    const { calls } = mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: administrationSession },
+      { status: 200, body: administrationUsersResponse }
+    ]);
+    renderWithRoute(routes.workbench);
+
+    await user.click(await screen.findByRole("button", { name: "Menu" }));
+    await user.click(await screen.findByRole("link", { name: "Administration" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Users" })
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("Administration").length).toBeGreaterThan(0);
+    expect(
+      screen.getByText("View users available through your current administrative authority.")
+    ).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Authorized users" })).toBeInTheDocument();
+    expect(screen.getByText("Marvin Alcantara")).toBeInTheDocument();
+    expect(screen.getByText("marvin.alcantara@ogiofficial.com")).toBeInTheDocument();
+    expect(screen.getByText("ACTIVE")).toBeInTheDocument();
+    expect(screen.getByText("2026-08-01T00:00:00.000Z")).toBeInTheDocument();
+    expect(screen.getByText("00000000-0000-4000-8000-000000000901")).toBeInTheDocument();
+    expect(screen.getByText("Braven Burrows")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /create user/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /disable user/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /assign roles/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /manage permissions/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: /search/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: /client/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: /facility/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Assessments" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Operational Risk" })).not.toBeInTheDocument();
+    expect(calls.map(({ url }) => url)).toEqual([
+      "/api/v1/auth/refresh",
+      "/api/v1/auth/me",
+      "/api/v1/auth/users"
+    ]);
+  });
+
+  it("does not reveal Administration from role names without view_users", async () => {
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      {
+        status: 200,
+        body: {
+          ...session,
+          permissions: ["view_operational_evidence"],
+          roles: ["Administration", "Administrator", "User Manager"]
+        }
+      }
+    ]);
+    renderWithRoute(routes.workbench);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Menu" }));
+
+    expect(screen.queryByRole("link", { name: "Administration" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Operations" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Reviews" })).toBeInTheDocument();
+  });
+
+  it("blocks the Administration route without view_users and does not call the users endpoint", async () => {
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    const { calls } = mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      {
+        status: 200,
+        body: {
+          ...session,
+          permissions: [],
+          roles: ["Administration", "Administrator"]
+        }
+      }
+    ]);
+    renderWithRoute(routes.administration);
+
+    expect(
+      await screen.findByRole("heading", { name: "You are not authorized to view users." })
+    ).toBeInTheDocument();
+    expect(calls.map(({ url }) => url)).toEqual([
+      "/api/v1/auth/refresh",
+      "/api/v1/auth/me"
+    ]);
+  });
+
+  it("renders the Administration users loading state", async () => {
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: administrationSession },
+      { status: 200, body: administrationUsersResponse }
+    ]);
+    renderWithRoute(routes.administration);
+
+    expect(await screen.findByText("Loading users.")).toBeInTheDocument();
+  });
+
+  it("renders the Administration users empty state", async () => {
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: administrationSession },
+      { status: 200, body: [] }
+    ]);
+    renderWithRoute(routes.administration);
+
+    expect(
+      await screen.findByRole("heading", { name: "No users were returned." })
+    ).toBeInTheDocument();
+  });
+
+  it("renders the Administration users authorization failure state", async () => {
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: administrationSession },
+      {
+        status: 403,
+        body: {
+          error: {
+            code: "FORBIDDEN",
+            message: "Forbidden"
+          }
+        }
+      }
+    ]);
+    renderWithRoute(routes.administration);
+
+    expect(
+      await screen.findByRole("heading", { name: "You are not authorized to view users." })
+    ).toBeInTheDocument();
+  });
+
+  it("renders the Administration users generic failure state", async () => {
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: administrationSession },
+      {
+        status: 500,
+        body: {
+          error: {
+            code: "INTERNAL_SERVER_ERROR",
+            message: "Internal Server Error"
+          }
+        }
+      }
+    ]);
+    renderWithRoute(routes.administration);
+
+    expect(
+      await screen.findByRole("heading", { name: "Users could not be loaded." })
+    ).toBeInTheDocument();
+  });
   it("hides permission-gated navigation when /me lacks permission", async () => {
     window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
     mockFetchQueue([

@@ -1,9 +1,10 @@
-﻿export const routes = {
+export const routes = {
   home: "/",
   login: "/login",
   workbench: "/workbench",
   operations: "/workbench/operations",
   records: "/workbench/operations/records",
+  administration: "/workbench/administration",
   governanceQueue: "/workbench/governance/queue",
   oetsTemplate: "/workbench/oets/:templateCode",
   oetsTemplatePath: (templateCode: string) =>

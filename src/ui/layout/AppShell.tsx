@@ -22,6 +22,12 @@ const navigationItems = [
     permission: "view_operational_evidence",
     to: routes.governanceQueue,
     implemented: true
+  },
+  {
+    label: "Administration",
+    permission: "view_users",
+    to: routes.administration,
+    implemented: true
   }
 ] as const;
 
