@@ -85,6 +85,53 @@ const catalogResponse = {
   ]
 };
 
+
+const recordsResponse = {
+  records: [
+    {
+      evidence_record_id: "00000000-0000-4000-8000-000000000501",
+      template_registry_id: "00000000-0000-4000-8000-000000000301",
+      template_version_id: "00000000-0000-4000-8000-000000000401",
+      template_code: "OGI_F001_WEEKLY_SAFETY_AUDIT_CHECKLIST",
+      template_version: "1.0.0",
+      schema_version: "1.0",
+      client_id: "00000000-0000-4000-8000-000000000101",
+      facility_id: "00000000-0000-4000-8000-000000000201",
+      lifecycle_state: "SUBMITTED",
+      payload_checksum: "payload-checksum-1",
+      created_by_user_id: "00000000-0000-4000-8000-000000000901",
+      submitted_by_user_id: "00000000-0000-4000-8000-000000000902",
+      created_at: "2026-08-01T00:00:00.000Z",
+      submitted_at: "2026-08-02T00:00:00.000Z",
+      updated_at: "2026-08-03T00:00:00.000Z"
+    }
+  ],
+  pagination: {
+    limit: 25,
+    offset: 0,
+    count: 1,
+    total_count: 40
+  }
+};
+
+const secondRecordsPageResponse = {
+  records: [
+    {
+      ...recordsResponse.records[0],
+      evidence_record_id: "00000000-0000-4000-8000-000000000502",
+      template_code: "OGI_F903_RISK_REGISTER",
+      lifecycle_state: "INTAKE_APPROVED",
+      submitted_at: "2026-08-04T00:00:00.000Z"
+    }
+  ],
+  pagination: {
+    limit: 25,
+    offset: 25,
+    count: 1,
+    total_count: 26
+  }
+};
+
 interface MockResponse {
   status: number;
   body?: unknown;
@@ -521,7 +568,10 @@ describe("Client Lens authentication foundation", () => {
     );
     expect(screen.queryByText("checksum-a")).not.toBeInTheDocument();
     expect(screen.queryByText("00000000-0000-4000-8000-000000000301")).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Records" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Records" })).toHaveAttribute(
+      "href",
+      routes.records
+    );
     expect(screen.queryByRole("link", { name: "My Work" })).not.toBeInTheDocument();
     expect(calls.map(({ url }) => url)).toEqual([
       "/api/v1/auth/refresh",
@@ -645,6 +695,163 @@ describe("Client Lens authentication foundation", () => {
 
     expect(screen.queryByRole("link", { name: "Operations" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Administration" })).not.toBeInTheDocument();
+  });
+
+  it("opens Records from Operations child navigation and calls the neutral records endpoint", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: session },
+      { status: 200, body: catalogResponse },
+      { status: 200, body: recordsResponse }
+    ]);
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    renderWithRoute(routes.operations);
+
+    await user.click(await screen.findByRole("link", { name: "Records" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Records" })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Browse Operational Evidence records you are authorized to view.")
+    ).toBeInTheDocument();
+    expect(screen.getByText("OGI_F001_WEEKLY_SAFETY_AUDIT_CHECKLIST")).toBeInTheDocument();
+    expect(screen.getByText("Awaiting Review")).toBeInTheDocument();
+    expect(screen.getByText("Record 00000000-0000-4000-8000-000000000501")).toBeInTheDocument();
+    expect(screen.getByText("00000000-0000-4000-8000-000000000101")).toBeInTheDocument();
+    expect(screen.getByText("00000000-0000-4000-8000-000000000201")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View Record" })).toHaveAttribute(
+      "href",
+      routes.evidenceRecordPath("00000000-0000-4000-8000-000000000501")
+    );
+    expect(screen.queryByText("payload-checksum-1")).not.toBeInTheDocument();
+    expect(screen.queryByText("Claim Review")).not.toBeInTheDocument();
+    expect(screen.queryByText("Review Conclusion")).not.toBeInTheDocument();
+    expect(screen.queryByText(/assigned/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
+    expect(calls.map(({ url }) => url)).toEqual([
+      "/api/v1/auth/refresh",
+      "/api/v1/auth/me",
+      "/api/v1/operational-evidence/templates",
+      "/api/v1/operational-evidence/records?limit=25&offset=0"
+    ]);
+  });
+
+  it("hides Records navigation without view_operational_evidence even when roles sound privileged", async () => {
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      {
+        status: 200,
+        body: {
+          ...session,
+          permissions: [],
+          roles: ["Records", "Operations", "Administrator"]
+        }
+      }
+    ]);
+    renderWithRoute(routes.workbench);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Menu" }));
+
+    expect(screen.queryByRole("link", { name: "Operations" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Records" })).not.toBeInTheDocument();
+  });
+
+  it("serializes Records filters to the canonical query parameters", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: session },
+      { status: 200, body: recordsResponse },
+      { status: 200, body: recordsResponse }
+    ]);
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    renderWithRoute(routes.records);
+
+    await screen.findByRole("heading", { name: "Records" });
+    await user.type(screen.getByLabelText("Lifecycle state"), "SUBMITTED");
+    await user.type(
+      screen.getByLabelText("Template code"),
+      "OGI_F001_WEEKLY_SAFETY_AUDIT_CHECKLIST"
+    );
+    await user.type(screen.getByLabelText("Submitted from"), "2026-08-01T08:30");
+    await user.type(screen.getByLabelText("Submitted to"), "2026-08-05T17:45");
+    await user.click(screen.getByRole("button", { name: "Apply filters" }));
+
+    expect(
+      await screen.findByRole("link", { name: "View Record" })
+    ).toBeInTheDocument();
+    expect(calls.map(({ url }) => url)).toContain(
+      "/api/v1/operational-evidence/records?lifecycle_state=SUBMITTED&template_code=OGI_F001_WEEKLY_SAFETY_AUDIT_CHECKLIST&submitted_from=2026-08-01T08%3A30%3A00.000Z&submitted_to=2026-08-05T17%3A45%3A00.000Z&limit=25&offset=0"
+    );
+  });
+
+  it("renders Records loading, empty, and authorization states", async () => {
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: session },
+      { status: 200, body: { records: [], pagination: { limit: 25, offset: 0, count: 0, total_count: 0 } } }
+    ]);
+    renderWithRoute(routes.records);
+
+    expect(await screen.findByText("Loading records.")).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "No records are currently available." })
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/assigned/i)).not.toBeInTheDocument();
+
+    vi.unstubAllGlobals();
+    window.sessionStorage.clear();
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: session },
+      { status: 403, body: { error: { code: "FORBIDDEN", message: "Forbidden" } } }
+    ]);
+    renderWithRoute(routes.records);
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Records are not available with your current authorization."
+      })
+    ).toBeInTheDocument();
+  });
+
+  it("paginates Records with backend limit, offset, and total count", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: session },
+      { status: 200, body: recordsResponse },
+      { status: 200, body: secondRecordsPageResponse }
+    ]);
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    renderWithRoute(routes.records);
+
+    expect(await screen.findByText("Showing 1-1 of 40")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Previous" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Next" })).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: "Next" }));
+
+    expect(await screen.findByText("Showing 26-26 of 26")).toBeInTheDocument();
+    expect(screen.getByText("Audit Approved")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Previous" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "Previous" }));
+
+    expect(await screen.findByText("Showing 1-1 of 40")).toBeInTheDocument();
+    expect(calls.map(({ url }) => url)).toEqual([
+      "/api/v1/auth/refresh",
+      "/api/v1/auth/me",
+      "/api/v1/operational-evidence/records?limit=25&offset=0",
+      "/api/v1/operational-evidence/records?limit=25&offset=25"
+    ]);
   });
 
   it("renders a safe not-found experience for unknown authenticated routes", async () => {

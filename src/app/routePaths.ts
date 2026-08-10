@@ -3,6 +3,7 @@
   login: "/login",
   workbench: "/workbench",
   operations: "/workbench/operations",
+  records: "/workbench/operations/records",
   governanceQueue: "/workbench/governance/queue",
   oetsTemplate: "/workbench/oets/:templateCode",
   oetsTemplatePath: (templateCode: string) =>

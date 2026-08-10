@@ -9,6 +9,7 @@ import { routes } from "./routePaths";
 import { LoginPage } from "./routes/LoginPage";
 import { NotFoundPage } from "./routes/NotFoundPage";
 import { OperationsPage } from "./routes/OperationsPage";
+import { RecordsPage } from "./routes/RecordsPage";
 import { WorkbenchPage } from "./routes/WorkbenchPage";
 
 
@@ -40,6 +41,10 @@ export const appRoutes: RouteObject[] = [
           {
             path: "workbench/operations",
             element: <OperationsPage />
+          },
+          {
+            path: "workbench/operations/records",
+            element: <RecordsPage />
           },
           {
             path: "workbench/governance/queue",
