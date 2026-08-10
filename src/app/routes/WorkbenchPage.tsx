@@ -9,17 +9,17 @@ export function WorkbenchPage() {
     <section aria-labelledby="workbench-heading" className="space-y-4">
       <div>
         <p className="text-xs font-semibold uppercase tracking-wide text-primary-blue">
-          Audit Review
+          Client Lens
         </p>
         <h1
           id="workbench-heading"
           className="mt-2 text-2xl font-semibold text-text-primary"
         >
-          Audit Review Workbench
+          Client Lens Overview
         </h1>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-text-muted">
-          Client Lens is ready for authenticated audit submission and review
-          assignment workflows.
+          Client Lens is ready for authenticated operational evidence and
+          review workflows.
         </p>
       </div>
 
@@ -29,11 +29,12 @@ export function WorkbenchPage() {
         </h2>
         <p className="mt-2 text-sm leading-6 text-text-muted">
           Routing, provider composition, design tokens, responsive shell, and
-          frontend test infrastructure are active for the audit review slice.
+          frontend test infrastructure are active for the current Client Lens
+          workflow slice.
         </p>
         <div className="mt-4">
           <Button asChild variant="secondary">
-            <Link to={routes.governanceQueue}>Open review queue</Link>
+            <Link to={routes.governanceQueue}>Open reviews</Link>
           </Button>
         </div>
       </Surface>

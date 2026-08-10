@@ -375,41 +375,32 @@ export function OperationalEvidenceRecordPage() {
 
   return (
     <div className="space-y-4">
-      <Surface className="space-y-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
-              Audit Record
-            </p>
-            <h1 className="mt-1 break-all text-2xl font-semibold text-text-primary">
-              {record.id}
-            </h1>
-          </div>
-          <span className="inline-flex w-fit rounded-component border border-border px-3 py-1 text-xs font-semibold uppercase text-text-muted">
-            {displayLifecycleStatus(record.lifecycle_state)}
-          </span>
+      <RecordIdentityPanel record={record} />
+
+      <section aria-labelledby="submitted-evidence-heading" className="space-y-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-primary-blue">
+            Record Truth
+          </p>
+          <h2
+            className="mt-1 text-xl font-semibold text-text-primary"
+            id="submitted-evidence-heading"
+          >
+            Submitted Evidence
+          </h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-text-muted">
+            This read-only view presents the evidence payload submitted for this
+            Operational Evidence record.
+          </p>
         </div>
-        <MetadataGrid
-          entries={[
-            ["Template code", record.template_provenance.template_code],
-            ["Template version", record.template_provenance.template_version],
-            [
-              "Template version ID",
-              record.template_provenance.template_version_id
-            ],
-            ["Schema version", record.template_provenance.schema_version],
-            ["Client ID", record.client_id],
-            ["Facility ID", record.facility_id ?? "No facility context"],
-            ["Payload checksum", record.payload_checksum],
-            ["Template checksum", record.template_provenance.checksum],
-            ["Created by", record.created_by_user_id],
-            ["Submitted by", record.submitted_by_user_id],
-            ["Created at", record.created_at],
-            ["Submitted at", record.submitted_at],
-            ["Updated at", record.updated_at]
-          ]}
+
+        <OetsRenderer
+          definition={narrowing.definition}
+          initialPayload={record.payload}
+          readOnly
+          runtimeTemplate={templateQuery.data}
         />
-      </Surface>
+      </section>
 
       <WorkflowActions
         error={transitionMutation.error}
@@ -473,13 +464,86 @@ export function OperationalEvidenceRecordPage() {
         </Surface>
       ) : null}
 
-      <OetsRenderer
-        definition={narrowing.definition}
-        initialPayload={record.payload}
-        readOnly
-        runtimeTemplate={templateQuery.data}
-      />
+      <RecordProvenanceDisclosure record={record} />
     </div>
+  );
+}
+
+function RecordIdentityPanel({
+  record
+}: {
+  record: Awaited<ReturnType<typeof getOperationalEvidenceRecord>>;
+}) {
+  return (
+    <Surface className="space-y-4">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+            Record Detail
+          </p>
+          <h1 className="mt-1 break-words text-2xl font-semibold text-text-primary">
+            {record.template_provenance.template_code}
+          </h1>
+          <p className="mt-2 break-all text-sm text-text-muted">
+            Record {record.id}
+          </p>
+        </div>
+        <div className="rounded-component border border-border bg-canvas px-4 py-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+            Current State
+          </p>
+          <p className="mt-1 text-lg font-semibold text-text-primary">
+            {displayLifecycleStatus(record.lifecycle_state)}
+          </p>
+        </div>
+      </div>
+      <MetadataGrid
+        entries={[
+          ["Client ID", record.client_id],
+          ["Facility ID", record.facility_id ?? "No facility context"],
+          ["Submitted at", record.submitted_at],
+          ["Template version", record.template_provenance.template_version]
+        ]}
+      />
+    </Surface>
+  );
+}
+
+function RecordProvenanceDisclosure({
+  record
+}: {
+  record: Awaited<ReturnType<typeof getOperationalEvidenceRecord>>;
+}) {
+  return (
+    <Surface>
+      <details className="group">
+        <summary className="cursor-pointer text-base font-semibold text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-canvas">
+          Provenance
+        </summary>
+        <p className="mt-2 text-sm leading-6 text-text-muted">
+          Technical identifiers and integrity values for the submitted record.
+        </p>
+        <div className="mt-4">
+          <MetadataGrid
+            entries={[
+              ["Evidence record ID", record.id],
+              ["Template registry ID", record.template_provenance.template_registry_id],
+              ["Template version ID", record.template_provenance.template_version_id],
+              ["Template code", record.template_provenance.template_code],
+              ["Template version", record.template_provenance.template_version],
+              ["Schema version", record.template_provenance.schema_version],
+              ["Payload checksum", record.payload_checksum],
+              ["Template checksum", record.template_provenance.checksum],
+              ["Created by", record.created_by_user_id],
+              ["Submitted by", record.submitted_by_user_id],
+              ["Created at", record.created_at],
+              ["Submitted at", record.submitted_at],
+              ["Updated at", record.updated_at]
+            ]}
+          />
+        </div>
+      </details>
+    </Surface>
   );
 }
 
@@ -588,10 +652,10 @@ function WorkflowActions({
     <Surface className="space-y-3">
       <div>
         <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
-          Review
+          Authorized Action
         </p>
         <h2 className="mt-1 text-base font-semibold text-text-primary">
-          Available Actions
+          Available Workflow Actions
         </h2>
       </div>
       {transitions.length > 0 ? (
@@ -677,14 +741,22 @@ function GovernanceReviewActions({
   }
 
   return (
-    <Surface className="space-y-3">
+    <section aria-labelledby="governance-review-heading">
+      <Surface className="space-y-4">
       <div>
-        <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
-          Review Assignment
+        <p className="text-xs font-semibold uppercase tracking-wide text-primary-blue">
+          Governance Action
         </p>
-        <h2 className="mt-1 text-base font-semibold text-text-primary">
-          Assigned Review Actions
+        <h2
+          className="mt-1 text-xl font-semibold text-text-primary"
+          id="governance-review-heading"
+        >
+          Governance Review
         </h2>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-text-muted">
+          Review ownership and conclusion submission are governed actions for
+          this submitted evidence record.
+        </p>
       </div>
 
       {isLoadingClaimState ? (
@@ -697,8 +769,14 @@ function GovernanceReviewActions({
           Review assignment could not be loaded.
         </div>
       ) : (
-        <div className="flex flex-wrap gap-3">
+        <div className="space-y-4">
           {actionStates.map(({ transition, activeClaim }) => {
+            const actionKey = transitionKey(transition);
+            const authorityLabel = displayReviewAuthority(
+              transition.governanceAuthorityCode
+            );
+            const claimState = reviewClaimStateLabel(activeClaim, currentUserId);
+
             if (activeClaim) {
               const isOwnedByCurrentUser =
                 currentUserId !== null &&
@@ -706,36 +784,64 @@ function GovernanceReviewActions({
 
               if (!isOwnedByCurrentUser) {
                 return (
-                  <p
-                    className="rounded-component border border-border bg-canvas px-3 py-2 text-sm text-text-muted"
-                    key={transitionKey(transition)}
-                  >
-                    {displayReviewAuthority(transition.governanceAuthorityCode)} review is already assigned.
-                  </p>
+                  <div className="space-y-3" key={actionKey}>
+                    <ReviewContextGrid
+                      authorityLabel={authorityLabel}
+                      claimState={claimState}
+                      lifecycleLabel={displayLifecycleStatus(transition.from)}
+                    />
+                    <p className="rounded-component border border-border bg-canvas px-3 py-2 text-sm text-text-muted">
+                      {authorityLabel} review is already claimed by another reviewer.
+                    </p>
+                  </div>
                 );
               }
 
-              const key = transitionKey(transition);
-              const rationale = rationaleByTransitionKey[key] ?? "";
+              const rationale = rationaleByTransitionKey[actionKey] ?? "";
+              const rationaleId = `${actionKey}:rationale`;
+              const rationaleHintId = `${actionKey}:rationale-hint`;
 
               return (
-                <div className="w-full space-y-3" key={key}>
+                <div className="space-y-4" key={actionKey}>
+                  <ReviewContextGrid
+                    authorityLabel={authorityLabel}
+                    claimState={claimState}
+                    lifecycleLabel={displayLifecycleStatus(transition.from)}
+                  />
                   {currentConclusion ? (
                     <p className="rounded-component border border-border bg-canvas px-3 py-2 text-sm text-text-muted">
                       The current Review Conclusion is shown below.
                     </p>
                   ) : null}
-                  <label className="block text-sm font-semibold text-text-primary">
-                    Review Conclusion Rationale
+                  <div className="rounded-component border border-border bg-canvas p-4">
+                    <label
+                      className="block text-sm font-semibold text-text-primary"
+                      htmlFor={rationaleId}
+                    >
+                      Review Conclusion Rationale
+                    </label>
+                    <p
+                      className="mt-1 text-sm leading-6 text-text-muted"
+                      id={rationaleHintId}
+                    >
+                      Provide the governed rationale that will be submitted with
+                      the Review Conclusion. Reviewer identity and target state
+                      are resolved by the backend.
+                    </p>
                     <textarea
-                      className="mt-2 min-h-28 w-full rounded-component border border-border bg-canvas px-3 py-2 text-sm text-text-primary outline-none focus:border-focus focus:ring-2 focus:ring-focus"
+                      aria-describedby={rationaleHintId}
+                      className="mt-3 min-h-32 w-full rounded-component border border-border bg-surface px-3 py-2 text-sm text-text-primary outline-none focus:border-focus focus:ring-2 focus:ring-focus"
+                      id={rationaleId}
                       onChange={(event) =>
                         onRationaleChange(transition, event.currentTarget.value)
                       }
                       value={rationale}
                     />
-                  </label>
-                  <div className="flex flex-wrap gap-3">
+                    <p className="mt-2 text-xs text-text-muted">
+                      A rationale is required before submitting the Review Conclusion.
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                     {canSubmitConclusion ? (
                       <Button
                         disabled={
@@ -762,7 +868,7 @@ function GovernanceReviewActions({
                       onClick={() => onRelease(activeClaim)}
                       variant="secondary"
                     >
-                      {releasePending ? "Returning..." : "Return to Queue"}
+                      {releasePending ? "Releasing Claim..." : "Release Claim"}
                     </Button>
                   </div>
                 </div>
@@ -770,16 +876,22 @@ function GovernanceReviewActions({
             }
 
             return (
-              <Button
-                disabled={claimPending}
-                key={transitionKey(transition)}
-                onClick={() => onClaim(transition)}
-                variant="secondary"
-              >
-                {claimPending
-                  ? "Assigning..."
-                  : "Assign to Me"}
-              </Button>
+              <div className="space-y-3" key={actionKey}>
+                <ReviewContextGrid
+                  authorityLabel={authorityLabel}
+                  claimState={claimState}
+                  lifecycleLabel={displayLifecycleStatus(transition.from)}
+                />
+                <div className="flex flex-wrap gap-3">
+                  <Button
+                    disabled={claimPending}
+                    onClick={() => onClaim(transition)}
+                    variant="secondary"
+                  >
+                    {claimPending ? "Claiming Review..." : "Claim Review"}
+                  </Button>
+                </div>
+              </div>
             );
           })}
         </div>
@@ -793,8 +905,51 @@ function GovernanceReviewActions({
           {governanceErrorMessage}
         </div>
       ) : null}
-    </Surface>
+      </Surface>
+    </section>
   );
+}
+
+function ReviewContextGrid({
+  authorityLabel,
+  claimState,
+  lifecycleLabel
+}: {
+  authorityLabel: string;
+  claimState: string;
+  lifecycleLabel: string;
+}) {
+  return (
+    <dl className="grid gap-3 sm:grid-cols-3">
+      <ReviewContextItem label="Review authority" value={authorityLabel} />
+      <ReviewContextItem label="Claim state" value={claimState} />
+      <ReviewContextItem label="Lifecycle context" value={lifecycleLabel} />
+    </dl>
+  );
+}
+
+function ReviewContextItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-component border border-border bg-canvas p-3">
+      <dt className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+        {label}
+      </dt>
+      <dd className="mt-1 text-sm font-semibold text-text-primary">{value}</dd>
+    </div>
+  );
+}
+
+function reviewClaimStateLabel(
+  claim: GovernanceReviewClaim | null,
+  currentUserId: string | null
+) {
+  if (!claim) {
+    return "Available";
+  }
+
+  return currentUserId !== null && claim.claimed_by_user_id === currentUserId
+    ? "Claimed by you"
+    : "Claimed by another reviewer";
 }
 
 function ReviewConclusionPanel({
@@ -829,14 +984,22 @@ function ReviewConclusionPanel({
   const error = currentError ?? historyError ?? selectedError;
 
   return (
-    <Surface className="space-y-4">
+    <section aria-labelledby="review-conclusions-heading">
+      <Surface className="space-y-4">
       <div>
-        <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
-          Review Conclusions
+        <p className="text-xs font-semibold uppercase tracking-wide text-primary-blue">
+          Governed History
         </p>
-        <h2 className="mt-1 text-base font-semibold text-text-primary">
-          {displayReviewAuthority(context.governanceAuthorityCode)} Review Conclusion History
+        <h2
+          className="mt-1 text-xl font-semibold text-text-primary"
+          id="review-conclusions-heading"
+        >
+          Review Conclusions
         </h2>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-text-muted">
+          Current and historical Review Conclusions are backend-derived,
+          read-only governed information for the {displayReviewAuthority(context.governanceAuthorityCode)} review.
+        </p>
       </div>
 
       {isLoadingCurrent || isLoadingHistory ? (
@@ -850,9 +1013,14 @@ function ReviewConclusionPanel({
         </div>
       ) : (
         <div className="space-y-4">
-          <div className="rounded-component border border-border bg-canvas p-3">
+          <section
+            aria-labelledby="current-review-conclusion-heading"
+            className="rounded-component border border-border bg-canvas p-4"
+          >
             <h3 className="text-sm font-semibold text-text-primary">
+              <span id="current-review-conclusion-heading">
               Current Review Conclusion
+              </span>
             </h3>
             {currentConclusion ? (
               <ReviewConclusionDetails conclusion={currentConclusion} />
@@ -861,17 +1029,23 @@ function ReviewConclusionPanel({
                 No current Review Conclusion has been recorded for this review context.
               </p>
             )}
-          </div>
+          </section>
 
-          <div className="space-y-2">
-            <h3 className="text-sm font-semibold text-text-primary">
-              Append-only History
+          <section
+            aria-labelledby="conclusion-history-heading"
+            className="space-y-2"
+          >
+            <h3
+              className="text-sm font-semibold text-text-primary"
+              id="conclusion-history-heading"
+            >
+              Conclusion History
             </h3>
             {history.length > 0 ? (
-              <ul className="space-y-2">
+              <ul aria-label="Conclusion History" className="space-y-2">
                 {history.map((conclusion) => (
                   <li
-                    className="rounded-component border border-border bg-canvas p-3"
+                    className="rounded-component border border-border bg-canvas p-4"
                     key={conclusion.id}
                   >
                     <ReviewConclusionDetails conclusion={conclusion} />
@@ -890,10 +1064,10 @@ function ReviewConclusionPanel({
                 No historical Review Conclusions have been recorded for this review context.
               </p>
             )}
-          </div>
+          </section>
 
           {selectedId ? (
-            <div className="rounded-component border border-border bg-canvas p-3">
+            <section className="rounded-component border border-border bg-canvas p-4">
               <h3 className="text-sm font-semibold text-text-primary">
                 Selected Review Conclusion
               </h3>
@@ -904,11 +1078,12 @@ function ReviewConclusionPanel({
                   Loading selected Review Conclusion.
                 </p>
               )}
-            </div>
+            </section>
           ) : null}
         </div>
       )}
-    </Surface>
+      </Surface>
+    </section>
   );
 }
 

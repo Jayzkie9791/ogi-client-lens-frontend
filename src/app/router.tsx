@@ -1,4 +1,4 @@
-﻿import { createBrowserRouter, Navigate, RouteObject } from "react-router-dom";
+import { createBrowserRouter, Navigate, RouteObject } from "react-router-dom";
 
 import { PublicOnlyRoute, RequireAuth } from "../auth/AuthGuards";
 import { GovernanceQueuePage } from "../oets/GovernanceQueuePage";
@@ -6,8 +6,11 @@ import { OperationalEvidenceRecordPage } from "../oets/OperationalEvidenceRecord
 import { RuntimeTemplatePage } from "../oets/RuntimeTemplatePage";
 import { AppShell } from "../ui/layout/AppShell";
 import { routes } from "./routePaths";
+import { AdministrationPage } from "./routes/AdministrationPage";
 import { LoginPage } from "./routes/LoginPage";
 import { NotFoundPage } from "./routes/NotFoundPage";
+import { OperationsPage } from "./routes/OperationsPage";
+import { RecordsPage } from "./routes/RecordsPage";
 import { WorkbenchPage } from "./routes/WorkbenchPage";
 
 
@@ -35,6 +38,18 @@ export const appRoutes: RouteObject[] = [
           {
             path: "workbench",
             element: <WorkbenchPage />
+          },
+          {
+            path: "workbench/operations",
+            element: <OperationsPage />
+          },
+          {
+            path: "workbench/operations/records",
+            element: <RecordsPage />
+          },
+          {
+            path: "workbench/administration",
+            element: <AdministrationPage />
           },
           {
             path: "workbench/governance/queue",
