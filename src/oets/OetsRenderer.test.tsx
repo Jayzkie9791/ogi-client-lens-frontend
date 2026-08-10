@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { act } from "react";
 import {
@@ -514,7 +514,7 @@ describe("Generic OETS renderer", () => {
     await user.click(screen.getByRole("button", { name: "Submit Audit" }));
 
     await waitFor(() =>
-      expect(screen.getByText("Awaiting Review")).toBeInTheDocument()
+      expect(screen.getAllByText("Awaiting Review").length).toBeGreaterThan(0)
     );
     expect(
       screen.queryByRole("button", { name: "Create Audit Draft" })
@@ -574,7 +574,7 @@ describe("Generic OETS renderer", () => {
     });
 
     await user.click(
-      await screen.findByRole("button", { name: "Assign to Me" })
+      await screen.findByRole("button", { name: "Claim Review" })
     );
     expect(
       await screen.findByLabelText("Review Conclusion Rationale")
@@ -625,7 +625,6 @@ describe("Generic OETS renderer", () => {
       call.url.endsWith("/records/evidence-record-1/transitions")
     )).toBe(false);
   });
-
   it("posts the Review Conclusion transition command without client-owned identity or target state", async () => {
     const conclusion = reviewConclusion();
     const reviewRecord = evidenceRecord({ lifecycle_state: "UNDER_OGI_REVIEW" });
@@ -677,7 +676,6 @@ describe("Generic OETS renderer", () => {
     expect(requestBody.recommendation).toBeUndefined();
     expect(requestBody.ori_value).toBeUndefined();
   });
-
   it("reads Review Conclusion history, current, and individual details through dedicated endpoints", async () => {
     const user = userEvent.setup();
     const queryClient = createTestQueryClient();
@@ -821,7 +819,7 @@ describe("Generic OETS renderer", () => {
       );
 
       expect(await screen.findByRole("alert")).toHaveTextContent(message);
-      expect(screen.getByText("Awaiting Review")).toBeInTheDocument();
+      expect(screen.getAllByText("Awaiting Review").length).toBeGreaterThan(0);
     }
   );
 
@@ -904,9 +902,8 @@ describe("Generic OETS renderer", () => {
         name: "Send to Risk Assessment"
       })
     ).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Assign to Me" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Claim Review" })).not.toBeInTheDocument();
   });
-
   it("shows risk assessment approval language only after the routing transition state", async () => {
     const queryClient = createTestQueryClient();
     mockFetchQueue([
@@ -2269,7 +2266,7 @@ function optionField(
     });
 
     expect(
-      await screen.findByRole("button", { name: "Assign to Me" })
+      await screen.findByRole("button", { name: "Claim Review" })
     ).toBeInTheDocument();
     expect(screen.queryByLabelText("Review Conclusion Rationale")).not.toBeInTheDocument();
   });
@@ -2302,8 +2299,78 @@ function optionField(
     expect(
       screen.getByRole("button", { name: "Submit Review Conclusion" })
     ).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Return to Queue" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Assign to Me" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Release Claim" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Claim Review" })).not.toBeInTheDocument();
+  });
+
+  it("presents the embedded Governance Review workspace after submitted evidence without exposing client-owned authority", async () => {
+    const queryClient = createTestQueryClient();
+    const submittedRecord = evidenceRecord({ lifecycle_state: "SUBMITTED" });
+    const activeClaim = governanceClaim();
+    mockFetchQueue([
+      { status: 200, body: submittedRecord },
+      {
+        status: 200,
+        body: { ...runtimeTemplate, definition_jsonb: ogiReviewWorkflowDefinition }
+      },
+      {
+        status: 200,
+        body: [governanceQueueItem({ activeClaim, record: submittedRecord })]
+      }
+    ]);
+
+    renderOperationalEvidenceRecordPageWithSession({
+      initialPath: "/workbench/evidence/evidence-record-1",
+      queryClient,
+      currentSession: session
+    });
+
+    await screen.findByText("Claimed by you");
+
+    const submittedEvidenceHeading = await screen.findByRole("heading", {
+      name: "Submitted Evidence"
+    });
+    const governanceReviewSection = screen
+      .getByRole("heading", { name: "Governance Review" })
+      .closest("section");
+    const reviewConclusionsHeading = screen.getByRole("heading", {
+      name: "Review Conclusions"
+    });
+
+    expect(governanceReviewSection).not.toBeNull();
+    expect(
+      submittedEvidenceHeading.compareDocumentPosition(
+        screen.getByRole("heading", { name: "Governance Review" })
+      ) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(
+      screen
+        .getByRole("heading", { name: "Governance Review" })
+        .compareDocumentPosition(reviewConclusionsHeading) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(
+      reviewConclusionsHeading.compareDocumentPosition(screen.getByText("Provenance")) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+
+    expect(within(governanceReviewSection as HTMLElement).getByText("Review authority")).toBeInTheDocument();
+    expect(within(governanceReviewSection as HTMLElement).getByText("OGI")).toBeInTheDocument();
+    expect(within(governanceReviewSection as HTMLElement).getByText("Claimed by you")).toBeInTheDocument();
+    expect(within(governanceReviewSection as HTMLElement).getByText("Lifecycle context")).toBeInTheDocument();
+    expect(within(governanceReviewSection as HTMLElement).getByText("Awaiting Review")).toBeInTheDocument();
+    expect(within(governanceReviewSection as HTMLElement).getByLabelText("Review Conclusion Rationale")).toBeInTheDocument();
+    expect(within(governanceReviewSection as HTMLElement).getByRole("button", { name: "Submit Review Conclusion" })).toBeDisabled();
+    expect(within(governanceReviewSection as HTMLElement).getByRole("button", { name: "Release Claim" })).toBeInTheDocument();
+    expect(screen.queryByLabelText(/reviewer/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/target/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("UNDER_OGI_REVIEW")).not.toBeInTheDocument();
+    expect(screen.queryByText("begin_ogi_review")).not.toBeInTheDocument();
+    expect(screen.queryByText("Assessment")).not.toBeInTheDocument();
+    expect(screen.queryByText("Operational Risk")).not.toBeInTheDocument();
+    expect(screen.queryByText("My Work")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /edit/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /delete/i })).not.toBeInTheDocument();
   });
 
   it("shows non-actionable claimed state when another reviewer owns the active claim", async () => {
@@ -2328,10 +2395,10 @@ function optionField(
       currentSession: session
     });
 
-    expect(await screen.findByText("OGI review is already assigned.")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Assign to Me" })).not.toBeInTheDocument();
+    expect(await screen.findByText("OGI review is already claimed by another reviewer.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Claim Review" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Start Review" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Return to Queue" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Release Claim" })).not.toBeInTheDocument();
   });
 
   it("releases a restored active governance claim and returns to claimable state", async () => {
@@ -2361,10 +2428,10 @@ function optionField(
       currentSession: session
     });
 
-    await user.click(await screen.findByRole("button", { name: "Return to Queue" }));
+    await user.click(await screen.findByRole("button", { name: "Release Claim" }));
 
     expect(
-      await screen.findByRole("button", { name: "Assign to Me" })
+      await screen.findByRole("button", { name: "Claim Review" })
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Start Review" })).not.toBeInTheDocument();
   });
@@ -2453,11 +2520,11 @@ function optionField(
       currentSession: session
     });
 
-    await user.click(await screen.findByRole("button", { name: "Assign to Me" }));
+    await user.click(await screen.findByRole("button", { name: "Claim Review" }));
 
-    expect(await screen.findByText("OGI review is already assigned.")).toBeInTheDocument();
+    expect(await screen.findByText("OGI review is already claimed by another reviewer.")).toBeInTheDocument();
     expect(
       screen.getByText("This review is already assigned. The latest assignment is shown.")
     ).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Assign to Me" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Claim Review" })).not.toBeInTheDocument();
   });
