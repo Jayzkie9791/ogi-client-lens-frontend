@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-
+import { useState } from "react";
 import { useParams } from "react-router-dom";
 
 import { isApiError } from "../api/errors";
@@ -23,9 +23,18 @@ import {
   GovernanceQueueItem,
   GovernanceReviewClaim,
   listGovernanceQueue,
-  releaseGovernanceReviewClaim,
-  transitionClaimedGovernanceReview
+  releaseGovernanceReviewClaim
 } from "./governanceApi";
+import {
+  CurrentReviewConclusionResponse,
+  getCurrentReviewConclusion,
+  getReviewConclusion,
+  listReviewConclusionHistory,
+  ReviewConclusion,
+  ReviewConclusionHistoryResponse,
+  ReviewConclusionQueryContext,
+  transitionClaimedGovernanceReviewWithConclusion
+} from "./reviewConclusionApi";
 
 import { OetsRenderer } from "./OetsRenderer";
 import { getRuntimeTemplateVersion } from "./runtimeTemplateApi";
@@ -47,10 +56,25 @@ interface GovernanceReviewActionState {
   activeClaim: GovernanceReviewClaim | null;
 }
 
+interface ReviewConclusionContextState {
+  governanceAuthorityCode: string;
+  context: ReviewConclusionQueryContext;
+}
+
+interface ClaimedReviewConclusionInput {
+  claim: GovernanceReviewClaim;
+  transition: GovernanceWorkflowTransition;
+  rationale: string;
+}
+
 export function OperationalEvidenceRecordPage() {
   const { recordId } = useParams();
   const auth = useAuth();
   const queryClient = useQueryClient();
+  const [rationaleByTransitionKey, setRationaleByTransitionKey] = useState<
+    Record<string, string>
+  >({});
+  const [selectedConclusionId, setSelectedConclusionId] = useState<string | null>(null);
   const recordQuery = useQuery({
     enabled: Boolean(recordId),
     queryKey: ["operational-evidence-record", recordId],
@@ -122,6 +146,69 @@ export function OperationalEvidenceRecordPage() {
         transition
       )?.active_claim ?? null
   }));
+  const reviewConclusionContext =
+    record && narrowing?.definition
+      ? findReviewConclusionContext(narrowing.definition, record)
+      : null;
+  const reviewConclusionQueryKeyPart = reviewConclusionContext
+    ? reviewConclusionContextKeyPart(reviewConclusionContext.context)
+    : null;
+  const hasCompletedGovernanceContext = Boolean(
+    record &&
+      reviewConclusionContext &&
+      record.lifecycle_state ===
+        reviewConclusionContext.context.target_lifecycle_state
+  );
+  const shouldLoadReviewConclusions =
+    Boolean(selectedConclusionId) || hasCompletedGovernanceContext;
+  const canSubmitReviewConclusion =
+    auth.canUsePermission("view_operational_evidence") &&
+    auth.canUsePermission("transition_operational_evidence");
+  const reviewConclusionHistoryQuery = useQuery({
+    enabled: Boolean(record && reviewConclusionContext && reviewConclusionQueryKeyPart && shouldLoadReviewConclusions),
+    queryKey: [
+      "operational-evidence-review-conclusion-history",
+      record?.id,
+      reviewConclusionQueryKeyPart
+    ],
+    queryFn: () => {
+      if (!record || !reviewConclusionContext) {
+        throw new Error("Audit record and review context are required before loading Review Conclusions.");
+      }
+
+      return listReviewConclusionHistory(record.id, reviewConclusionContext.context);
+    }
+  });
+  const currentReviewConclusionQuery = useQuery({
+    enabled: Boolean(record && reviewConclusionContext && reviewConclusionQueryKeyPart && shouldLoadReviewConclusions),
+    queryKey: [
+      "operational-evidence-current-review-conclusion",
+      record?.id,
+      reviewConclusionQueryKeyPart
+    ],
+    queryFn: () => {
+      if (!record || !reviewConclusionContext) {
+        throw new Error("Audit record and review context are required before loading the current Review Conclusion.");
+      }
+
+      return getCurrentReviewConclusion(record.id, reviewConclusionContext.context);
+    }
+  });
+  const selectedReviewConclusionQuery = useQuery({
+    enabled: Boolean(record && selectedConclusionId),
+    queryKey: [
+      "operational-evidence-review-conclusion",
+      record?.id,
+      selectedConclusionId
+    ],
+    queryFn: () => {
+      if (!record || !selectedConclusionId) {
+        throw new Error("Audit record and Review Conclusion ID are required before loading the Review Conclusion.");
+      }
+
+      return getReviewConclusion(record.id, selectedConclusionId);
+    }
+  });
   const transitionMutation = useMutation({
     mutationFn: (transition: WorkflowTransition) =>
       transitionOperationalEvidenceRecord(recordId ?? "", {
@@ -175,11 +262,56 @@ export function OperationalEvidenceRecordPage() {
     }
   });
   const claimedTransitionMutation = useMutation({
-    mutationFn: (claim: GovernanceReviewClaim) =>
-      transitionClaimedGovernanceReview(claim.id),
-    onSuccess() {
+    mutationFn: ({ claim, transition, rationale }: ClaimedReviewConclusionInput) => {
+      if (!record) {
+        throw new Error("Audit record is required before submitting a Review Conclusion.");
+      }
+
+      return transitionClaimedGovernanceReviewWithConclusion(record.id, claim.id, {
+        governance_authority_code: transition.governanceAuthorityCode,
+        transition_trigger: transition.trigger,
+        rationale
+      });
+    },
+    onSuccess(result) {
+      const context = reviewConclusionContextFromConclusion(result.conclusion);
+      const keyPart = reviewConclusionContextKeyPart(context);
+
+      setSelectedConclusionId(result.conclusion.id);
+      queryClient.setQueryData<CurrentReviewConclusionResponse>(
+        [
+          "operational-evidence-current-review-conclusion",
+          result.conclusion.reviewed_evidence_record_id,
+          keyPart
+        ],
+        { conclusion: result.conclusion }
+      );
+      queryClient.setQueryData<ReviewConclusionHistoryResponse>(
+        [
+          "operational-evidence-review-conclusion-history",
+          result.conclusion.reviewed_evidence_record_id,
+          keyPart
+        ],
+        (existing) => ({
+          conclusions: appendReviewConclusion(
+            existing?.conclusions ?? [],
+            result.conclusion
+          )
+        })
+      );
+      queryClient.setQueryData(
+        [
+          "operational-evidence-review-conclusion",
+          result.conclusion.reviewed_evidence_record_id,
+          result.conclusion.id
+        ],
+        result.conclusion
+      );
       void queryClient.invalidateQueries({
         queryKey: ["operational-evidence-record", recordId]
+      });
+      void queryClient.invalidateQueries({
+        queryKey: governanceClaimQueryKey
       });
     }
   });
@@ -298,9 +430,34 @@ export function OperationalEvidenceRecordPage() {
         loadClaimStateError={governanceQueueQuery.error}
         onClaim={(transition) => claimMutation.mutate(transition)}
         onRelease={(claim) => releaseClaimMutation.mutate(claim)}
-        onTransition={(claim) => claimedTransitionMutation.mutate(claim)}
+        canSubmitConclusion={canSubmitReviewConclusion}
+        currentConclusion={currentReviewConclusionQuery.data?.conclusion ?? null}
+        onRationaleChange={(transition, rationale) =>
+          setRationaleByTransitionKey((existing) => ({
+            ...existing,
+            [transitionKey(transition)]: rationale
+          }))
+        }
+        onTransition={(claim, transition, rationale) =>
+          claimedTransitionMutation.mutate({ claim, transition, rationale })
+        }
+        rationaleByTransitionKey={rationaleByTransitionKey}
         releaseError={releaseClaimMutation.error}
         releasePending={releaseClaimMutation.isPending}
+      />
+
+      <ReviewConclusionPanel
+        context={reviewConclusionContext}
+        currentConclusion={currentReviewConclusionQuery.data?.conclusion ?? null}
+        currentError={currentReviewConclusionQuery.error}
+        history={reviewConclusionHistoryQuery.data?.conclusions ?? []}
+        historyError={reviewConclusionHistoryQuery.error}
+        isLoadingCurrent={currentReviewConclusionQuery.isLoading}
+        isLoadingHistory={reviewConclusionHistoryQuery.isLoading}
+        onSelectConclusion={setSelectedConclusionId}
+        selectedConclusion={selectedReviewConclusionQuery.data ?? null}
+        selectedError={selectedReviewConclusionQuery.error}
+        selectedId={selectedConclusionId}
       />
 
       {narrowing.warnings.length > 0 ? (
@@ -377,6 +534,41 @@ function setClaimStateInCache(
 function transitionKey(transition: GovernanceWorkflowTransition) {
   return `${transition.from}:${transition.trigger}:${transition.to}`;
 }
+
+function appendReviewConclusion(
+  conclusions: ReviewConclusion[],
+  conclusion: ReviewConclusion
+) {
+  return conclusions.some((item) => item.id === conclusion.id)
+    ? conclusions
+    : [...conclusions, conclusion];
+}
+
+function reviewConclusionContextFromConclusion(
+  conclusion: ReviewConclusion
+): ReviewConclusionQueryContext {
+  return {
+    reviewed_evidence_integrity_checksum:
+      conclusion.reviewed_evidence_integrity_checksum,
+    governing_template_version_id:
+      conclusion.governing_template.template_version_id,
+    reviewer_authority_code: conclusion.reviewer_authority_code,
+    source_lifecycle_state: conclusion.workflow_context.source_lifecycle_state,
+    transition_trigger: conclusion.workflow_context.transition_trigger,
+    target_lifecycle_state: conclusion.workflow_context.target_lifecycle_state
+  };
+}
+
+function reviewConclusionContextKeyPart(context: ReviewConclusionQueryContext) {
+  return [
+    context.reviewed_evidence_integrity_checksum,
+    context.governing_template_version_id,
+    context.reviewer_authority_code,
+    context.source_lifecycle_state,
+    context.transition_trigger,
+    context.target_lifecycle_state
+  ] as const;
+}
 function WorkflowActions({
   error,
   isPending,
@@ -440,7 +632,11 @@ function GovernanceReviewActions({
   loadClaimStateError,
   onClaim,
   onRelease,
+  canSubmitConclusion,
+  currentConclusion,
+  onRationaleChange,
   onTransition,
+  rationaleByTransitionKey,
   releaseError,
   releasePending
 }: {
@@ -452,13 +648,29 @@ function GovernanceReviewActions({
   currentUserId: string | null;
   isLoadingClaimState: boolean;
   loadClaimStateError: Error | null;
+  canSubmitConclusion: boolean;
+  currentConclusion: ReviewConclusion | null;
   onClaim: (transition: GovernanceWorkflowTransition) => void;
+  onRationaleChange: (
+    transition: GovernanceWorkflowTransition,
+    rationale: string
+  ) => void;
   onRelease: (claim: GovernanceReviewClaim) => void;
-  onTransition: (claim: GovernanceReviewClaim) => void;
+  onTransition: (
+    claim: GovernanceReviewClaim,
+    transition: GovernanceWorkflowTransition,
+    rationale: string
+  ) => void;
+  rationaleByTransitionKey: Record<string, string>;
   releaseError: Error | null;
   releasePending: boolean;
 }) {
   const error = claimError ?? releaseError ?? claimedTransitionError;
+  const governanceErrorMessage = claimedTransitionError
+    ? reviewConclusionErrorMessage(claimedTransitionError)
+    : error
+      ? transitionErrorMessage(error)
+      : null;
 
   if (actionStates.length === 0 && !error && !loadClaimStateError) {
     return null;
@@ -503,22 +715,56 @@ function GovernanceReviewActions({
                 );
               }
 
+              const key = transitionKey(transition);
+              const rationale = rationaleByTransitionKey[key] ?? "";
+
               return (
-                <div className="flex flex-wrap gap-3" key={transitionKey(transition)}>
-                  <Button
-                    disabled={claimedTransitionPending || releasePending}
-                    onClick={() => onTransition(activeClaim)}
-                    variant="secondary"
-                  >
-                    {claimedTransitionPending ? "Starting review..." : "Start Review"}
-                  </Button>
-                  <Button
-                    disabled={claimedTransitionPending || releasePending}
-                    onClick={() => onRelease(activeClaim)}
-                    variant="secondary"
-                  >
-                    {releasePending ? "Returning..." : "Return to Queue"}
-                  </Button>
+                <div className="w-full space-y-3" key={key}>
+                  {currentConclusion ? (
+                    <p className="rounded-component border border-border bg-canvas px-3 py-2 text-sm text-text-muted">
+                      The current Review Conclusion is shown below.
+                    </p>
+                  ) : null}
+                  <label className="block text-sm font-semibold text-text-primary">
+                    Review Conclusion Rationale
+                    <textarea
+                      className="mt-2 min-h-28 w-full rounded-component border border-border bg-canvas px-3 py-2 text-sm text-text-primary outline-none focus:border-focus focus:ring-2 focus:ring-focus"
+                      onChange={(event) =>
+                        onRationaleChange(transition, event.currentTarget.value)
+                      }
+                      value={rationale}
+                    />
+                  </label>
+                  <div className="flex flex-wrap gap-3">
+                    {canSubmitConclusion ? (
+                      <Button
+                        disabled={
+                          claimedTransitionPending ||
+                          releasePending ||
+                          rationale.trim().length === 0
+                        }
+                        onClick={() =>
+                          onTransition(activeClaim, transition, rationale.trim())
+                        }
+                        variant="secondary"
+                      >
+                        {claimedTransitionPending
+                          ? "Submitting Review Conclusion..."
+                          : "Submit Review Conclusion"}
+                      </Button>
+                    ) : (
+                      <p className="rounded-component border border-border bg-canvas px-3 py-2 text-sm text-text-muted">
+                        You do not have permission to complete this review.
+                      </p>
+                    )}
+                    <Button
+                      disabled={claimedTransitionPending || releasePending}
+                      onClick={() => onRelease(activeClaim)}
+                      variant="secondary"
+                    >
+                      {releasePending ? "Returning..." : "Return to Queue"}
+                    </Button>
+                  </div>
                 </div>
               );
             }
@@ -544,10 +790,160 @@ function GovernanceReviewActions({
           className="rounded-component border border-state-error bg-elevated p-3 text-sm text-text-primary"
           role="alert"
         >
-          {transitionErrorMessage(error)}
+          {governanceErrorMessage}
         </div>
       ) : null}
     </Surface>
+  );
+}
+
+function ReviewConclusionPanel({
+  context,
+  currentConclusion,
+  currentError,
+  history,
+  historyError,
+  isLoadingCurrent,
+  isLoadingHistory,
+  onSelectConclusion,
+  selectedConclusion,
+  selectedError,
+  selectedId
+}: {
+  context: ReviewConclusionContextState | null;
+  currentConclusion: ReviewConclusion | null;
+  currentError: Error | null;
+  history: ReviewConclusion[];
+  historyError: Error | null;
+  isLoadingCurrent: boolean;
+  isLoadingHistory: boolean;
+  onSelectConclusion: (conclusionId: string) => void;
+  selectedConclusion: ReviewConclusion | null;
+  selectedError: Error | null;
+  selectedId: string | null;
+}) {
+  if (!context) {
+    return null;
+  }
+
+  const error = currentError ?? historyError ?? selectedError;
+
+  return (
+    <Surface className="space-y-4">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+          Review Conclusions
+        </p>
+        <h2 className="mt-1 text-base font-semibold text-text-primary">
+          {displayReviewAuthority(context.governanceAuthorityCode)} Review Conclusion History
+        </h2>
+      </div>
+
+      {isLoadingCurrent || isLoadingHistory ? (
+        <p className="text-sm text-text-muted">Loading Review Conclusions.</p>
+      ) : error ? (
+        <div
+          className="rounded-component border border-state-error bg-elevated p-3 text-sm text-text-primary"
+          role="alert"
+        >
+          {reviewConclusionErrorMessage(error)}
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="rounded-component border border-border bg-canvas p-3">
+            <h3 className="text-sm font-semibold text-text-primary">
+              Current Review Conclusion
+            </h3>
+            {currentConclusion ? (
+              <ReviewConclusionDetails conclusion={currentConclusion} />
+            ) : (
+              <p className="mt-2 text-sm text-text-muted">
+                No current Review Conclusion has been recorded for this review context.
+              </p>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <h3 className="text-sm font-semibold text-text-primary">
+              Append-only History
+            </h3>
+            {history.length > 0 ? (
+              <ul className="space-y-2">
+                {history.map((conclusion) => (
+                  <li
+                    className="rounded-component border border-border bg-canvas p-3"
+                    key={conclusion.id}
+                  >
+                    <ReviewConclusionDetails conclusion={conclusion} />
+                    <Button
+                      className="mt-3"
+                      onClick={() => onSelectConclusion(conclusion.id)}
+                      variant="secondary"
+                    >
+                      View Review Conclusion
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-text-muted">
+                No historical Review Conclusions have been recorded for this review context.
+              </p>
+            )}
+          </div>
+
+          {selectedId ? (
+            <div className="rounded-component border border-border bg-canvas p-3">
+              <h3 className="text-sm font-semibold text-text-primary">
+                Selected Review Conclusion
+              </h3>
+              {selectedConclusion ? (
+                <ReviewConclusionDetails conclusion={selectedConclusion} />
+              ) : (
+                <p className="mt-2 text-sm text-text-muted">
+                  Loading selected Review Conclusion.
+                </p>
+              )}
+            </div>
+          ) : null}
+        </div>
+      )}
+    </Surface>
+  );
+}
+
+function ReviewConclusionDetails({
+  conclusion
+}: {
+  conclusion: ReviewConclusion;
+}) {
+  return (
+    <dl className="mt-2 grid gap-2 text-sm md:grid-cols-2">
+      <div>
+        <dt className="font-semibold text-text-muted">Conclusion ID</dt>
+        <dd className="break-all text-text-primary">{conclusion.id}</dd>
+      </div>
+      <div>
+        <dt className="font-semibold text-text-muted">Authority</dt>
+        <dd className="text-text-primary">
+          {displayReviewAuthority(conclusion.reviewer_authority_code)}
+        </dd>
+      </div>
+      <div className="md:col-span-2">
+        <dt className="font-semibold text-text-muted">Rationale</dt>
+        <dd className="whitespace-pre-wrap text-text-primary">
+          {conclusion.rationale}
+        </dd>
+      </div>
+      <div>
+        <dt className="font-semibold text-text-muted">Created at</dt>
+        <dd className="text-text-primary">{conclusion.created_at}</dd>
+      </div>
+      <div>
+        <dt className="font-semibold text-text-muted">Review claim ID</dt>
+        <dd className="break-all text-text-primary">{conclusion.review_claim_id}</dd>
+      </div>
+    </dl>
   );
 }
 
@@ -567,10 +963,59 @@ function RecordErrorState({ error }: { error: Error }) {
   );
 }
 
+function findReviewConclusionContext(
+  definition: OetsDefinition,
+  record: Awaited<ReturnType<typeof getOperationalEvidenceRecord>>
+): ReviewConclusionContextState | null {
+  const transitions = findWorkflowTransitions(definition);
+  const matchingTransition = transitions.find((transition) => {
+    const governanceAuthorityCode = resolveGovernanceAuthorityCode(
+      transition.to
+    );
+
+    return Boolean(
+      governanceAuthorityCode &&
+        (transition.from === record.lifecycle_state ||
+          transition.to === record.lifecycle_state)
+    );
+  });
+
+  if (!matchingTransition) {
+    return null;
+  }
+
+  const governanceAuthorityCode = resolveGovernanceAuthorityCode(
+    matchingTransition.to
+  );
+
+  if (!governanceAuthorityCode) {
+    return null;
+  }
+
+  return {
+    governanceAuthorityCode,
+    context: {
+      reviewed_evidence_integrity_checksum: record.payload_checksum,
+      governing_template_version_id:
+        record.template_provenance.template_version_id,
+      reviewer_authority_code: governanceAuthorityCode,
+      source_lifecycle_state: matchingTransition.from,
+      transition_trigger: matchingTransition.trigger,
+      target_lifecycle_state: matchingTransition.to
+    }
+  };
+}
+
 function findAvailableTransitions(
   definition: OetsDefinition,
   lifecycleState: string
 ): WorkflowTransition[] {
+  return findWorkflowTransitions(definition).filter(
+    (transition) => transition.from === lifecycleState
+  );
+}
+
+function findWorkflowTransitions(definition: OetsDefinition): WorkflowTransition[] {
   const workflow = definition.workflow;
 
   if (!isRecord(workflow) || !Array.isArray(workflow.transitions)) {
@@ -588,7 +1033,7 @@ function findAvailableTransitions(
     const to = readNonEmptyString(value.to);
     const trigger = readNonEmptyString(value.trigger);
 
-    if (!from || !to || !trigger || from !== lifecycleState) {
+    if (!from || !to || !trigger) {
       return [];
     }
 
@@ -631,6 +1076,36 @@ function readTransitionLabel(value: Record<string, unknown>) {
     readNonEmptyString(value.name) ??
     readNonEmptyString(value.title)
   );
+}
+
+function reviewConclusionErrorMessage(error: Error) {
+  if (isApiError(error)) {
+    if (error.status === 400) {
+      return "The Review Conclusion request was rejected by the backend contract.";
+    }
+
+    if ([401, 403].includes(error.status)) {
+      return "You are not authorized to view or submit this Review Conclusion.";
+    }
+
+    if (error.status === 404) {
+      return "The Review Conclusion context could not be found.";
+    }
+
+    if (error.status === 409) {
+      return "The Review Conclusion is no longer current. Reload the record and try again.";
+    }
+
+    if (error.status === 422) {
+      return "The Review Conclusion was rejected by backend validation.";
+    }
+
+    if (error.status >= 500) {
+      return "The Review Conclusion could not be persisted by the backend.";
+    }
+  }
+
+  return "The Review Conclusion could not be loaded.";
 }
 
 function transitionErrorMessage(error: Error) {
