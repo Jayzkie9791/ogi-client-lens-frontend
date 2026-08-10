@@ -23,6 +23,7 @@ import {
 } from "./evidenceSubmissionApi";
 import { OetsRenderer } from "./OetsRenderer";
 import { OperationalEvidenceRecordPage } from "./OperationalEvidenceRecordPage";
+import { transitionClaimedGovernanceReviewWithConclusion } from "./reviewConclusionApi";
 import { RuntimeTemplatePage } from "./RuntimeTemplatePage";
 import { OetsDefinition, OetsEvidencePayload, OetsTemplateRuntimeDefinition } from "./types";
 
@@ -34,7 +35,7 @@ const session = {
   clientId: "00000000-0000-4000-8000-000000000101",
   facilityIds: ["00000000-0000-4000-8000-000000000201"],
   roles: ["Operator"],
-  permissions: ["view_operational_evidence"]
+  permissions: ["view_operational_evidence", "transition_operational_evidence"]
 };
 
 interface MockResponse {
@@ -251,6 +252,39 @@ function governanceQueueItem({
     transition_trigger: `begin_${governanceAuthorityCode.toLowerCase()}_review`,
     target_state: `UNDER_${governanceAuthorityCode}_REVIEW`,
     active_claim: activeClaim
+  };
+}
+
+function reviewConclusion(
+  overrides: Partial<{
+    id: string;
+    rationale: string;
+    reviewer_actor_id: string;
+    reviewer_authority_code: string;
+    review_claim_id: string;
+    predecessor_conclusion_id: string | null;
+    revision_reason: string | null;
+  }> = {}
+) {
+  return {
+    id: "conclusion-1",
+    reviewed_evidence_record_id: "evidence-record-1",
+    reviewed_evidence_integrity_checksum: "payload-checksum-1",
+    governing_template: evidenceRecord().template_provenance,
+    reviewer_actor_id: session.id,
+    reviewer_authority_code: "OGI",
+    review_claim_id: "claim-1",
+    workflow_context: {
+      source_lifecycle_state: "SUBMITTED",
+      transition_trigger: "begin_ogi_review",
+      target_lifecycle_state: "UNDER_OGI_REVIEW"
+    },
+    rationale: "Reviewer conclusion supports beginning OGI review.",
+    predecessor_conclusion_id: null,
+    revision_reason: null,
+    correlation_id: "correlation-1",
+    created_at: "2026-07-27T00:10:00.000Z",
+    ...overrides
   };
 }
 
@@ -491,12 +525,13 @@ describe("Generic OETS renderer", () => {
   });
 
 
-  it("claims governance review before beginning a review workflow transition", async () => {
+  it("submits a claimed governance review through the atomic Review Conclusion endpoint", async () => {
     const user = userEvent.setup();
     const queryClient = createTestQueryClient();
     const submittedRecord = evidenceRecord({ lifecycle_state: "SUBMITTED" });
     const reviewRecord = evidenceRecord({ lifecycle_state: "UNDER_OGI_REVIEW" });
     const claim = governanceClaim();
+    const conclusion = reviewConclusion();
     const { calls } = mockFetchQueue([
       { status: 200, body: submittedRecord },
       {
@@ -505,8 +540,16 @@ describe("Generic OETS renderer", () => {
       },
       { status: 200, body: [governanceQueueItem({ record: submittedRecord })] },
       { status: 201, body: claim },
+      {
+        status: 200,
+        body: {
+          conclusion,
+          evidence_record: reviewRecord,
+          review_claim: governanceClaim({ claim_status: "COMPLETED" })
+        }
+      },
       { status: 200, body: reviewRecord },
-      { status: 200, body: reviewRecord }
+      { status: 200, body: [] }
     ]);
 
     renderOperationalEvidenceRecordPageWithSession({
@@ -519,32 +562,253 @@ describe("Generic OETS renderer", () => {
       await screen.findByRole("button", { name: "Assign to Me" })
     );
     expect(
-      await screen.findByRole("button", { name: "Start Review" })
+      await screen.findByLabelText("Review Conclusion Rationale")
     ).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Start Review" }));
+    await user.type(
+      screen.getByLabelText("Review Conclusion Rationale"),
+      "Reviewer conclusion supports beginning OGI review."
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Submit Review Conclusion" })
+    );
 
     await waitFor(() =>
       expect(screen.getByText("Under Review")).toBeInTheDocument()
     );
+    expect(
+      (await screen.findAllByText("Reviewer conclusion supports beginning OGI review.")).length
+    ).toBeGreaterThan(0);
 
     const claimCall = calls.find((call) =>
       call.url.endsWith("/governance/review-claims")
     );
-    const transitionCall = calls.find((call) =>
-      call.url.endsWith("/governance/review-claims/claim-1/transitions")
+    const conclusionCall = calls.find((call) =>
+      call.url.endsWith(
+        "/records/evidence-record-1/governance/review-claims/claim-1/conclusions/transitions"
+      )
     );
+    const requestBody = JSON.parse(String(conclusionCall?.init?.body));
 
     expect(JSON.parse(String(claimCall?.init?.body))).toEqual({
       evidence_record_id: "evidence-record-1",
       governance_authority_code: "OGI",
       transition_trigger: "begin_ogi_review"
     });
-    expect(JSON.parse(String(transitionCall?.init?.body))).toEqual({});
+    expect(requestBody).toEqual({
+      governance_authority_code: "OGI",
+      transition_trigger: "begin_ogi_review",
+      rationale: "Reviewer conclusion supports beginning OGI review."
+    });
+    expect(requestBody.reviewer_actor_id).toBeUndefined();
+    expect(requestBody.reviewer_user_id).toBeUndefined();
+    expect(requestBody.target_state).toBeUndefined();
+    expect(calls.some((call) =>
+      call.url.endsWith("/governance/review-claims/claim-1/transitions")
+    )).toBe(false);
     expect(calls.some((call) =>
       call.url.endsWith("/records/evidence-record-1/transitions")
     )).toBe(false);
   });
+
+  it("posts the Review Conclusion transition command without client-owned identity or target state", async () => {
+    const conclusion = reviewConclusion();
+    const reviewRecord = evidenceRecord({ lifecycle_state: "UNDER_OGI_REVIEW" });
+    const { calls } = mockFetchQueue([
+      {
+        status: 200,
+        body: {
+          conclusion,
+          evidence_record: reviewRecord,
+          review_claim: governanceClaim({ claim_status: "COMPLETED" })
+        }
+      }
+    ]);
+
+    configureApiAuth({
+      getAccessToken: () => "access-token",
+      refreshAccessToken: async () => "access-token",
+      onAuthFailure: () => undefined
+    });
+
+    const response = await transitionClaimedGovernanceReviewWithConclusion(
+      "evidence-record-1",
+      "claim-1",
+      {
+        governance_authority_code: "OGI",
+        transition_trigger: "begin_ogi_review",
+        rationale: "Reviewer conclusion supports beginning OGI review."
+      }
+    );
+    const requestBody = JSON.parse(String(calls[0].init?.body));
+
+    expect(response.conclusion.id).toBe("conclusion-1");
+    expect(response.evidence_record.lifecycle_state).toBe("UNDER_OGI_REVIEW");
+    expect(response.review_claim.claim_status).toBe("COMPLETED");
+    expect(calls[0].url).toBe(
+      "/api/v1/operational-evidence/records/evidence-record-1/governance/review-claims/claim-1/conclusions/transitions"
+    );
+    expect(calls[0].init?.method).toBe("POST");
+    expect(requestBody).toEqual({
+      governance_authority_code: "OGI",
+      transition_trigger: "begin_ogi_review",
+      rationale: "Reviewer conclusion supports beginning OGI review."
+    });
+    expect(requestBody.reviewer_actor_id).toBeUndefined();
+    expect(requestBody.reviewer_user_id).toBeUndefined();
+    expect(requestBody.target_state).toBeUndefined();
+    expect(requestBody.score).toBeUndefined();
+    expect(requestBody.rating).toBeUndefined();
+    expect(requestBody.recommendation).toBeUndefined();
+    expect(requestBody.ori_value).toBeUndefined();
+  });
+
+  it("reads Review Conclusion history, current, and individual details through dedicated endpoints", async () => {
+    const user = userEvent.setup();
+    const queryClient = createTestQueryClient();
+    const underReviewRecord = evidenceRecord({ lifecycle_state: "UNDER_OGI_REVIEW" });
+    const predecessor = reviewConclusion({
+      id: "conclusion-0",
+      rationale: "Earlier reviewer conclusion."
+    });
+    const current = reviewConclusion({
+      id: "conclusion-1",
+      rationale: "Current reviewer conclusion.",
+      predecessor_conclusion_id: predecessor.id,
+      revision_reason: "Corrected conclusion narrative."
+    });
+    const { calls } = mockFetchQueue([
+      { status: 200, body: underReviewRecord },
+      {
+        status: 200,
+        body: { ...runtimeTemplate, definition_jsonb: ogiReviewThenArchiveWorkflowDefinition }
+      },
+      { status: 200, body: { conclusions: [predecessor, current] } },
+      { status: 200, body: { conclusion: current } },
+      { status: 200, body: current }
+    ]);
+
+    renderOperationalEvidenceRecordPageWithSession({
+      initialPath: "/workbench/evidence/evidence-record-1",
+      queryClient,
+      currentSession: session
+    });
+
+    expect(
+      (await screen.findAllByText("Current reviewer conclusion.")).length
+    ).toBeGreaterThan(0);
+    expect(screen.getByText("Earlier reviewer conclusion.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /edit/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /delete/i })).not.toBeInTheDocument();
+
+    await user.click(screen.getAllByRole("button", { name: "View Review Conclusion" })[1]);
+
+    expect(await screen.findByText("Selected Review Conclusion")).toBeInTheDocument();
+    expect(calls.some((call) =>
+      call.url.startsWith(
+        "/api/v1/operational-evidence/records/evidence-record-1/review-conclusions/current?"
+      )
+    )).toBe(true);
+    expect(calls.some((call) =>
+      call.url.startsWith(
+        "/api/v1/operational-evidence/records/evidence-record-1/review-conclusions?"
+      )
+    )).toBe(true);
+    expect(calls.some((call) =>
+      call.url.endsWith(
+        "/api/v1/operational-evidence/records/evidence-record-1/review-conclusions/conclusion-1"
+      )
+    )).toBe(true);
+  });
+
+  it("does not offer Review Conclusion submission without transition permission", async () => {
+    const queryClient = createTestQueryClient();
+    const submittedRecord = evidenceRecord({ lifecycle_state: "SUBMITTED" });
+    const activeClaim = governanceClaim();
+    mockFetchQueue([
+      { status: 200, body: submittedRecord },
+      {
+        status: 200,
+        body: { ...runtimeTemplate, definition_jsonb: ogiReviewWorkflowDefinition }
+      },
+      {
+        status: 200,
+        body: [governanceQueueItem({ activeClaim, record: submittedRecord })]
+      }
+    ]);
+
+    renderOperationalEvidenceRecordPageWithSession({
+      initialPath: "/workbench/evidence/evidence-record-1",
+      queryClient,
+      currentSession: {
+        ...session,
+        permissions: ["view_operational_evidence"]
+      }
+    });
+
+    expect(
+      await screen.findByText("You do not have permission to complete this review.")
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Submit Review Conclusion" })
+    ).not.toBeInTheDocument();
+  });
+
+  it.each([
+    [400, "The Review Conclusion request was rejected by the backend contract."],
+    [401, "You are not authorized to view or submit this Review Conclusion."],
+    [403, "You are not authorized to view or submit this Review Conclusion."],
+    [404, "The Review Conclusion context could not be found."],
+    [409, "The Review Conclusion is no longer current. Reload the record and try again."],
+    [422, "The Review Conclusion was rejected by backend validation."],
+    [500, "The Review Conclusion could not be persisted by the backend."]
+  ] as const)(
+    "surfaces Review Conclusion backend status %i without falling back to a misleading success state",
+    async (status, message) => {
+      const user = userEvent.setup();
+      const queryClient = createTestQueryClient();
+      const submittedRecord = evidenceRecord({ lifecycle_state: "SUBMITTED" });
+      const activeClaim = governanceClaim();
+      mockFetchQueue([
+        { status: 200, body: submittedRecord },
+        {
+          status: 200,
+          body: { ...runtimeTemplate, definition_jsonb: ogiReviewWorkflowDefinition }
+        },
+        {
+          status: 200,
+          body: [governanceQueueItem({ activeClaim, record: submittedRecord })]
+        },
+        {
+          status,
+          statusText: "Review Conclusion Error",
+          body: {
+            error: {
+              code: "OEE_REVIEW_CONCLUSION_TEST_ERROR",
+              message: "Review Conclusion failed."
+            }
+          }
+        }
+      ]);
+
+      renderOperationalEvidenceRecordPageWithSession({
+        initialPath: "/workbench/evidence/evidence-record-1",
+        queryClient,
+        currentSession: session
+      });
+
+      await user.type(
+        await screen.findByLabelText("Review Conclusion Rationale"),
+        "Reviewer conclusion supports beginning OGI review."
+      );
+      await user.click(
+        screen.getByRole("button", { name: "Submit Review Conclusion" })
+      );
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(message);
+      expect(screen.getByText("Awaiting Review")).toBeInTheDocument();
+    }
+  );
 
   it("moves F-01 intake approval through the direct workflow transition API", async () => {
     const user = userEvent.setup();
@@ -561,6 +825,8 @@ describe("Generic OETS renderer", () => {
         status: 200,
         body: { ...runtimeTemplate, definition_jsonb: f01IntakeWorkflowDefinition }
       },
+      { status: 200, body: { conclusions: [] } },
+      { status: 200, body: { conclusion: null } },
       { status: 200, body: approvedRecord },
       { status: 200, body: approvedRecord }
     ]);
@@ -662,6 +928,8 @@ describe("Generic OETS renderer", () => {
         status: 200,
         body: { ...runtimeTemplate, definition_jsonb: f01IntakeWorkflowDefinition }
       },
+      { status: 200, body: { conclusions: [] } },
+      { status: 200, body: { conclusion: null } },
       { status: 200, body: returnedRecord },
       { status: 200, body: returnedRecord }
     ]);
@@ -1988,7 +2256,7 @@ function optionField(
     expect(
       await screen.findByRole("button", { name: "Assign to Me" })
     ).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Start Review" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Review Conclusion Rationale")).not.toBeInTheDocument();
   });
 
   it("restores current user's active governance claim on initial load", async () => {
@@ -2013,7 +2281,12 @@ function optionField(
       currentSession: session
     });
 
-    expect(await screen.findByRole("button", { name: "Start Review" })).toBeInTheDocument();
+    expect(
+      await screen.findByLabelText("Review Conclusion Rationale")
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Submit Review Conclusion" })
+    ).toBeDisabled();
     expect(screen.getByRole("button", { name: "Return to Queue" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Assign to Me" })).not.toBeInTheDocument();
   });
@@ -2081,13 +2354,14 @@ function optionField(
     expect(screen.queryByRole("button", { name: "Start Review" })).not.toBeInTheDocument();
   });
 
-  it("begins review from a restored active claim and renders next workflow actions", async () => {
+  it("submits a Review Conclusion from a restored active claim and renders next workflow actions", async () => {
     const user = userEvent.setup();
     const queryClient = createTestQueryClient();
     const submittedRecord = evidenceRecord({ lifecycle_state: "SUBMITTED" });
     const reviewRecord = evidenceRecord({ lifecycle_state: "UNDER_OGI_REVIEW" });
     const activeClaim = governanceClaim();
-    mockFetchQueue([
+    const conclusion = reviewConclusion();
+    const { calls } = mockFetchQueue([
       { status: 200, body: submittedRecord },
       {
         status: 200,
@@ -2097,8 +2371,16 @@ function optionField(
         status: 200,
         body: [governanceQueueItem({ activeClaim, record: submittedRecord })]
       },
+      {
+        status: 200,
+        body: {
+          conclusion,
+          evidence_record: reviewRecord,
+          review_claim: governanceClaim({ claim_status: "COMPLETED" })
+        }
+      },
       { status: 200, body: reviewRecord },
-      { status: 200, body: reviewRecord }
+      { status: 200, body: [] }
     ]);
 
     renderOperationalEvidenceRecordPageWithSession({
@@ -2107,10 +2389,19 @@ function optionField(
       currentSession: session
     });
 
-    await user.click(await screen.findByRole("button", { name: "Start Review" }));
+    await user.type(
+      await screen.findByLabelText("Review Conclusion Rationale"),
+      "Reviewer conclusion supports beginning OGI review."
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Submit Review Conclusion" })
+    );
 
     expect(await screen.findByText("Under Review")).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "Archive" })).toBeInTheDocument();
+    expect(calls.some((call) =>
+      call.url.endsWith("/governance/review-claims/claim-1/transitions")
+    )).toBe(false);
   });
 
   it("reconciles active claim state after duplicate claim conflict", async () => {
