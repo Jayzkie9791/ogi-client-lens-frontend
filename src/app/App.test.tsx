@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, beforeEach, expect, vi } from "vitest";
@@ -131,6 +131,75 @@ const secondRecordsPageResponse = {
     total_count: 26
   }
 };
+
+const queueEvidenceRecord = {
+  id: "00000000-0000-4000-8000-000000000701",
+  template_provenance: {
+    template_id: "00000000-0000-4000-8000-000000000301",
+    template_code: "OGI_F001_WEEKLY_SAFETY_AUDIT_CHECKLIST",
+    template_version: "1.0.0",
+    template_registry_id: "00000000-0000-4000-8000-000000000301",
+    template_version_id: "00000000-0000-4000-8000-000000000401",
+    schema_version: "1.0",
+    checksum: "checksum-a"
+  },
+  client_id: "00000000-0000-4000-8000-000000000101",
+  facility_id: "00000000-0000-4000-8000-000000000201",
+  lifecycle_state: "SUBMITTED",
+  payload: {
+    sections: {}
+  },
+  payload_checksum: "payload-checksum-queue",
+  created_by_user_id: "00000000-0000-4000-8000-000000000901",
+  submitted_by_user_id: "00000000-0000-4000-8000-000000000902",
+  created_at: "2026-08-01T00:00:00.000Z",
+  submitted_at: "2026-08-02T00:00:00.000Z",
+  updated_at: "2026-08-03T00:00:00.000Z"
+};
+
+const queueClaim = {
+  id: "00000000-0000-4000-8000-000000000801",
+  evidence_record_id: queueEvidenceRecord.id,
+  template_version_id: queueEvidenceRecord.template_provenance.template_version_id,
+  governance_authority_code: "OGI",
+  lifecycle_state: "SUBMITTED",
+  transition_trigger: "begin_ogi_review",
+  claim_status: "ACTIVE",
+  claimed_by_user_id: session.id,
+  claimed_at: "2026-08-02T00:10:00.000Z",
+  released_at: null,
+  completed_at: null,
+  created_at: "2026-08-02T00:10:00.000Z",
+  updated_at: "2026-08-02T00:10:00.000Z"
+};
+
+const unclaimedQueueResponse = [
+  {
+    evidence_record: queueEvidenceRecord,
+    governance_authority_code: "OGI",
+    lifecycle_state: "SUBMITTED",
+    transition_trigger: "begin_ogi_review",
+    target_state: "UNDER_OGI_REVIEW",
+    active_claim: null
+  }
+];
+
+const ownedClaimQueueResponse = [
+  {
+    ...unclaimedQueueResponse[0],
+    active_claim: queueClaim
+  }
+];
+
+const otherClaimQueueResponse = [
+  {
+    ...unclaimedQueueResponse[0],
+    active_claim: {
+      ...queueClaim,
+      claimed_by_user_id: "00000000-0000-4000-8000-000000000999"
+    }
+  }
+];
 
 interface MockResponse {
   status: number;
@@ -506,10 +575,10 @@ describe("Client Lens authentication foundation", () => {
   it("opens the review queue from primary navigation", async () => {
     const user = userEvent.setup();
     window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
-    mockFetchQueue([
+    const { calls } = mockFetchQueue([
       { status: 200, body: { accessToken: "access-token" } },
       { status: 200, body: session },
-      { status: 200, body: [] }
+      { status: 200, body: unclaimedQueueResponse }
     ]);
     renderWithRoute(routes.workbench);
 
@@ -519,6 +588,166 @@ describe("Client Lens authentication foundation", () => {
     expect(
       await screen.findByRole("heading", { name: "Review Queue" })
     ).toBeInTheDocument();
+    expect(
+      screen.getByText("Find governed review work available to you or already claimed by you.")
+    ).toBeInTheDocument();
+    const queueItem = within(
+      screen.getByRole("list", { name: "Governance review queue" })
+    ).getByRole("listitem");
+    expect(screen.getByText("OGI_F001_WEEKLY_SAFETY_AUDIT_CHECKLIST")).toBeInTheDocument();
+    expect(screen.getByText("Awaiting Review")).toBeInTheDocument();
+    expect(screen.getByText("OGI")).toBeInTheDocument();
+    expect(within(queueItem).getByText("Available")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Claim Review" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open Record" })).toHaveAttribute(
+      "href",
+      routes.evidenceRecordPath(queueEvidenceRecord.id)
+    );
+    expect(screen.queryByText("begin_ogi_review")).not.toBeInTheDocument();
+    expect(screen.queryByText("UNDER_OGI_REVIEW")).not.toBeInTheDocument();
+    expect(screen.queryByText("My Work")).not.toBeInTheDocument();
+    expect(calls.map(({ url }) => url)).toEqual([
+      "/api/v1/auth/refresh",
+      "/api/v1/auth/me",
+      "/api/v1/operational-evidence/governance/queue?claim_status=ANY"
+    ]);
+  });
+
+  it("does not reveal Reviews from role names without the required permission", async () => {
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      {
+        status: 200,
+        body: {
+          ...session,
+          permissions: [],
+          roles: ["Reviews", "Reviewer", "Administrator"]
+        }
+      }
+    ]);
+    renderWithRoute(routes.workbench);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Menu" }));
+
+    expect(screen.queryByRole("link", { name: "Reviews" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Administration" })).not.toBeInTheDocument();
+  });
+
+  it("filters the review queue using supported governance query parameters", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: session },
+      { status: 200, body: unclaimedQueueResponse },
+      { status: 200, body: ownedClaimQueueResponse }
+    ]);
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    renderWithRoute(routes.governanceQueue);
+
+    await screen.findByRole("heading", { name: "Review Queue" });
+    await user.type(screen.getByLabelText("Governance authority"), "OGI");
+    await user.type(screen.getByLabelText("Lifecycle state"), "SUBMITTED");
+    await user.selectOptions(screen.getByLabelText("Claim status"), "CLAIMED");
+    await user.click(screen.getByRole("button", { name: "Apply filters" }));
+
+    expect(await screen.findByText("Claimed by you")).toBeInTheDocument();
+    expect(calls.map(({ url }) => url)).toContain(
+      "/api/v1/operational-evidence/governance/queue?claim_status=CLAIMED&governance_authority_code=OGI&lifecycle_state=SUBMITTED"
+    );
+  });
+
+  it("claims a review from the queue and reconciles to the owned claim state", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: session },
+      { status: 200, body: unclaimedQueueResponse },
+      { status: 201, body: queueClaim },
+      { status: 200, body: ownedClaimQueueResponse }
+    ]);
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    renderWithRoute(routes.governanceQueue);
+
+    await user.click(await screen.findByRole("button", { name: "Claim Review" }));
+
+    expect(await screen.findByText("Claimed by you")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Continue Review" })).toHaveAttribute(
+      "href",
+      routes.evidenceRecordPath(queueEvidenceRecord.id)
+    );
+    expect(screen.queryByRole("button", { name: "Claim Review" })).not.toBeInTheDocument();
+
+    const claimCall = calls.find((call) =>
+      call.url.endsWith("/governance/review-claims")
+    );
+
+    expect(claimCall?.init?.method).toBe("POST");
+    expect(JSON.parse(String(claimCall?.init?.body))).toEqual({
+      evidence_record_id: queueEvidenceRecord.id,
+      governance_authority_code: "OGI",
+      transition_trigger: "begin_ogi_review"
+    });
+    expect(calls.map(({ url }) => url)).toEqual([
+      "/api/v1/auth/refresh",
+      "/api/v1/auth/me",
+      "/api/v1/operational-evidence/governance/queue?claim_status=ANY",
+      "/api/v1/operational-evidence/governance/review-claims",
+      "/api/v1/operational-evidence/governance/queue?claim_status=ANY"
+    ]);
+  });
+
+  it("shows claimed-by-another review work as non-actionable", async () => {
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: session },
+      { status: 200, body: otherClaimQueueResponse }
+    ]);
+    renderWithRoute(routes.governanceQueue);
+
+    expect(await screen.findByText("Claimed by another reviewer")).toBeInTheDocument();
+    expect(screen.getByText(/Claimed by 00000000-0000-4000-8000-000000000999/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View Record" })).toHaveAttribute(
+      "href",
+      routes.evidenceRecordPath(queueEvidenceRecord.id)
+    );
+    expect(screen.queryByRole("button", { name: "Claim Review" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Continue Review" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Release Claim" })).not.toBeInTheDocument();
+  });
+
+  it("fails closed on duplicate review claim conflict and refreshes queue state", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: session },
+      { status: 200, body: unclaimedQueueResponse },
+      {
+        status: 409,
+        statusText: "Conflict",
+        body: {
+          error: {
+            code: "OEE_GOVERNANCE_REVIEW_CLAIM_CONFLICT",
+            message: "Governance review is already claimed."
+          }
+        }
+      },
+      { status: 200, body: otherClaimQueueResponse }
+    ]);
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    renderWithRoute(routes.governanceQueue);
+
+    await user.click(await screen.findByRole("button", { name: "Claim Review" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This review is already claimed. The queue has been refreshed."
+    );
+    expect(await screen.findByText("Claimed by another reviewer")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Claim Review" })).not.toBeInTheDocument();
+    expect(calls.filter((call) =>
+      call.url.endsWith("/governance/review-claims")
+    )).toHaveLength(1);
   });
 
   it("keeps capability-driven navigation intact when the compact menu opens", async () => {
