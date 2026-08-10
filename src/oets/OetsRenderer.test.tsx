@@ -436,13 +436,28 @@ describe("Generic OETS renderer", () => {
     });
 
     expect(
-      await screen.findByRole("heading", { name: "evidence-record-1" })
+      await screen.findByRole("heading", { name: runtimeTemplate.template_code })
     ).toBeInTheDocument();
+    expect(screen.getByText("Record Detail")).toBeInTheDocument();
+    expect(screen.getByText("Record evidence-record-1")).toBeInTheDocument();
+    expect(screen.getByText("Current State")).toBeInTheDocument();
     expect(screen.getByText("Draft")).toBeInTheDocument();
-    expect(screen.getByText(runtimeTemplate.template_code)).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Submitted Evidence" })
+    ).toBeInTheDocument();
+    expect(
+      screen.getAllByText(runtimeTemplate.template_code).length
+    ).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText(runtimeTemplate.template_version).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("Provenance")).toBeInTheDocument();
     expect(screen.getByText(runtimeTemplate.template_version_id)).toBeInTheDocument();
     expect(screen.getByText("payload-checksum-1")).toBeInTheDocument();
+    expect(
+      screen
+        .getByRole("heading", { name: "Submitted Evidence" })
+        .compareDocumentPosition(screen.getByText("Provenance")) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
     expect(screen.getByLabelText("Text Field")).toHaveValue("Persisted evidence");
     expect(screen.getByLabelText("Text Field")).toBeDisabled();
     expect(screen.getByLabelText("Number Field")).toHaveValue(7);

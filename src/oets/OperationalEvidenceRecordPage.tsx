@@ -375,41 +375,32 @@ export function OperationalEvidenceRecordPage() {
 
   return (
     <div className="space-y-4">
-      <Surface className="space-y-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
-              Audit Record
-            </p>
-            <h1 className="mt-1 break-all text-2xl font-semibold text-text-primary">
-              {record.id}
-            </h1>
-          </div>
-          <span className="inline-flex w-fit rounded-component border border-border px-3 py-1 text-xs font-semibold uppercase text-text-muted">
-            {displayLifecycleStatus(record.lifecycle_state)}
-          </span>
+      <RecordIdentityPanel record={record} />
+
+      <section aria-labelledby="submitted-evidence-heading" className="space-y-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-primary-blue">
+            Record Truth
+          </p>
+          <h2
+            className="mt-1 text-xl font-semibold text-text-primary"
+            id="submitted-evidence-heading"
+          >
+            Submitted Evidence
+          </h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-text-muted">
+            This read-only view presents the evidence payload submitted for this
+            Operational Evidence record.
+          </p>
         </div>
-        <MetadataGrid
-          entries={[
-            ["Template code", record.template_provenance.template_code],
-            ["Template version", record.template_provenance.template_version],
-            [
-              "Template version ID",
-              record.template_provenance.template_version_id
-            ],
-            ["Schema version", record.template_provenance.schema_version],
-            ["Client ID", record.client_id],
-            ["Facility ID", record.facility_id ?? "No facility context"],
-            ["Payload checksum", record.payload_checksum],
-            ["Template checksum", record.template_provenance.checksum],
-            ["Created by", record.created_by_user_id],
-            ["Submitted by", record.submitted_by_user_id],
-            ["Created at", record.created_at],
-            ["Submitted at", record.submitted_at],
-            ["Updated at", record.updated_at]
-          ]}
+
+        <OetsRenderer
+          definition={narrowing.definition}
+          initialPayload={record.payload}
+          readOnly
+          runtimeTemplate={templateQuery.data}
         />
-      </Surface>
+      </section>
 
       <WorkflowActions
         error={transitionMutation.error}
@@ -473,13 +464,86 @@ export function OperationalEvidenceRecordPage() {
         </Surface>
       ) : null}
 
-      <OetsRenderer
-        definition={narrowing.definition}
-        initialPayload={record.payload}
-        readOnly
-        runtimeTemplate={templateQuery.data}
-      />
+      <RecordProvenanceDisclosure record={record} />
     </div>
+  );
+}
+
+function RecordIdentityPanel({
+  record
+}: {
+  record: Awaited<ReturnType<typeof getOperationalEvidenceRecord>>;
+}) {
+  return (
+    <Surface className="space-y-4">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+            Record Detail
+          </p>
+          <h1 className="mt-1 break-words text-2xl font-semibold text-text-primary">
+            {record.template_provenance.template_code}
+          </h1>
+          <p className="mt-2 break-all text-sm text-text-muted">
+            Record {record.id}
+          </p>
+        </div>
+        <div className="rounded-component border border-border bg-canvas px-4 py-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+            Current State
+          </p>
+          <p className="mt-1 text-lg font-semibold text-text-primary">
+            {displayLifecycleStatus(record.lifecycle_state)}
+          </p>
+        </div>
+      </div>
+      <MetadataGrid
+        entries={[
+          ["Client ID", record.client_id],
+          ["Facility ID", record.facility_id ?? "No facility context"],
+          ["Submitted at", record.submitted_at],
+          ["Template version", record.template_provenance.template_version]
+        ]}
+      />
+    </Surface>
+  );
+}
+
+function RecordProvenanceDisclosure({
+  record
+}: {
+  record: Awaited<ReturnType<typeof getOperationalEvidenceRecord>>;
+}) {
+  return (
+    <Surface>
+      <details className="group">
+        <summary className="cursor-pointer text-base font-semibold text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-canvas">
+          Provenance
+        </summary>
+        <p className="mt-2 text-sm leading-6 text-text-muted">
+          Technical identifiers and integrity values for the submitted record.
+        </p>
+        <div className="mt-4">
+          <MetadataGrid
+            entries={[
+              ["Evidence record ID", record.id],
+              ["Template registry ID", record.template_provenance.template_registry_id],
+              ["Template version ID", record.template_provenance.template_version_id],
+              ["Template code", record.template_provenance.template_code],
+              ["Template version", record.template_provenance.template_version],
+              ["Schema version", record.template_provenance.schema_version],
+              ["Payload checksum", record.payload_checksum],
+              ["Template checksum", record.template_provenance.checksum],
+              ["Created by", record.created_by_user_id],
+              ["Submitted by", record.submitted_by_user_id],
+              ["Created at", record.created_at],
+              ["Submitted at", record.submitted_at],
+              ["Updated at", record.updated_at]
+            ]}
+          />
+        </div>
+      </details>
+    </Surface>
   );
 }
 
@@ -588,10 +652,10 @@ function WorkflowActions({
     <Surface className="space-y-3">
       <div>
         <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
-          Review
+          Authorized Action
         </p>
         <h2 className="mt-1 text-base font-semibold text-text-primary">
-          Available Actions
+          Available Workflow Actions
         </h2>
       </div>
       {transitions.length > 0 ? (
@@ -680,10 +744,10 @@ function GovernanceReviewActions({
     <Surface className="space-y-3">
       <div>
         <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
-          Review Assignment
+          Governance Review
         </p>
         <h2 className="mt-1 text-base font-semibold text-text-primary">
-          Assigned Review Actions
+          Authorized Governance Action
         </h2>
       </div>
 
