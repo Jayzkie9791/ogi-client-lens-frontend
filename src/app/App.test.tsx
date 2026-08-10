@@ -108,7 +108,7 @@ describe("Client Lens authentication foundation", () => {
     renderWithRoute(routes.workbench);
 
     expect(
-      screen.queryByRole("heading", { name: "Audit Review Workbench" })
+      screen.queryByRole("heading", { name: "Client Lens Overview" })
     ).not.toBeInTheDocument();
     expect(
       await screen.findByRole("heading", { name: "Sign in to Client Lens" })
@@ -129,7 +129,7 @@ describe("Client Lens authentication foundation", () => {
     ).resolves.toHaveAttribute("src", "/brand/client-lens-logo.png");
   });
 
-  it("renders the primary navigation and permission-aware review queue link", async () => {
+  it("renders the primary navigation and permission-aware reviews link", async () => {
     window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
     mockFetchQueue([
       { status: 200, body: { accessToken: "access-token" } },
@@ -140,10 +140,15 @@ describe("Client Lens authentication foundation", () => {
     expect(
       await screen.findByRole("navigation", { name: "Primary navigation" })
     ).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Workbench" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Overview" })).toBeInTheDocument();
     expect(
-      screen.getByRole("link", { name: "Review Queue" })
+      screen.getByRole("link", { name: "Reviews" })
     ).toHaveAttribute("href", routes.governanceQueue);
+    expect(screen.queryByRole("link", { name: "Workbench" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Assessments" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Operational Risk" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Administration" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Operations" })).not.toBeInTheDocument();
   });
 
   it("hides permission-gated navigation when /me lacks permission", async () => {
@@ -155,10 +160,10 @@ describe("Client Lens authentication foundation", () => {
     renderWithRoute(routes.workbench);
 
     expect(
-      await screen.findByRole("heading", { name: "Audit Review Workbench" })
+      await screen.findByRole("heading", { name: "Client Lens Overview" })
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("link", { name: "Review Queue" })
+      screen.queryByRole("link", { name: "Reviews" })
     ).not.toBeInTheDocument();
   });
 
@@ -188,7 +193,7 @@ describe("Client Lens authentication foundation", () => {
     await user.click(screen.getByRole("button", { name: "Sign in" }));
 
     expect(
-      await screen.findByRole("heading", { name: "Audit Review Workbench" })
+      await screen.findByRole("heading", { name: "Client Lens Overview" })
     ).toBeInTheDocument();
     expect(window.sessionStorage.getItem(getRefreshTokenStorageKey())).toBe(
       "login-refresh-token"
@@ -356,7 +361,7 @@ describe("Client Lens authentication foundation", () => {
     renderWithRoute(routes.login);
 
     expect(
-      await screen.findByRole("heading", { name: "Audit Review Workbench" })
+      await screen.findByRole("heading", { name: "Client Lens Overview" })
     ).toBeInTheDocument();
   });
 
@@ -395,13 +400,31 @@ describe("Client Lens authentication foundation", () => {
     ]);
     renderWithRoute(routes.workbench);
 
-    await user.click(
-      await screen.findByRole("link", { name: "Review Queue" })
-    );
+    await user.click(await screen.findByRole("button", { name: "Menu" }));
+    await user.click(await screen.findByRole("link", { name: "Reviews" }));
 
     expect(
       await screen.findByRole("heading", { name: "Review Queue" })
     ).toBeInTheDocument();
+  });
+
+  it("keeps capability-driven navigation intact when the compact menu opens", async () => {
+    const user = userEvent.setup();
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: { ...session, permissions: [] } }
+    ]);
+    renderWithRoute(routes.workbench);
+
+    await user.click(await screen.findByRole("button", { name: "Menu" }));
+
+    expect(screen.getByRole("link", { name: "Overview" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Reviews" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Operations" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Assessments" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Operational Risk" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Administration" })).not.toBeInTheDocument();
   });
 
   it("renders a safe not-found experience for unknown authenticated routes", async () => {
