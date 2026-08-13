@@ -7,7 +7,7 @@ interface AuthRuntime {
 }
 
 interface ApiRequestOptions<T> {
-  method?: "GET" | "POST";
+  method?: "GET" | "PATCH" | "POST";
   body?: unknown;
   auth?: boolean;
   validate: (value: unknown) => value is T;

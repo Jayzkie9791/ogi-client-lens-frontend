@@ -5,6 +5,7 @@ export const routes = {
   operations: "/workbench/operations",
   records: "/workbench/operations/records",
   administration: "/workbench/administration",
+  registrationClients: "/workbench/registration/clients",
   governanceQueue: "/workbench/governance/queue",
   oetsTemplate: "/workbench/oets/:templateCode",
   oetsTemplatePath: (templateCode: string) =>

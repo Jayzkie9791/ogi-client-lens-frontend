@@ -4,6 +4,7 @@ import { PublicOnlyRoute, RequireAuth } from "../auth/AuthGuards";
 import { GovernanceQueuePage } from "../oets/GovernanceQueuePage";
 import { OperationalEvidenceRecordPage } from "../oets/OperationalEvidenceRecordPage";
 import { RuntimeTemplatePage } from "../oets/RuntimeTemplatePage";
+import { RegistrationClientsPage } from "../registration/RegistrationClientsPage";
 import { AppShell } from "../ui/layout/AppShell";
 import { routes } from "./routePaths";
 import { AdministrationPage } from "./routes/AdministrationPage";
@@ -50,6 +51,10 @@ export const appRoutes: RouteObject[] = [
           {
             path: "workbench/administration",
             element: <AdministrationPage />
+          },
+          {
+            path: "workbench/registration/clients",
+            element: <RegistrationClientsPage />
           },
           {
             path: "workbench/governance/queue",

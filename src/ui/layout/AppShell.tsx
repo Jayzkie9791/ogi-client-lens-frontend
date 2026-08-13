@@ -24,6 +24,12 @@ const navigationItems = [
     implemented: true
   },
   {
+    label: "Registration",
+    permission: "view_client",
+    to: routes.registrationClients,
+    implemented: true
+  },
+  {
     label: "Administration",
     permission: "view_users",
     to: routes.administration,
