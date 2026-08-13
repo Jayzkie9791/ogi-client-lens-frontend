@@ -24,7 +24,7 @@ const navigationItems = [
   },
   {
     label: "Registration",
-    permissions: ["view_client", "view_facility"],
+    permissions: ["view_client", "view_facility", "view_staff_member"],
     to: routes.registrationClients,
     implemented: true
   },
@@ -85,9 +85,8 @@ export function AppShell() {
                   }
 
                   const navigationItem =
-                    item.label === "Registration" &&
-                    !auth.canUsePermission("view_client")
-                      ? { ...item, to: routes.registrationFacilities }
+                    item.label === "Registration"
+                      ? { ...item, to: registrationLandingPath(auth) }
                       : item;
 
                   return <NavigationListItem item={navigationItem} key={item.label} />;
@@ -126,6 +125,18 @@ type NavigationItem = {
   readonly to: string;
   readonly implemented: boolean;
 };
+
+function registrationLandingPath(auth: ReturnType<typeof useAuth>) {
+  if (auth.canUsePermission("view_client")) {
+    return routes.registrationClients;
+  }
+
+  if (auth.canUsePermission("view_facility")) {
+    return routes.registrationFacilities;
+  }
+
+  return routes.registrationPersonnel;
+}
 
 function NavigationListItem({ item }: { item: NavigationItem }) {
   return (
