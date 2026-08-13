@@ -2,7 +2,6 @@ import { useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 
 import { routes } from "../../app/routePaths";
-import { PermissionGate } from "../../auth/PermissionGate";
 import { useAuth } from "../../auth/useAuth";
 
 const navigationItems = [
@@ -13,25 +12,25 @@ const navigationItems = [
   },
   {
     label: "Operations",
-    permission: "view_operational_evidence",
+    permissions: ["view_operational_evidence"],
     to: routes.operations,
     implemented: true
   },
   {
     label: "Reviews",
-    permission: "view_operational_evidence",
+    permissions: ["view_operational_evidence"],
     to: routes.governanceQueue,
     implemented: true
   },
   {
     label: "Registration",
-    permission: "view_client",
+    permissions: ["view_client", "view_facility"],
     to: routes.registrationClients,
     implemented: true
   },
   {
     label: "Administration",
-    permission: "view_users",
+    permissions: ["view_users"],
     to: routes.administration,
     implemented: true
   }
@@ -76,18 +75,22 @@ export function AppShell() {
             >
               <ul className="flex flex-wrap gap-2">
                 {navigationItems.map((item) => {
-                  if ("permission" in item) {
-                    return (
-                      <PermissionGate
-                        key={item.label}
-                        permission={item.permission}
-                      >
-                        <NavigationListItem item={item} />
-                      </PermissionGate>
-                    );
+                  if (
+                    "permissions" in item &&
+                    !item.permissions.some((permission) =>
+                      auth.canUsePermission(permission)
+                    )
+                  ) {
+                    return null;
                   }
 
-                  return <NavigationListItem item={item} key={item.label} />;
+                  const navigationItem =
+                    item.label === "Registration" &&
+                    !auth.canUsePermission("view_client")
+                      ? { ...item, to: routes.registrationFacilities }
+                      : item;
+
+                  return <NavigationListItem item={navigationItem} key={item.label} />;
                 })}
               </ul>
             </nav>
@@ -118,7 +121,11 @@ export function AppShell() {
   );
 }
 
-type NavigationItem = (typeof navigationItems)[number];
+type NavigationItem = {
+  readonly label: string;
+  readonly to: string;
+  readonly implemented: boolean;
+};
 
 function NavigationListItem({ item }: { item: NavigationItem }) {
   return (

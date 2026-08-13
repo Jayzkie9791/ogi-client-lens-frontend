@@ -15,6 +15,7 @@ import {
   registrationClientStatuses,
   updateRegistrationClient
 } from "./registrationClientApi";
+import { RegistrationNavigation } from "./RegistrationNavigation";
 
 const permissions = {
   view: "view_client",
@@ -157,6 +158,8 @@ export function RegistrationClientsPage() {
           Manage Client / Organization registration records through the authorized backend registration contract.
         </p>
       </div>
+
+      <RegistrationNavigation />
 
       {message ? (
         <Surface role="status">

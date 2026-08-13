@@ -5,6 +5,7 @@ import { GovernanceQueuePage } from "../oets/GovernanceQueuePage";
 import { OperationalEvidenceRecordPage } from "../oets/OperationalEvidenceRecordPage";
 import { RuntimeTemplatePage } from "../oets/RuntimeTemplatePage";
 import { RegistrationClientsPage } from "../registration/RegistrationClientsPage";
+import { RegistrationFacilitiesPage } from "../registration/RegistrationFacilitiesPage";
 import { AppShell } from "../ui/layout/AppShell";
 import { routes } from "./routePaths";
 import { AdministrationPage } from "./routes/AdministrationPage";
@@ -13,7 +14,6 @@ import { NotFoundPage } from "./routes/NotFoundPage";
 import { OperationsPage } from "./routes/OperationsPage";
 import { RecordsPage } from "./routes/RecordsPage";
 import { WorkbenchPage } from "./routes/WorkbenchPage";
-
 
 export const appRoutes: RouteObject[] = [
   {
@@ -55,6 +55,10 @@ export const appRoutes: RouteObject[] = [
           {
             path: "workbench/registration/clients",
             element: <RegistrationClientsPage />
+          },
+          {
+            path: "workbench/registration/facilities",
+            element: <RegistrationFacilitiesPage />
           },
           {
             path: "workbench/governance/queue",
