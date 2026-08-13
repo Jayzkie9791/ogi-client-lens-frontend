@@ -8,6 +8,10 @@ export const routes = {
   registrationClients: "/workbench/registration/clients",
   registrationFacilities: "/workbench/registration/facilities",
   registrationPersonnel: "/workbench/registration/personnel",
+  credentials: "/workbench/credentials",
+  credentialsPersonnel: "/workbench/credentials/personnel/:staffMemberId",
+  credentialsPersonnelPath: (staffMemberId: string) =>
+    `/workbench/credentials/personnel/${encodeURIComponent(staffMemberId)}`,
   governanceQueue: "/workbench/governance/queue",
   oetsTemplate: "/workbench/oets/:templateCode",
   oetsTemplatePath: (templateCode: string) =>

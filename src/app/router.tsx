@@ -1,6 +1,10 @@
 import { createBrowserRouter, Navigate, RouteObject } from "react-router-dom";
 
 import { PublicOnlyRoute, RequireAuth } from "../auth/AuthGuards";
+import {
+  CredentialsDetailPage,
+  CredentialsListPage
+} from "../credentials/CredentialsPage";
 import { GovernanceQueuePage } from "../oets/GovernanceQueuePage";
 import { OperationalEvidenceRecordPage } from "../oets/OperationalEvidenceRecordPage";
 import { RuntimeTemplatePage } from "../oets/RuntimeTemplatePage";
@@ -64,6 +68,14 @@ export const appRoutes: RouteObject[] = [
           {
             path: "workbench/registration/personnel",
             element: <RegistrationPersonnelPage />
+          },
+          {
+            path: "workbench/credentials",
+            element: <CredentialsListPage />
+          },
+          {
+            path: "workbench/credentials/personnel/:staffMemberId",
+            element: <CredentialsDetailPage />
           },
           {
             path: "workbench/governance/queue",

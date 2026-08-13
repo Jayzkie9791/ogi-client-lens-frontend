@@ -29,6 +29,12 @@ const navigationItems = [
     implemented: true
   },
   {
+    label: "Credentials",
+    permissions: ["view_staff_member"],
+    to: routes.credentials,
+    implemented: true
+  },
+  {
     label: "Administration",
     permissions: ["view_users"],
     to: routes.administration,

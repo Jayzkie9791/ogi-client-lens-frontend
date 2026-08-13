@@ -586,7 +586,9 @@ describe("Registration Personnel frontend", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Personnel record already exists."
     );
-    expect(screen.queryByText("Credentials")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /create credential/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /issue credential/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /revoke credential/i })).not.toBeInTheDocument();
     expect(screen.queryByText("Operational Evidence")).not.toBeInTheDocument();
     expect(screen.queryByText("Risk Assessment")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Facility assignment")).not.toBeInTheDocument();
