@@ -5,6 +5,10 @@ import {
   CredentialsDetailPage,
   CredentialsListPage
 } from "../credentials/CredentialsPage";
+import {
+  CertificateDevPreviewPage,
+  CertificatePage
+} from "../credentials/CertificatePage";
 import { GovernanceQueuePage } from "../oets/GovernanceQueuePage";
 import { OperationalEvidenceRecordPage } from "../oets/OperationalEvidenceRecordPage";
 import { RuntimeTemplatePage } from "../oets/RuntimeTemplatePage";
@@ -72,6 +76,14 @@ export const appRoutes: RouteObject[] = [
           {
             path: "workbench/credentials",
             element: <CredentialsListPage />
+          },
+          {
+            path: "workbench/credentials/certificates/dev-preview",
+            element: <CertificateDevPreviewPage />
+          },
+          {
+            path: "workbench/credentials/certificates/:issuanceId",
+            element: <CertificatePage />
           },
           {
             path: "workbench/credentials/personnel/:staffMemberId",

@@ -12,6 +12,12 @@ export const routes = {
   credentialsPersonnel: "/workbench/credentials/personnel/:staffMemberId",
   credentialsPersonnelPath: (staffMemberId: string) =>
     `/workbench/credentials/personnel/${encodeURIComponent(staffMemberId)}`,
+  credentialCertificate:
+    "/workbench/credentials/certificates/:issuanceId",
+  credentialCertificatePath: (issuanceId: string) =>
+    `/workbench/credentials/certificates/${encodeURIComponent(issuanceId)}`,
+  credentialCertificateDevPreview:
+    "/workbench/credentials/certificates/dev-preview",
   governanceQueue: "/workbench/governance/queue",
   oetsTemplate: "/workbench/oets/:templateCode",
   oetsTemplatePath: (templateCode: string) =>

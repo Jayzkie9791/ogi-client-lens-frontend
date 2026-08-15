@@ -13,6 +13,15 @@ interface ApiRequestOptions<T> {
   validate: (value: unknown) => value is T;
 }
 
+interface ApiBlobRequestOptions {
+  auth?: boolean;
+}
+
+export interface ApiBlobResponse {
+  blob: Blob;
+  filename: string | null;
+}
+
 let authRuntime: AuthRuntime | null = null;
 let refreshInFlight: Promise<string | null> | null = null;
 
@@ -25,6 +34,13 @@ export async function apiRequest<T>(
   options: ApiRequestOptions<T>
 ): Promise<T> {
   return requestOnce(path, options, false);
+}
+
+export async function apiBlobRequest(
+  path: string,
+  options: ApiBlobRequestOptions = {}
+): Promise<ApiBlobResponse> {
+  return blobRequestOnce(path, options, false);
 }
 
 async function requestOnce<T>(
@@ -71,6 +87,43 @@ async function requestOnce<T>(
   return payload;
 }
 
+async function blobRequestOnce(
+  path: string,
+  options: ApiBlobRequestOptions,
+  didRetry: boolean
+): Promise<ApiBlobResponse> {
+  const response = await fetch(buildUrl(path), {
+    method: "GET",
+    headers: buildBlobHeaders(options)
+  });
+
+  if (
+    response.status === 401 &&
+    options.auth !== false &&
+    !didRetry &&
+    authRuntime
+  ) {
+    const token = await refreshAccessTokenSingleFlight();
+
+    if (token) {
+      return blobRequestOnce(path, options, true);
+    }
+
+    authRuntime.onAuthFailure();
+  }
+
+  if (!response.ok) {
+    throw await normalizeError(response);
+  }
+
+  return {
+    blob: await response.blob(),
+    filename: readContentDispositionFilename(
+      response.headers.get("Content-Disposition")
+    )
+  };
+}
+
 async function refreshAccessTokenSingleFlight() {
   if (!authRuntime) {
     return null;
@@ -93,6 +146,22 @@ function buildHeaders(options: ApiRequestOptions<unknown>) {
   if (options.body !== undefined) {
     headers.set("Content-Type", "application/json");
   }
+
+  if (options.auth !== false) {
+    const token = authRuntime?.getAccessToken();
+
+    if (token) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
+  }
+
+  return headers;
+}
+
+function buildBlobHeaders(options: ApiBlobRequestOptions) {
+  const headers = new Headers({
+    Accept: "application/pdf"
+  });
 
   if (options.auth !== false) {
     const token = authRuntime?.getAccessToken();
@@ -161,4 +230,14 @@ function stringValue(value: unknown, fallback: string) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readContentDispositionFilename(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const match = /filename="([^"]+)"/i.exec(value) ?? /filename=([^;]+)/i.exec(value);
+
+  return match?.[1]?.trim() ?? null;
 }
