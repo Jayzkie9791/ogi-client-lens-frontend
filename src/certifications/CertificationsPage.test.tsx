@@ -11,6 +11,7 @@ import { getRefreshTokenStorageKey } from "../auth/storage";
 import { AuthenticatedSession } from "../auth/types";
 import {
   CredentialsListResponse,
+  CredentialsOperationalAuthorizationProjection,
   CredentialsPersonnelDetailProjection,
   CredentialsPersonnelProjection
 } from "../credentials/credentialsApi";
@@ -20,6 +21,8 @@ const staffMemberId = "00000000-0000-4000-8000-000000300001";
 const secondStaffMemberId = "00000000-0000-4000-8000-000000300002";
 const certificationId = "00000000-0000-4000-8000-000000400001";
 const newCertificationId = "00000000-0000-4000-8000-000000400002";
+const operationalAuthorizationId = "00000000-0000-4000-8000-000000500001";
+const renewedOperationalAuthorizationId = "00000000-0000-4000-8000-000000500002";
 
 const certificationSession: AuthenticatedSession = {
   id: "00000000-0000-4000-8000-000000000001",
@@ -51,6 +54,33 @@ const issueSession: AuthenticatedSession = {
 const endorsementSession: AuthenticatedSession = {
   ...certificationSession,
   permissions: [...certificationSession.permissions, "endorse_certification"]
+};
+
+const authorizationViewSession: AuthenticatedSession = {
+  ...certificationSession,
+  permissions: [
+    ...certificationSession.permissions,
+    "view_operational_authorization"
+  ]
+};
+
+const authorizationCreateSession: AuthenticatedSession = {
+  ...authorizationViewSession,
+  permissions: [
+    ...authorizationViewSession.permissions,
+    "create_operational_authorization"
+  ]
+};
+
+const authorizationLifecycleSession: AuthenticatedSession = {
+  ...authorizationViewSession,
+  permissions: [
+    ...authorizationViewSession.permissions,
+    "renew_operational_authorization",
+    "suspend_operational_authorization",
+    "reinstate_operational_authorization",
+    "revoke_operational_authorization"
+  ]
 };
 
 const credentialsOnlySession: AuthenticatedSession = {
@@ -200,6 +230,83 @@ const anaDetailWithNewEndorsement: CredentialsPersonnelDetailProjection = {
       : certification
   )
 };
+
+const activeOperationalAuthorization: CredentialsOperationalAuthorizationProjection = {
+  id: operationalAuthorizationId,
+  authorization_number: "AUTH-001",
+  authorization_level: "L3",
+  program: {
+    program_code: "OPEN_WATER_GUARDIAN",
+    certification_level: "L3",
+    display_name: "Open Water Guardian",
+    qualification_label: "Open Water Guardian",
+    validity_period: {
+      unit: "YEAR",
+      value: 1
+    },
+    teaching_authority_levels: [],
+    certificate_eligible: true,
+    certificate_template_family_code: "OGI_L1_L7_CERTIFICATE_FAMILY",
+    certificate_template_variant_code: null
+  },
+  authorization_status: "ACTIVE",
+  issue_date: "2026-01-05T00:00:00.000Z",
+  expiry_date: "2027-01-05T00:00:00.000Z",
+  renewal_date: null,
+  certification_id: certificationId,
+  previous_authorization_id: null
+};
+
+const suspendedOperationalAuthorization: CredentialsOperationalAuthorizationProjection = {
+  ...activeOperationalAuthorization,
+  authorization_status: "SUSPENDED"
+};
+
+const revokedOperationalAuthorization: CredentialsOperationalAuthorizationProjection = {
+  ...activeOperationalAuthorization,
+  authorization_status: "REVOKED"
+};
+
+const renewedOperationalAuthorization: CredentialsOperationalAuthorizationProjection = {
+  ...activeOperationalAuthorization,
+  id: renewedOperationalAuthorizationId,
+  authorization_number: "AUTH-002",
+  issue_date: "2026-02-01T00:00:00.000Z",
+  expiry_date: "2027-02-01T00:00:00.000Z",
+  renewal_date: "2026-02-01T00:00:00.000Z",
+  previous_authorization_id: operationalAuthorizationId
+};
+
+function detailWithAuthorizations(
+  authorizations: CredentialsOperationalAuthorizationProjection[]
+): CredentialsPersonnelDetailProjection {
+  return {
+    ...anaDetail,
+    operational_authorizations: authorizations
+  };
+}
+
+function authorizationCommandResponse(
+  authorization: CredentialsOperationalAuthorizationProjection
+) {
+  return {
+    success: true,
+    data: {
+      id: authorization.id,
+      authorization_number: authorization.authorization_number,
+      authorization_level: authorization.authorization_level,
+      authorization_status: authorization.authorization_status,
+      issue_date: authorization.issue_date,
+      expiry_date: authorization.expiry_date,
+      renewal_date: authorization.renewal_date,
+      upgrade_requested: false,
+      staff_member_id: staffMemberId,
+      certification_id: authorization.certification_id,
+      previous_authorization_id: authorization.previous_authorization_id,
+      created_by_user_id: authorizationLifecycleSession.id
+    }
+  };
+}
 
 interface MockResponse {
   status: number;
@@ -638,6 +745,443 @@ describe("Certification workspace frontend", () => {
     await user.click(submitButton);
 
     expect(await screen.findByRole("alert")).toHaveTextContent(message);
+    expect(screen.queryByText("Backend detail should not be shown.")).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        calls.filter((call) => call.url === `/api/v1/credentials/personnel/${staffMemberId}`)
+      ).toHaveLength(2)
+    );
+  });
+
+  it("renders Operational Authorization only with view_operational_authorization", async () => {
+    const user = userEvent.setup();
+
+    mockFetchRoutes(
+      certificationRoutes(
+        detailWithAuthorizations([activeOperationalAuthorization]),
+        certificationSession
+      )
+    );
+
+    renderWithRoute(routes.certifications);
+
+    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+
+    expect(screen.queryByRole("heading", { name: "Operational Authorization" })).not.toBeInTheDocument();
+    expect(screen.queryByText("AUTH-001")).not.toBeInTheDocument();
+
+    cleanup();
+    vi.unstubAllGlobals();
+    window.sessionStorage.clear();
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    mockFetchRoutes(
+      certificationRoutes(
+        detailWithAuthorizations([activeOperationalAuthorization]),
+        authorizationViewSession
+      )
+    );
+
+    renderWithRoute(routes.certifications);
+    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Operational Authorization" })
+    ).toBeInTheDocument();
+    expect(screen.getByText("AUTH-001")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create Operational Authorization" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Renew" })).not.toBeInTheDocument();
+  });
+
+  it("creates Operational Authorization with the exact backend contract and refetches authoritative projections", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetchRoutes([
+      ...authRoutes(authorizationCreateSession),
+      {
+        url: "/api/v1/credentials",
+        responses: [
+          { status: 200, body: credentialsListResponse },
+          { status: 200, body: credentialsListResponse }
+        ]
+      },
+      {
+        url: `/api/v1/credentials/personnel/${staffMemberId}`,
+        responses: [
+          { status: 200, body: anaDetail },
+          { status: 200, body: detailWithAuthorizations([activeOperationalAuthorization]) }
+        ]
+      },
+      {
+        method: "POST",
+        url: "/api/v1/operational-authorizations",
+        responses: [
+          {
+            status: 201,
+            body: authorizationCommandResponse(activeOperationalAuthorization)
+          }
+        ]
+      }
+    ]);
+
+    renderWithRoute(routes.certifications);
+
+    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "Create Operational Authorization" }));
+    await user.type(screen.getByLabelText("Authorization number"), "AUTH-001");
+    await user.selectOptions(screen.getByLabelText("Authorization level"), "L3");
+    await user.type(screen.getByLabelText("Issue date"), "2026-01-05");
+    await user.type(screen.getByLabelText("Expiry date"), "2027-01-05");
+    const createButtons = screen.getAllByRole("button", {
+      name: "Create Operational Authorization"
+    });
+
+    await user.click(createButtons[createButtons.length - 1]);
+
+    expect(
+      await screen.findByText("Operational Authorization created successfully.")
+    ).toBeInTheDocument();
+    expect(await screen.findByText("AUTH-001")).toBeInTheDocument();
+
+    const createCall = calls.find(
+      (call) => call.url === "/api/v1/operational-authorizations"
+    );
+
+    expect(createCall?.init?.method).toBe("POST");
+    expect(JSON.parse(String(createCall?.init?.body))).toEqual({
+      authorization_number: "AUTH-001",
+      authorization_level: "L3",
+      issue_date: "2026-01-05T00:00:00.000Z",
+      expiry_date: "2027-01-05T00:00:00.000Z",
+      certification_id: certificationId,
+      staff_member_id: staffMemberId
+    });
+    expect(
+      calls.filter((call) => call.url === `/api/v1/credentials/personnel/${staffMemberId}`)
+    ).toHaveLength(2);
+    expect(calls.map(({ url }) => url)).not.toContain("/api/v1/credentials/issuances");
+    expect(calls.map(({ url }) => url)).not.toContain("/api/v1/registration/facility-assignments");
+    expect(calls.map(({ url }) => url)).not.toContain("/api/v1/auth/user-facility-access");
+  });
+
+  it("gates Operational Authorization actions by lifecycle status and permission", async () => {
+    const user = userEvent.setup();
+
+    mockFetchRoutes(
+      certificationRoutes(
+        detailWithAuthorizations([activeOperationalAuthorization]),
+        authorizationViewSession
+      )
+    );
+
+    renderWithRoute(routes.certifications);
+    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+
+    expect(await screen.findByText("AUTH-001")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Renew" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Suspend" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Revoke" })).not.toBeInTheDocument();
+
+    cleanup();
+    vi.unstubAllGlobals();
+    window.sessionStorage.clear();
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    mockFetchRoutes(
+      certificationRoutes(
+        detailWithAuthorizations([activeOperationalAuthorization]),
+        authorizationLifecycleSession
+      )
+    );
+
+    renderWithRoute(routes.certifications);
+    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+
+    expect(await screen.findByRole("button", { name: "Renew" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Suspend" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Revoke" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reinstate" })).not.toBeInTheDocument();
+
+    cleanup();
+    vi.unstubAllGlobals();
+    window.sessionStorage.clear();
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    mockFetchRoutes(
+      certificationRoutes(
+        detailWithAuthorizations([suspendedOperationalAuthorization]),
+        authorizationLifecycleSession
+      )
+    );
+
+    renderWithRoute(routes.certifications);
+    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+
+    expect(await screen.findByRole("button", { name: "Reinstate" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Revoke" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Renew" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Suspend" })).not.toBeInTheDocument();
+
+    cleanup();
+    vi.unstubAllGlobals();
+    window.sessionStorage.clear();
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    mockFetchRoutes(
+      certificationRoutes(
+        detailWithAuthorizations([revokedOperationalAuthorization]),
+        authorizationLifecycleSession
+      )
+    );
+
+    renderWithRoute(routes.certifications);
+    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+
+    expect(await screen.findByText("AUTH-001")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Renew" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reinstate" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Revoke" })).not.toBeInTheDocument();
+  });
+
+  it("renders multiple Operational Authorization records without collapsing retained history", async () => {
+    const user = userEvent.setup();
+
+    mockFetchRoutes(
+      certificationRoutes(
+        detailWithAuthorizations([
+          renewedOperationalAuthorization,
+          revokedOperationalAuthorization
+        ]),
+        authorizationLifecycleSession
+      )
+    );
+
+    renderWithRoute(routes.certifications);
+
+    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+
+    expect(await screen.findByText("AUTH-002")).toBeInTheDocument();
+    expect(screen.getByText("AUTH-001")).toBeInTheDocument();
+    expect(screen.getByText("Previous authorization retained as metadata.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Renew" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Suspend" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reinstate" })).not.toBeInTheDocument();
+  });
+
+  it("renews Operational Authorization with exact contract and keeps previous authorization metadata read-only", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetchRoutes([
+      ...authRoutes(authorizationLifecycleSession),
+      {
+        url: "/api/v1/credentials",
+        responses: [
+          { status: 200, body: credentialsListResponse },
+          { status: 200, body: credentialsListResponse }
+        ]
+      },
+      {
+        url: `/api/v1/credentials/personnel/${staffMemberId}`,
+        responses: [
+          { status: 200, body: detailWithAuthorizations([activeOperationalAuthorization]) },
+          { status: 200, body: detailWithAuthorizations([renewedOperationalAuthorization]) }
+        ]
+      },
+      {
+        method: "POST",
+        url: `/api/v1/operational-authorizations/${operationalAuthorizationId}/renew`,
+        responses: [
+          {
+            status: 201,
+            body: authorizationCommandResponse(renewedOperationalAuthorization)
+          }
+        ]
+      }
+    ]);
+
+    renderWithRoute(routes.certifications);
+
+    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "Renew" }));
+    await user.type(screen.getByLabelText("Authorization number"), "AUTH-002");
+    await user.type(screen.getByLabelText("Issue date"), "2026-02-01");
+    await user.type(screen.getByLabelText("Expiry date"), "2027-02-01");
+    await user.click(screen.getByRole("button", { name: "Renew Authorization" }));
+
+    expect(
+      await screen.findByText("Operational Authorization renewed successfully.")
+    ).toBeInTheDocument();
+    expect(await screen.findByText("AUTH-002")).toBeInTheDocument();
+    expect(screen.getByText("Previous authorization retained as metadata.")).toBeInTheDocument();
+
+    const renewCall = calls.find(
+      (call) =>
+        call.url === `/api/v1/operational-authorizations/${operationalAuthorizationId}/renew`
+    );
+
+    expect(renewCall?.init?.method).toBe("POST");
+    expect(JSON.parse(String(renewCall?.init?.body))).toEqual({
+      authorization_number: "AUTH-002",
+      issue_date: "2026-02-01T00:00:00.000Z",
+      expiry_date: "2027-02-01T00:00:00.000Z"
+    });
+  });
+
+  it("prevents duplicate Operational Authorization lifecycle submission while pending", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetchRoutes([
+      ...authRoutes(authorizationLifecycleSession),
+      {
+        url: "/api/v1/credentials",
+        responses: [
+          { status: 200, body: credentialsListResponse },
+          { status: 200, body: credentialsListResponse }
+        ]
+      },
+      {
+        url: `/api/v1/credentials/personnel/${staffMemberId}`,
+        responses: [
+          { status: 200, body: detailWithAuthorizations([activeOperationalAuthorization]) },
+          { status: 200, body: detailWithAuthorizations([suspendedOperationalAuthorization]) }
+        ]
+      },
+      {
+        method: "POST",
+        url: `/api/v1/operational-authorizations/${operationalAuthorizationId}/suspend`,
+        responses: [
+          {
+            status: 200,
+            delayMs: 50,
+            body: authorizationCommandResponse(suspendedOperationalAuthorization)
+          }
+        ]
+      }
+    ]);
+
+    renderWithRoute(routes.certifications);
+
+    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "Suspend" }));
+    await user.type(screen.getByLabelText("Reason"), "Temporary operating restriction");
+    await user.click(screen.getByRole("button", { name: "Suspend Authorization" }));
+    await user.click(screen.getByRole("button", { name: "Suspending" }));
+
+    expect(
+      await screen.findByText("Operational Authorization suspended successfully.")
+    ).toBeInTheDocument();
+    expect(
+      calls.filter(
+        (call) =>
+          call.url ===
+          `/api/v1/operational-authorizations/${operationalAuthorizationId}/suspend`
+      )
+    ).toHaveLength(1);
+  });
+
+  it.each([
+    ["suspend", "Suspend", "Suspend Authorization", "/suspend", "Operational Authorization suspended successfully."],
+    ["reinstate", "Reinstate", "Reinstate Authorization", "/reinstate", "Operational Authorization reinstated successfully."],
+    ["revoke", "Revoke", "Revoke Authorization", "/revoke", "Operational Authorization revoked successfully."]
+  ])(
+    "submits %s Operational Authorization governance commands with reason and optional notes only",
+    async (_mode, actionLabel, submitLabel, suffix, successMessage) => {
+      const user = userEvent.setup();
+      const sourceAuthorization =
+        actionLabel === "Reinstate"
+          ? suspendedOperationalAuthorization
+          : activeOperationalAuthorization;
+      const updatedAuthorization =
+        actionLabel === "Suspend"
+          ? suspendedOperationalAuthorization
+          : actionLabel === "Revoke"
+          ? revokedOperationalAuthorization
+          : activeOperationalAuthorization;
+      const { calls } = mockFetchRoutes([
+        ...authRoutes(authorizationLifecycleSession),
+        {
+          url: "/api/v1/credentials",
+          responses: [
+            { status: 200, body: credentialsListResponse },
+            { status: 200, body: credentialsListResponse }
+          ]
+        },
+        {
+          url: `/api/v1/credentials/personnel/${staffMemberId}`,
+          responses: [
+            { status: 200, body: detailWithAuthorizations([sourceAuthorization]) },
+            { status: 200, body: detailWithAuthorizations([updatedAuthorization]) }
+          ]
+        },
+        {
+          method: "POST",
+          url: `/api/v1/operational-authorizations/${operationalAuthorizationId}${suffix}`,
+          responses: [
+            {
+              status: 200,
+              body: authorizationCommandResponse(updatedAuthorization)
+            }
+          ]
+        }
+      ]);
+
+      renderWithRoute(routes.certifications);
+
+      await user.click(await screen.findByRole("button", { name: "View Certification" }));
+      await user.click(await screen.findByRole("button", { name: actionLabel }));
+      await user.type(screen.getByLabelText("Reason"), "Governed lifecycle update");
+      await user.type(screen.getByLabelText("Notes"), "Reviewed by OGI");
+      await user.click(screen.getByRole("button", { name: submitLabel }));
+
+      expect(await screen.findByText(successMessage)).toBeInTheDocument();
+
+      const commandCall = calls.find(
+        (call) => call.url === `/api/v1/operational-authorizations/${operationalAuthorizationId}${suffix}`
+      );
+
+      expect(commandCall?.init?.method).toBe("POST");
+      expect(JSON.parse(String(commandCall?.init?.body))).toEqual({
+        reason: "Governed lifecycle update",
+        notes: "Reviewed by OGI"
+      });
+    }
+  );
+
+  it("maps Operational Authorization conflicts safely and refetches persisted state", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetchRoutes([
+      ...authRoutes(authorizationLifecycleSession),
+      {
+        url: "/api/v1/credentials",
+        responses: [{ status: 200, body: credentialsListResponse }]
+      },
+      {
+        url: `/api/v1/credentials/personnel/${staffMemberId}`,
+        responses: [
+          { status: 200, body: detailWithAuthorizations([activeOperationalAuthorization]) },
+          { status: 200, body: detailWithAuthorizations([activeOperationalAuthorization]) }
+        ]
+      },
+      {
+        method: "POST",
+        url: `/api/v1/operational-authorizations/${operationalAuthorizationId}/suspend`,
+        responses: [
+          {
+            status: 409,
+            body: {
+              success: false,
+              code: "OPERATIONAL_AUTHORIZATION_CONFLICT",
+              message: "Backend detail should not be shown.",
+              status: 409
+            }
+          }
+        ]
+      }
+    ]);
+
+    renderWithRoute(routes.certifications);
+
+    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "Suspend" }));
+    await user.type(screen.getByLabelText("Reason"), "Duplicate lifecycle command");
+    await user.click(screen.getByRole("button", { name: "Suspend Authorization" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Operational Authorization lifecycle action could not be completed because of a conflict."
+    );
     expect(screen.queryByText("Backend detail should not be shown.")).not.toBeInTheDocument();
     await waitFor(() =>
       expect(

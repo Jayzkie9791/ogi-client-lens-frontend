@@ -1,5 +1,5 @@
 import { FormEvent, ReactNode, useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { isApiError } from "../api/errors";
 import { useAuth } from "../auth/useAuth";
@@ -8,6 +8,7 @@ import { Surface } from "../ui/components/Surface";
 import {
   CredentialsCertificationEndorsementProjection,
   CredentialsCertificationProjection,
+  CredentialsOperationalAuthorizationProjection,
   CredentialsPersonnelDetailProjection,
   CredentialsPersonnelProjection,
   getPersonnelCredentials,
@@ -22,12 +23,26 @@ import {
   createCertification
 } from "./certificationsApi";
 import { CertificationWorkspaceTabs } from "./CertificationWorkspaceTabs";
+import {
+  createOperationalAuthorization,
+  GovernOperationalAuthorizationRequest,
+  reinstateOperationalAuthorization,
+  renewOperationalAuthorization,
+  revokeOperationalAuthorization,
+  suspendOperationalAuthorization
+} from "./operationalAuthorizationApi";
 
 const viewCertificationPermission = "view_certification";
 const viewPersonnelPermission = "view_staff_member";
 const createDraftPermission = "create_certification_draft";
 const issueCertificationPermission = "issue_certification";
 const endorseCertificationPermission = "endorse_certification";
+const viewOperationalAuthorizationPermission = "view_operational_authorization";
+const createOperationalAuthorizationPermission = "create_operational_authorization";
+const renewOperationalAuthorizationPermission = "renew_operational_authorization";
+const suspendOperationalAuthorizationPermission = "suspend_operational_authorization";
+const reinstateOperationalAuthorizationPermission = "reinstate_operational_authorization";
+const revokeOperationalAuthorizationPermission = "revoke_operational_authorization";
 
 interface CertificationRegistryEntry {
   readonly certificationId: string;
@@ -57,6 +72,20 @@ interface EndorsementFormState {
   endorsement: CertificationEndorsement;
 }
 
+type AuthorizationMode = "create" | "renew" | "suspend" | "reinstate" | "revoke";
+
+interface CreateAuthorizationFormState {
+  authorizationNumber: string;
+  authorizationLevel: CertificationLevel;
+  issueDate: string;
+  expiryDate: string;
+}
+
+interface AuthorizationGovernanceFormState {
+  reason: string;
+  notes: string;
+}
+
 const emptyForm: CreateCertificationFormState = {
   staffMemberId: "",
   certificationLevel: "L1",
@@ -74,6 +103,18 @@ const emptyEndorsementForm: EndorsementFormState = {
   endorsement: "POOL"
 };
 
+const emptyCreateAuthorizationForm: CreateAuthorizationFormState = {
+  authorizationNumber: "",
+  authorizationLevel: "L1",
+  issueDate: "",
+  expiryDate: ""
+};
+
+const emptyAuthorizationGovernanceForm: AuthorizationGovernanceFormState = {
+  reason: "",
+  notes: ""
+};
+
 export function CertificationsPage() {
   const auth = useAuth();
   const queryClient = useQueryClient();
@@ -82,14 +123,36 @@ export function CertificationsPage() {
   const canCreateDraft = auth.canUsePermission(createDraftPermission);
   const canIssueCertification = auth.canUsePermission(issueCertificationPermission);
   const canEndorseCertification = auth.canUsePermission(endorseCertificationPermission);
+  const canViewOperationalAuthorization = auth.canUsePermission(viewOperationalAuthorizationPermission);
+  const canCreateOperationalAuthorization = auth.canUsePermission(
+    createOperationalAuthorizationPermission
+  );
+  const canRenewOperationalAuthorization = auth.canUsePermission(
+    renewOperationalAuthorizationPermission
+  );
+  const canSuspendOperationalAuthorization = auth.canUsePermission(
+    suspendOperationalAuthorizationPermission
+  );
+  const canReinstateOperationalAuthorization = auth.canUsePermission(
+    reinstateOperationalAuthorizationPermission
+  );
+  const canRevokeOperationalAuthorization = auth.canUsePermission(
+    revokeOperationalAuthorizationPermission
+  );
   const [selectedCertificationId, setSelectedCertificationId] = useState<string | null>(null);
   const [createMode, setCreateMode] = useState(false);
   const [endorsementMode, setEndorsementMode] = useState(false);
+  const [authorizationMode, setAuthorizationMode] = useState<AuthorizationMode | null>(null);
   const [form, setForm] = useState<CreateCertificationFormState>(emptyForm);
   const [endorsementForm, setEndorsementForm] = useState<EndorsementFormState>(
     emptyEndorsementForm
   );
   const [endorsementSuccess, setEndorsementSuccess] = useState<string | null>(null);
+  const [authorizationSuccess, setAuthorizationSuccess] = useState<string | null>(null);
+  const [createAuthorizationForm, setCreateAuthorizationForm] =
+    useState<CreateAuthorizationFormState>(emptyCreateAuthorizationForm);
+  const [authorizationGovernanceForm, setAuthorizationGovernanceForm] =
+    useState<AuthorizationGovernanceFormState>(emptyAuthorizationGovernanceForm);
 
   const credentialsQuery = useQuery({
     queryKey: ["credentials", "certifications-workspace"],
@@ -173,6 +236,67 @@ export function CertificationsPage() {
     }
   });
 
+  const createAuthorizationMutation = useMutation({
+    mutationFn: () =>
+      createOperationalAuthorization({
+        authorization_number: createAuthorizationForm.authorizationNumber.trim(),
+        authorization_level: createAuthorizationForm.authorizationLevel,
+        issue_date: toIsoDate(createAuthorizationForm.issueDate),
+        expiry_date: toIsoDate(createAuthorizationForm.expiryDate),
+        certification_id: selectedCertificationId ?? "",
+        staff_member_id: selectedEntry?.staffMemberId ?? ""
+      }),
+    onSuccess: async () => {
+      setAuthorizationMode(null);
+      setCreateAuthorizationForm(emptyCreateAuthorizationForm);
+      setAuthorizationSuccess("Operational Authorization created successfully.");
+      await invalidateAuthorizationQueries(queryClient, selectedDetailQueryKey);
+    },
+    onError: async () => {
+      if (selectedEntry) {
+        await queryClient.invalidateQueries({ queryKey: selectedDetailQueryKey });
+      }
+    }
+  });
+
+  const authorizationCommandMutation = useMutation({
+    mutationFn: (payload: {
+      authorizationId: string;
+      mode: Exclude<AuthorizationMode, "create">;
+    }) => {
+      if (payload.mode === "renew") {
+        return renewOperationalAuthorization(payload.authorizationId, {
+          authorization_number: createAuthorizationForm.authorizationNumber.trim(),
+          issue_date: toIsoDate(createAuthorizationForm.issueDate),
+          expiry_date: toIsoDate(createAuthorizationForm.expiryDate)
+        });
+      }
+
+      const governancePayload = governanceRequestBody(authorizationGovernanceForm);
+
+      if (payload.mode === "suspend") {
+        return suspendOperationalAuthorization(payload.authorizationId, governancePayload);
+      }
+
+      if (payload.mode === "reinstate") {
+        return reinstateOperationalAuthorization(payload.authorizationId, governancePayload);
+      }
+
+      return revokeOperationalAuthorization(payload.authorizationId, governancePayload);
+    },
+    onSuccess: async (_authorization, payload) => {
+      setAuthorizationMode(null);
+      setCreateAuthorizationForm(emptyCreateAuthorizationForm);
+      setAuthorizationGovernanceForm(emptyAuthorizationGovernanceForm);
+      setAuthorizationSuccess(authorizationSuccessMessage(payload.mode));
+      await invalidateAuthorizationQueries(queryClient, selectedDetailQueryKey);
+    },
+    onError: async () => {
+      if (selectedEntry) {
+        await queryClient.invalidateQueries({ queryKey: selectedDetailQueryKey });
+      }
+    }
+  });
   const selectedCertification = detailQuery.data
     ? findCertification(detailQuery.data, selectedCertificationId)
     : null;
@@ -264,8 +388,22 @@ export function CertificationsPage() {
               />
             ) : selectedEntry ? (
               <CertificationDetailPanel
+                authorizationCommandError={authorizationCommandMutation.error}
+                authorizationCommandPending={authorizationCommandMutation.isPending}
+                authorizationGovernanceForm={authorizationGovernanceForm}
+                authorizationMode={authorizationMode}
+                authorizationSuccess={authorizationSuccess}
+                canCreateOperationalAuthorization={canCreateOperationalAuthorization}
                 canEndorseCertification={canEndorseCertification}
+                canReinstateOperationalAuthorization={canReinstateOperationalAuthorization}
+                canRenewOperationalAuthorization={canRenewOperationalAuthorization}
+                canRevokeOperationalAuthorization={canRevokeOperationalAuthorization}
+                canSuspendOperationalAuthorization={canSuspendOperationalAuthorization}
+                canViewOperationalAuthorization={canViewOperationalAuthorization}
                 certification={selectedCertification}
+                createAuthorizationError={createAuthorizationMutation.error}
+                createAuthorizationForm={createAuthorizationForm}
+                createAuthorizationPending={createAuthorizationMutation.isPending}
                 detail={detailQuery.data ?? null}
                 endorsementForm={endorsementForm}
                 endorsementMode={endorsementMode}
@@ -275,16 +413,47 @@ export function CertificationsPage() {
                 entry={selectedEntry}
                 error={detailQuery.error}
                 loading={detailQuery.isLoading}
+                onCancelAuthorization={() => {
+                  setAuthorizationMode(null);
+                  setCreateAuthorizationForm(emptyCreateAuthorizationForm);
+                  setAuthorizationGovernanceForm(emptyAuthorizationGovernanceForm);
+                  createAuthorizationMutation.reset();
+                  authorizationCommandMutation.reset();
+                }}
                 onCancelEndorsement={() => {
                   setEndorsementMode(false);
                   setEndorsementForm(emptyEndorsementForm);
                   endorsementMutation.reset();
                 }}
+                onChangeAuthorizationGovernance={setAuthorizationGovernanceForm}
+                onChangeCreateAuthorization={setCreateAuthorizationForm}
                 onChangeEndorsement={setEndorsementForm}
+                onStartAuthorization={(mode) => {
+                  setAuthorizationMode(mode);
+                  setAuthorizationSuccess(null);
+                  createAuthorizationMutation.reset();
+                  authorizationCommandMutation.reset();
+                }}
                 onStartEndorsement={() => {
                   setEndorsementMode(true);
                   setEndorsementSuccess(null);
                   endorsementMutation.reset();
+                }}
+                onSubmitAuthorization={(event, authorization) => {
+                  event.preventDefault();
+                  if (authorizationMode === "create") {
+                    createAuthorizationMutation.mutate();
+                    return;
+                  }
+
+                  if (!authorization || !authorizationMode) {
+                    return;
+                  }
+
+                  authorizationCommandMutation.mutate({
+                    authorizationId: authorization.id,
+                    mode: authorizationMode
+                  });
                 }}
                 onSubmitEndorsement={(event) => {
                   event.preventDefault();
@@ -296,8 +465,7 @@ export function CertificationsPage() {
                     endorsement: endorsementForm.endorsement
                   });
                 }}
-              />
-            ) : (
+              />            ) : (
               <Surface>
                 <h2 className="text-base font-semibold text-text-primary">
                   Select a Certification
@@ -408,8 +576,22 @@ function CertificationRegistry({
 }
 
 function CertificationDetailPanel({
+  authorizationCommandError,
+  authorizationCommandPending,
+  authorizationGovernanceForm,
+  authorizationMode,
+  authorizationSuccess,
+  canCreateOperationalAuthorization,
   canEndorseCertification,
+  canReinstateOperationalAuthorization,
+  canRenewOperationalAuthorization,
+  canRevokeOperationalAuthorization,
+  canSuspendOperationalAuthorization,
+  canViewOperationalAuthorization,
   certification,
+  createAuthorizationError,
+  createAuthorizationForm,
+  createAuthorizationPending,
   detail,
   endorsementForm,
   endorsementMode,
@@ -419,13 +601,32 @@ function CertificationDetailPanel({
   entry,
   error,
   loading,
+  onCancelAuthorization,
   onCancelEndorsement,
+  onChangeAuthorizationGovernance,
+  onChangeCreateAuthorization,
   onChangeEndorsement,
+  onStartAuthorization,
   onStartEndorsement,
+  onSubmitAuthorization,
   onSubmitEndorsement
 }: {
+  authorizationCommandError: Error | null;
+  authorizationCommandPending: boolean;
+  authorizationGovernanceForm: AuthorizationGovernanceFormState;
+  authorizationMode: AuthorizationMode | null;
+  authorizationSuccess: string | null;
+  canCreateOperationalAuthorization: boolean;
   canEndorseCertification: boolean;
+  canReinstateOperationalAuthorization: boolean;
+  canRenewOperationalAuthorization: boolean;
+  canRevokeOperationalAuthorization: boolean;
+  canSuspendOperationalAuthorization: boolean;
+  canViewOperationalAuthorization: boolean;
   certification: CredentialsCertificationProjection | null;
+  createAuthorizationError: Error | null;
+  createAuthorizationForm: CreateAuthorizationFormState;
+  createAuthorizationPending: boolean;
   detail: CredentialsPersonnelDetailProjection | null;
   endorsementForm: EndorsementFormState;
   endorsementMode: boolean;
@@ -435,9 +636,17 @@ function CertificationDetailPanel({
   entry: CertificationRegistryEntry;
   error: Error | null;
   loading: boolean;
+  onCancelAuthorization: () => void;
   onCancelEndorsement: () => void;
+  onChangeAuthorizationGovernance: (form: AuthorizationGovernanceFormState) => void;
+  onChangeCreateAuthorization: (form: CreateAuthorizationFormState) => void;
   onChangeEndorsement: (form: EndorsementFormState) => void;
+  onStartAuthorization: (mode: AuthorizationMode) => void;
   onStartEndorsement: () => void;
+  onSubmitAuthorization: (
+    event: FormEvent<HTMLFormElement>,
+    authorization: CredentialsOperationalAuthorizationProjection | null
+  ) => void;
   onSubmitEndorsement: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   if (loading) {
@@ -459,6 +668,11 @@ function CertificationDetailPanel({
       </SafeState>
     );
   }
+
+  const linkedAuthorizations = authorizationsForCertification(
+    detail.operational_authorizations,
+    certification.id
+  );
 
   return (
     <Surface>
@@ -505,9 +719,31 @@ function CertificationDetailPanel({
         successMessage={endorsementSuccess}
         submitting={endorsing}
       />
-      <p className="mt-4 text-xs text-text-muted">
-        Operational Authorization lifecycle actions are read-only in this workspace slice.
-      </p>
+      {canViewOperationalAuthorization ? (
+        <OperationalAuthorizationSection
+          authorizationCommandError={authorizationCommandError}
+          authorizationCommandPending={authorizationCommandPending}
+          authorizationGovernanceForm={authorizationGovernanceForm}
+          authorizationMode={authorizationMode}
+          authorizationSuccess={authorizationSuccess}
+          authorizations={linkedAuthorizations}
+          canCreate={canCreateOperationalAuthorization}
+          canReinstate={canReinstateOperationalAuthorization}
+          canRenew={canRenewOperationalAuthorization}
+          canRevoke={canRevokeOperationalAuthorization}
+          canSuspend={canSuspendOperationalAuthorization}
+          certification={certification}
+          createAuthorizationError={createAuthorizationError}
+          createAuthorizationForm={createAuthorizationForm}
+          createAuthorizationPending={createAuthorizationPending}
+          detail={detail}
+          onCancel={onCancelAuthorization}
+          onChangeCreate={onChangeCreateAuthorization}
+          onChangeGovernance={onChangeAuthorizationGovernance}
+          onStart={onStartAuthorization}
+          onSubmit={onSubmitAuthorization}
+        />
+      ) : null}
     </Surface>
   );
 }
@@ -537,10 +773,13 @@ function EndorsementsSection({
   successMessage: string | null;
   submitting: boolean;
 }) {
-  const endorsements = endorsementsByMostRecent(certification.endorsements);
+  const existingEndorsements = endorsementsByMostRecent(certification.endorsements);
 
   return (
-    <section aria-labelledby="certification-endorsements-heading" className="mt-5 border-t border-border pt-4">
+    <section
+      aria-labelledby="certification-endorsements-heading"
+      className="mt-5 border-t border-border pt-4"
+    >
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h3
@@ -550,7 +789,7 @@ function EndorsementsSection({
             Endorsements
           </h3>
           <p className="mt-1 text-sm text-text-muted">
-            Endorsements are attached to the selected Certification record.
+            Endorsements extend the existing Certification record without issuing credentials.
           </p>
         </div>
         {canEndorseCertification && !endorsementMode ? (
@@ -561,42 +800,42 @@ function EndorsementsSection({
       </div>
 
       {successMessage ? (
-        <p className="mt-3 rounded-component border border-border bg-elevated px-3 py-2 text-sm text-text-primary" role="status">
+        <p
+          className="mt-3 rounded-component border border-border bg-elevated px-3 py-2 text-sm text-text-primary"
+          role="status"
+        >
           {successMessage}
         </p>
       ) : null}
 
-      {endorsements.length === 0 ? (
+      {existingEndorsements.length === 0 ? (
         <p className="mt-3 text-sm text-text-muted">No endorsements recorded.</p>
       ) : (
         <ul className="mt-3 space-y-2">
-          {endorsements.map((endorsement) => (
-            <li
-              className="rounded-component border border-border bg-elevated px-3 py-2"
-              key={`${certification.id}-${endorsement.endorsement}`}
-            >
-              <p className="text-sm font-semibold text-text-primary">
+          {existingEndorsements.map((endorsement) => (
+              <li
+                className="rounded-component border border-border bg-elevated px-3 py-2 text-sm"
+              key={`${endorsement.endorsement}-${endorsement.created_at}`}
+              >
+              <span className="font-semibold text-text-primary">
                 {displayCode(endorsement.endorsement)}
-              </p>
-              <p className="mt-1 text-xs text-text-muted">
+              </span>
+              <span className="ml-2 text-text-muted">
                 Recorded {formatDate(endorsement.created_at)}
-              </p>
+              </span>
             </li>
           ))}
         </ul>
       )}
 
       {endorsementMode ? (
-        <form className="mt-4 space-y-4 rounded-component border border-border bg-surface p-4" onSubmit={onSubmit}>
-          <div>
-            <h4 className="text-sm font-semibold text-text-primary">
-              Add Endorsement
-            </h4>
-            <p className="mt-1 text-sm text-text-muted">
-              Endorsing {programLabel(certification)} certificate {certification.certification_number}.
-            </p>
-          </div>
-          {error ? <CertificationErrorState compact error={error} operation="endorsement" /> : null}
+        <form className="mt-4 space-y-4" onSubmit={onSubmit}>
+          <p className="text-sm text-text-muted">
+            Endorsing {programLabel(certification)} certificate {certification.certification_number}.
+          </p>
+          {error ? (
+            <CertificationErrorState error={error} operation="endorsement" compact />
+          ) : null}
           <label className="block text-sm font-semibold text-text-primary">
             Endorsement
             <select
@@ -629,6 +868,374 @@ function EndorsementsSection({
   );
 }
 
+function OperationalAuthorizationSection({
+  authorizationCommandError,
+  authorizationCommandPending,
+  authorizationGovernanceForm,
+  authorizationMode,
+  authorizationSuccess,
+  authorizations,
+  canCreate,
+  canReinstate,
+  canRenew,
+  canRevoke,
+  canSuspend,
+  certification,
+  createAuthorizationError,
+  createAuthorizationForm,
+  createAuthorizationPending,
+  detail,
+  onCancel,
+  onChangeCreate,
+  onChangeGovernance,
+  onStart,
+  onSubmit
+}: {
+  authorizationCommandError: Error | null;
+  authorizationCommandPending: boolean;
+  authorizationGovernanceForm: AuthorizationGovernanceFormState;
+  authorizationMode: AuthorizationMode | null;
+  authorizationSuccess: string | null;
+  authorizations: CredentialsOperationalAuthorizationProjection[];
+  canCreate: boolean;
+  canReinstate: boolean;
+  canRenew: boolean;
+  canRevoke: boolean;
+  canSuspend: boolean;
+  certification: CredentialsCertificationProjection;
+  createAuthorizationError: Error | null;
+  createAuthorizationForm: CreateAuthorizationFormState;
+  createAuthorizationPending: boolean;
+  detail: CredentialsPersonnelDetailProjection;
+  onCancel: () => void;
+  onChangeCreate: (form: CreateAuthorizationFormState) => void;
+  onChangeGovernance: (form: AuthorizationGovernanceFormState) => void;
+  onStart: (mode: AuthorizationMode) => void;
+  onSubmit: (
+    event: FormEvent<HTMLFormElement>,
+    authorization: CredentialsOperationalAuthorizationProjection | null
+  ) => void;
+}) {
+  const currentAuthorization = currentOperationalAuthorization(authorizations);
+
+  return (
+    <section aria-labelledby="operational-authorization-heading" className="mt-5 border-t border-border pt-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3
+            className="text-base font-semibold text-text-primary"
+            id="operational-authorization-heading"
+          >
+            Operational Authorization
+          </h3>
+          <p className="mt-1 text-sm text-text-muted">
+            Authorization state is linked to the selected Personnel and Certification context.
+          </p>
+        </div>
+        {authorizations.length === 0 && canCreate && authorizationMode !== "create" ? (
+          <Button onClick={() => onStart("create")} variant="secondary">
+            Create Operational Authorization
+          </Button>
+        ) : null}
+      </div>
+
+      {authorizationSuccess ? (
+        <p className="mt-3 rounded-component border border-border bg-elevated px-3 py-2 text-sm text-text-primary" role="status">
+          {authorizationSuccess}
+        </p>
+      ) : null}
+
+      {authorizations.length === 0 ? (
+        <p className="mt-3 text-sm text-text-muted">No operational authorization recorded.</p>
+      ) : (
+        <ul className="mt-3 space-y-3">
+          {authorizations.map((authorization) => (
+            <li
+              className="rounded-component border border-border bg-elevated px-3 py-3"
+              key={authorization.id}
+            >
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-text-primary">
+                    {authorization.authorization_number}
+                  </p>
+                  <p className="mt-1 text-xs text-text-muted">
+                    {displayCode(authorization.authorization_level)} / {formatDate(authorization.issue_date)} to {formatDate(authorization.expiry_date)}
+                  </p>
+                  {authorization.renewal_date ? (
+                    <p className="mt-1 text-xs text-text-muted">
+                      Renewed {formatDate(authorization.renewal_date)}
+                    </p>
+                  ) : null}
+                  {authorization.previous_authorization_id ? (
+                    <p className="mt-1 text-xs text-text-muted">
+                      Previous authorization retained as metadata.
+                    </p>
+                  ) : null}
+                </div>
+                <StatusBadge value={authorization.authorization_status} />
+              </div>
+              {authorization.id === currentAuthorization?.id ? (
+                <AuthorizationActions
+                  authorization={authorization}
+                  canReinstate={canReinstate}
+                  canRenew={canRenew}
+                  canRevoke={canRevoke}
+                  canSuspend={canSuspend}
+                  disabled={authorizationCommandPending || createAuthorizationPending}
+                  onStart={onStart}
+                />
+              ) : null}
+              {authorizationMode && authorization.id === currentAuthorization?.id ? (
+                <AuthorizationLifecycleForm
+                  authorization={authorization}
+                  createAuthorizationForm={createAuthorizationForm}
+                  createError={createAuthorizationError}
+                  governanceError={authorizationCommandError}
+                  governanceForm={authorizationGovernanceForm}
+                  mode={authorizationMode}
+                  onCancel={onCancel}
+                  onChangeCreate={onChangeCreate}
+                  onChangeGovernance={onChangeGovernance}
+                  onSubmit={onSubmit}
+                  submitting={authorizationCommandPending || createAuthorizationPending}
+                />
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {authorizationMode === "create" ? (
+        <AuthorizationLifecycleForm
+          authorization={null}
+          certification={certification}
+          createAuthorizationForm={createAuthorizationForm}
+          createError={createAuthorizationError}
+          detail={detail}
+          governanceError={authorizationCommandError}
+          governanceForm={authorizationGovernanceForm}
+          mode="create"
+          onCancel={onCancel}
+          onChangeCreate={onChangeCreate}
+          onChangeGovernance={onChangeGovernance}
+          onSubmit={onSubmit}
+          submitting={authorizationCommandPending || createAuthorizationPending}
+        />
+      ) : null}
+    </section>
+  );
+}
+
+function AuthorizationActions({
+  authorization,
+  canReinstate,
+  canRenew,
+  canRevoke,
+  canSuspend,
+  disabled,
+  onStart
+}: {
+  authorization: CredentialsOperationalAuthorizationProjection;
+  canReinstate: boolean;
+  canRenew: boolean;
+  canRevoke: boolean;
+  canSuspend: boolean;
+  disabled: boolean;
+  onStart: (mode: AuthorizationMode) => void;
+}) {
+  const actions = authorizationActionsForStatus(authorization.authorization_status);
+
+  if (actions.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="mt-3 flex flex-wrap gap-2">
+      {actions.includes("renew") && canRenew ? (
+        <Button disabled={disabled} onClick={() => onStart("renew")} type="button" variant="secondary">
+          Renew
+        </Button>
+      ) : null}
+      {actions.includes("suspend") && canSuspend ? (
+        <Button disabled={disabled} onClick={() => onStart("suspend")} type="button" variant="secondary">
+          Suspend
+        </Button>
+      ) : null}
+      {actions.includes("reinstate") && canReinstate ? (
+        <Button disabled={disabled} onClick={() => onStart("reinstate")} type="button" variant="secondary">
+          Reinstate
+        </Button>
+      ) : null}
+      {actions.includes("revoke") && canRevoke ? (
+        <Button disabled={disabled} onClick={() => onStart("revoke")} type="button" variant="secondary">
+          Revoke
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+function AuthorizationLifecycleForm({
+  authorization,
+  certification,
+  createAuthorizationForm,
+  createError,
+  detail,
+  governanceError,
+  governanceForm,
+  mode,
+  onCancel,
+  onChangeCreate,
+  onChangeGovernance,
+  onSubmit,
+  submitting
+}: {
+  authorization: CredentialsOperationalAuthorizationProjection | null;
+  certification?: CredentialsCertificationProjection;
+  createAuthorizationForm: CreateAuthorizationFormState;
+  createError: Error | null;
+  detail?: CredentialsPersonnelDetailProjection;
+  governanceError: Error | null;
+  governanceForm: AuthorizationGovernanceFormState;
+  mode: AuthorizationMode;
+  onCancel: () => void;
+  onChangeCreate: (form: CreateAuthorizationFormState) => void;
+  onChangeGovernance: (form: AuthorizationGovernanceFormState) => void;
+  onSubmit: (
+    event: FormEvent<HTMLFormElement>,
+    authorization: CredentialsOperationalAuthorizationProjection | null
+  ) => void;
+  submitting: boolean;
+}) {
+  const isDateForm = mode === "create" || mode === "renew";
+  const error = mode === "create" ? createError : governanceError;
+
+  return (
+    <form className="mt-4 space-y-4 rounded-component border border-border bg-surface p-4" onSubmit={(event) => onSubmit(event, authorization)}>
+      <div>
+        <h4 className="text-sm font-semibold text-text-primary">
+          {authorizationFormTitle(mode)}
+        </h4>
+        <p className="mt-1 text-sm text-text-muted">
+          {mode === "create" && certification && detail
+            ? `Authorizing ${detail.full_name} from ${programLabel(certification)} certificate ${certification.certification_number}.`
+            : authorization
+            ? `Updating authorization ${authorization.authorization_number}.`
+            : "Updating Operational Authorization."}
+        </p>
+      </div>
+      {error ? <CertificationErrorState compact error={error} operation="authorization" /> : null}
+      {isDateForm ? (
+        <>
+          <label className="block text-sm font-semibold text-text-primary">
+            Authorization number
+            <input
+              className={inputClassName}
+              onChange={(event) =>
+                onChangeCreate({
+                  ...createAuthorizationForm,
+                  authorizationNumber: event.currentTarget.value
+                })
+              }
+              required
+              value={createAuthorizationForm.authorizationNumber}
+            />
+          </label>
+          {mode === "create" ? (
+            <label className="block text-sm font-semibold text-text-primary">
+              Authorization level
+              <select
+                className={inputClassName}
+                onChange={(event) =>
+                  onChangeCreate({
+                    ...createAuthorizationForm,
+                    authorizationLevel: event.currentTarget.value as CertificationLevel
+                  })
+                }
+                value={createAuthorizationForm.authorizationLevel}
+              >
+                {certificationLevels.map((level) => (
+                  <option key={level} value={level}>{level}</option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="block text-sm font-semibold text-text-primary">
+              Issue date
+              <input
+                className={inputClassName}
+                onChange={(event) =>
+                  onChangeCreate({
+                    ...createAuthorizationForm,
+                    issueDate: event.currentTarget.value
+                  })
+                }
+                required
+                type="date"
+                value={createAuthorizationForm.issueDate}
+              />
+            </label>
+            <label className="block text-sm font-semibold text-text-primary">
+              Expiry date
+              <input
+                className={inputClassName}
+                onChange={(event) =>
+                  onChangeCreate({
+                    ...createAuthorizationForm,
+                    expiryDate: event.currentTarget.value
+                  })
+                }
+                required
+                type="date"
+                value={createAuthorizationForm.expiryDate}
+              />
+            </label>
+          </div>
+        </>
+      ) : (
+        <>
+          <label className="block text-sm font-semibold text-text-primary">
+            Reason
+            <input
+              className={inputClassName}
+              onChange={(event) =>
+                onChangeGovernance({
+                  ...governanceForm,
+                  reason: event.currentTarget.value
+                })
+              }
+              required
+              value={governanceForm.reason}
+            />
+          </label>
+          <label className="block text-sm font-semibold text-text-primary">
+            Notes
+            <textarea
+              className={inputClassName}
+              onChange={(event) =>
+                onChangeGovernance({
+                  ...governanceForm,
+                  notes: event.currentTarget.value
+                })
+              }
+              value={governanceForm.notes}
+            />
+          </label>
+        </>
+      )}
+      <div className="flex flex-wrap gap-2">
+        <Button disabled={submitting} type="submit">
+          {submitting ? authorizationPendingLabel(mode) : authorizationFormTitle(mode)}
+        </Button>
+        <Button disabled={submitting} onClick={onCancel} type="button" variant="secondary">
+          Cancel
+        </Button>
+      </div>
+    </form>
+  );
+}
 function CreateCertificationPanel({
   canIssueCertification,
   form,
@@ -853,7 +1460,7 @@ function CertificationErrorState({
 }: {
   compact?: boolean;
   error: Error;
-  operation?: "certification" | "endorsement";
+  operation?: "certification" | "endorsement" | "authorization";
 }) {
   const title = certificationErrorTitle(error, operation);
 
@@ -870,36 +1477,60 @@ function CertificationErrorState({
 
 function certificationErrorTitle(
   error: Error,
-  operation: "certification" | "endorsement" = "certification"
+  operation: "certification" | "endorsement" | "authorization" = "certification"
 ) {
   if (!isApiError(error)) {
+    if (operation === "authorization") {
+      return "Operational Authorization could not be updated.";
+    }
+
     return operation === "endorsement"
       ? "Certification endorsement could not be added."
       : "Certifications could not be loaded.";
   }
 
   if (error.status === 400 || error.status === 422) {
+    if (operation === "authorization") {
+      return "Operational Authorization input is invalid.";
+    }
+
     return operation === "endorsement"
       ? "Certification endorsement input is invalid."
       : "Certification input is invalid.";
   }
 
   if (error.status === 403) {
+    if (operation === "authorization") {
+      return "Operational Authorization is not available with your current authorization.";
+    }
+
     return operation === "endorsement"
       ? "Certification endorsement is not available with your current authorization."
       : "Certifications are not available with your current authorization.";
   }
 
   if (error.status === 404) {
+    if (operation === "authorization") {
+      return "Operational Authorization is unavailable or outside your scope.";
+    }
+
     return operation === "endorsement"
       ? "Certification is unavailable or outside your scope."
       : "Certification or Personnel detail was not found.";
   }
 
   if (error.status === 409) {
+    if (operation === "authorization") {
+      return "Operational Authorization lifecycle action could not be completed because of a conflict.";
+    }
+
     return operation === "endorsement"
       ? "Certification endorsement could not be added because of a conflict."
       : "Certification could not be created because of a conflict.";
+  }
+
+  if (operation === "authorization") {
+    return "Operational Authorization could not be updated.";
   }
 
   return operation === "endorsement"
@@ -955,6 +1586,116 @@ function endorsementsByMostRecent(
   );
 }
 
+function authorizationsForCertification(
+  authorizations: CredentialsOperationalAuthorizationProjection[],
+  certificationId: string
+) {
+  return authorizations
+    .filter((authorization) => authorization.certification_id === certificationId)
+    .slice()
+    .sort((left, right) => right.issue_date.localeCompare(left.issue_date));
+}
+
+function currentOperationalAuthorization(
+  authorizations: CredentialsOperationalAuthorizationProjection[]
+) {
+  return (
+    authorizations.find(
+      (authorization) => authorization.authorization_status !== "REVOKED"
+    ) ?? authorizations[0] ?? null
+  );
+}
+
+function authorizationActionsForStatus(status: string): AuthorizationMode[] {
+  if (status === "REVOKED") {
+    return [];
+  }
+
+  if (status === "SUSPENDED") {
+    return ["reinstate", "revoke"];
+  }
+
+  if (status === "ACTIVE") {
+    return ["renew", "suspend", "revoke"];
+  }
+
+  return ["renew", "suspend", "reinstate", "revoke"];
+}
+
+function governanceRequestBody(
+  form: AuthorizationGovernanceFormState
+): GovernOperationalAuthorizationRequest {
+  return {
+    reason: form.reason.trim(),
+    ...(form.notes.trim() ? { notes: form.notes.trim() } : {})
+  };
+}
+
+async function invalidateAuthorizationQueries(
+  queryClient: QueryClient,
+  detailQueryKey: readonly unknown[]
+) {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: ["credentials"] }),
+    queryClient.invalidateQueries({ queryKey: detailQueryKey })
+  ]);
+}
+
+function authorizationFormTitle(mode: AuthorizationMode) {
+  if (mode === "create") {
+    return "Create Operational Authorization";
+  }
+
+  if (mode === "renew") {
+    return "Renew Authorization";
+  }
+
+  if (mode === "suspend") {
+    return "Suspend Authorization";
+  }
+
+  if (mode === "reinstate") {
+    return "Reinstate Authorization";
+  }
+
+  return "Revoke Authorization";
+}
+
+function authorizationPendingLabel(mode: AuthorizationMode) {
+  if (mode === "create") {
+    return "Creating Operational Authorization";
+  }
+
+  if (mode === "renew") {
+    return "Renewing";
+  }
+
+  if (mode === "suspend") {
+    return "Suspending";
+  }
+
+  if (mode === "reinstate") {
+    return "Reinstating";
+  }
+
+  return "Revoking";
+}
+
+function authorizationSuccessMessage(mode: Exclude<AuthorizationMode, "create">) {
+  if (mode === "renew") {
+    return "Operational Authorization renewed successfully.";
+  }
+
+  if (mode === "suspend") {
+    return "Operational Authorization suspended successfully.";
+  }
+
+  if (mode === "reinstate") {
+    return "Operational Authorization reinstated successfully.";
+  }
+
+  return "Operational Authorization revoked successfully.";
+}
 function toIsoDate(value: string) {
   return `${value}T00:00:00.000Z`;
 }

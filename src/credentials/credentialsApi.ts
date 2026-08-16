@@ -97,6 +97,7 @@ export interface CredentialsOperationalAuthorizationProjection {
   id: string;
   authorization_number: string;
   authorization_level: string;
+  program?: CredentialsCertificationProgramProjection;
   authorization_status: string;
   issue_date: string;
   expiry_date: string;
@@ -466,6 +467,8 @@ function isCredentialsOperationalAuthorizationProjection(
     typeof value.id === "string" &&
     typeof value.authorization_number === "string" &&
     typeof value.authorization_level === "string" &&
+    (value.program === undefined ||
+      isCredentialsCertificationProgramProjection(value.program)) &&
     typeof value.authorization_status === "string" &&
     typeof value.issue_date === "string" &&
     typeof value.expiry_date === "string" &&
