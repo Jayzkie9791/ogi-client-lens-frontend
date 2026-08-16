@@ -10,8 +10,17 @@ export const certificationStatuses = [
   "REVOKED"
 ] as const;
 
+export const certificationEndorsements = [
+  "POOL",
+  "WATERFRONT",
+  "WATERPARK",
+  "OPEN_WATER",
+  "INSTRUCTOR"
+] as const;
+
 export type CertificationLevel = (typeof certificationLevels)[number];
 export type CertificationStatus = (typeof certificationStatuses)[number];
+export type CertificationEndorsement = (typeof certificationEndorsements)[number];
 
 export interface CreateCertificationRequest {
   readonly certification_level: CertificationLevel;
@@ -24,6 +33,10 @@ export interface CreateCertificationRequest {
   readonly written_exam_score?: number;
   readonly certification_status?: CertificationStatus;
   readonly staff_member_id: string;
+}
+
+export interface CreateCertificationEndorsementRequest {
+  readonly endorsement: CertificationEndorsement;
 }
 
 export interface CertificationCommandRecord {
@@ -41,9 +54,20 @@ export interface CertificationCommandRecord {
   readonly created_by_user_id: string | null;
 }
 
+export interface CertificationEndorsementCommandRecord {
+  readonly certification_id: string;
+  readonly endorsement: CertificationEndorsement;
+  readonly created_at: string;
+}
+
 interface CertificationCommandResponse {
   readonly success: true;
   readonly data: CertificationCommandRecord;
+}
+
+interface CertificationEndorsementCommandResponse {
+  readonly success: true;
+  readonly data: CertificationEndorsementCommandRecord;
 }
 
 export function createCertification(payload: CreateCertificationRequest) {
@@ -54,6 +78,20 @@ export function createCertification(payload: CreateCertificationRequest) {
   }).then((response) => response.data);
 }
 
+export function addCertificationEndorsement(
+  certificationId: string,
+  payload: CreateCertificationEndorsementRequest
+) {
+  return apiRequest<CertificationEndorsementCommandResponse>(
+    `/api/v1/certifications/${encodeURIComponent(certificationId)}/endorsements`,
+    {
+      method: "POST",
+      body: payload,
+      validate: isCertificationEndorsementCommandResponse
+    }
+  ).then((response) => response.data);
+}
+
 function isCertificationCommandResponse(
   value: unknown
 ): value is CertificationCommandResponse {
@@ -61,6 +99,16 @@ function isCertificationCommandResponse(
     isRecord(value) &&
     value.success === true &&
     isCertificationCommandRecord(value.data)
+  );
+}
+
+function isCertificationEndorsementCommandResponse(
+  value: unknown
+): value is CertificationEndorsementCommandResponse {
+  return (
+    isRecord(value) &&
+    value.success === true &&
+    isCertificationEndorsementCommandRecord(value.data)
   );
 }
 
@@ -85,6 +133,17 @@ function isCertificationCommandRecord(
   );
 }
 
+function isCertificationEndorsementCommandRecord(
+  value: unknown
+): value is CertificationEndorsementCommandRecord {
+  return (
+    isRecord(value) &&
+    typeof value.certification_id === "string" &&
+    isCertificationEndorsement(value.endorsement) &&
+    typeof value.created_at === "string"
+  );
+}
+
 function isCertificationLevel(value: unknown): value is CertificationLevel {
   return (
     typeof value === "string" &&
@@ -96,6 +155,15 @@ function isCertificationStatus(value: unknown): value is CertificationStatus {
   return (
     typeof value === "string" &&
     certificationStatuses.includes(value as CertificationStatus)
+  );
+}
+
+function isCertificationEndorsement(
+  value: unknown
+): value is CertificationEndorsement {
+  return (
+    typeof value === "string" &&
+    certificationEndorsements.includes(value as CertificationEndorsement)
   );
 }
 

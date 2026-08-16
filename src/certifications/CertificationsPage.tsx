@@ -6,6 +6,7 @@ import { useAuth } from "../auth/useAuth";
 import { Button } from "../ui/components/Button";
 import { Surface } from "../ui/components/Surface";
 import {
+  CredentialsCertificationEndorsementProjection,
   CredentialsCertificationProjection,
   CredentialsPersonnelDetailProjection,
   CredentialsPersonnelProjection,
@@ -13,6 +14,9 @@ import {
   listCredentials
 } from "../credentials/credentialsApi";
 import {
+  addCertificationEndorsement,
+  CertificationEndorsement,
+  certificationEndorsements,
   CertificationLevel,
   certificationLevels,
   createCertification
@@ -23,6 +27,7 @@ const viewCertificationPermission = "view_certification";
 const viewPersonnelPermission = "view_staff_member";
 const createDraftPermission = "create_certification_draft";
 const issueCertificationPermission = "issue_certification";
+const endorseCertificationPermission = "endorse_certification";
 
 interface CertificationRegistryEntry {
   readonly certificationId: string;
@@ -48,6 +53,10 @@ interface CreateCertificationFormState {
   writtenExamScore: string;
 }
 
+interface EndorsementFormState {
+  endorsement: CertificationEndorsement;
+}
+
 const emptyForm: CreateCertificationFormState = {
   staffMemberId: "",
   certificationLevel: "L1",
@@ -61,6 +70,10 @@ const emptyForm: CreateCertificationFormState = {
   writtenExamScore: ""
 };
 
+const emptyEndorsementForm: EndorsementFormState = {
+  endorsement: "POOL"
+};
+
 export function CertificationsPage() {
   const auth = useAuth();
   const queryClient = useQueryClient();
@@ -68,9 +81,15 @@ export function CertificationsPage() {
   const canViewPersonnel = auth.canUsePermission(viewPersonnelPermission);
   const canCreateDraft = auth.canUsePermission(createDraftPermission);
   const canIssueCertification = auth.canUsePermission(issueCertificationPermission);
+  const canEndorseCertification = auth.canUsePermission(endorseCertificationPermission);
   const [selectedCertificationId, setSelectedCertificationId] = useState<string | null>(null);
   const [createMode, setCreateMode] = useState(false);
+  const [endorsementMode, setEndorsementMode] = useState(false);
   const [form, setForm] = useState<CreateCertificationFormState>(emptyForm);
+  const [endorsementForm, setEndorsementForm] = useState<EndorsementFormState>(
+    emptyEndorsementForm
+  );
+  const [endorsementSuccess, setEndorsementSuccess] = useState<string | null>(null);
 
   const credentialsQuery = useQuery({
     queryKey: ["credentials", "certifications-workspace"],
@@ -89,9 +108,14 @@ export function CertificationsPage() {
   );
   const selectedEntry =
     registryEntries.find((entry) => entry.certificationId === selectedCertificationId) ?? null;
+  const selectedDetailQueryKey = [
+    "credentials-personnel",
+    selectedEntry?.staffMemberId,
+    "certification-detail"
+  ] as const;
 
   const detailQuery = useQuery({
-    queryKey: ["credentials-personnel", selectedEntry?.staffMemberId, "certification-detail"],
+    queryKey: selectedDetailQueryKey,
     queryFn: () => getPersonnelCredentials(selectedEntry?.staffMemberId ?? ""),
     enabled: canViewCertifications && canViewPersonnel && Boolean(selectedEntry),
     retry: false
@@ -120,6 +144,32 @@ export function CertificationsPage() {
       setForm(emptyForm);
       setSelectedCertificationId(certification.id);
       await queryClient.invalidateQueries({ queryKey: ["credentials"] });
+    }
+  });
+
+  const endorsementMutation = useMutation({
+    mutationFn: (payload: {
+      certificationId: string;
+      endorsement: CertificationEndorsement;
+    }) =>
+      addCertificationEndorsement(payload.certificationId, {
+        endorsement: payload.endorsement
+      }),
+    onSuccess: async (_endorsement, payload) => {
+      setEndorsementMode(false);
+      setEndorsementForm(emptyEndorsementForm);
+      setEndorsementSuccess(
+        `${displayCode(payload.endorsement)} endorsement added successfully.`
+      );
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["credentials"] }),
+        queryClient.invalidateQueries({ queryKey: selectedDetailQueryKey })
+      ]);
+    },
+    onError: async () => {
+      if (selectedEntry) {
+        await queryClient.invalidateQueries({ queryKey: selectedDetailQueryKey });
+      }
     }
   });
 
@@ -166,7 +216,16 @@ export function CertificationsPage() {
             </p>
           </div>
           {canCreateDraft ? (
-            <Button onClick={() => setCreateMode(true)}>Create Certification</Button>
+            <Button
+              onClick={() => {
+                setCreateMode(true);
+                setEndorsementMode(false);
+                setEndorsementSuccess(null);
+                endorsementMutation.reset();
+              }}
+            >
+              Create Certification
+            </Button>
           ) : null}
         </div>
 
@@ -182,6 +241,9 @@ export function CertificationsPage() {
               entries={registryEntries}
               onSelect={(entry) => {
                 setCreateMode(false);
+                setEndorsementMode(false);
+                setEndorsementSuccess(null);
+                endorsementMutation.reset();
                 setSelectedCertificationId(entry.certificationId);
               }}
               selectedCertificationId={selectedCertificationId}
@@ -202,11 +264,38 @@ export function CertificationsPage() {
               />
             ) : selectedEntry ? (
               <CertificationDetailPanel
+                canEndorseCertification={canEndorseCertification}
                 certification={selectedCertification}
                 detail={detailQuery.data ?? null}
+                endorsementForm={endorsementForm}
+                endorsementMode={endorsementMode}
+                endorsementMutationError={endorsementMutation.error}
+                endorsementSuccess={endorsementSuccess}
+                endorsing={endorsementMutation.isPending}
                 entry={selectedEntry}
                 error={detailQuery.error}
                 loading={detailQuery.isLoading}
+                onCancelEndorsement={() => {
+                  setEndorsementMode(false);
+                  setEndorsementForm(emptyEndorsementForm);
+                  endorsementMutation.reset();
+                }}
+                onChangeEndorsement={setEndorsementForm}
+                onStartEndorsement={() => {
+                  setEndorsementMode(true);
+                  setEndorsementSuccess(null);
+                  endorsementMutation.reset();
+                }}
+                onSubmitEndorsement={(event) => {
+                  event.preventDefault();
+                  if (!selectedCertificationId) {
+                    return;
+                  }
+                  endorsementMutation.mutate({
+                    certificationId: selectedCertificationId,
+                    endorsement: endorsementForm.endorsement
+                  });
+                }}
               />
             ) : (
               <Surface>
@@ -319,17 +408,37 @@ function CertificationRegistry({
 }
 
 function CertificationDetailPanel({
+  canEndorseCertification,
   certification,
   detail,
+  endorsementForm,
+  endorsementMode,
+  endorsementMutationError,
+  endorsementSuccess,
+  endorsing,
   entry,
   error,
-  loading
+  loading,
+  onCancelEndorsement,
+  onChangeEndorsement,
+  onStartEndorsement,
+  onSubmitEndorsement
 }: {
+  canEndorseCertification: boolean;
   certification: CredentialsCertificationProjection | null;
   detail: CredentialsPersonnelDetailProjection | null;
+  endorsementForm: EndorsementFormState;
+  endorsementMode: boolean;
+  endorsementMutationError: Error | null;
+  endorsementSuccess: string | null;
+  endorsing: boolean;
   entry: CertificationRegistryEntry;
   error: Error | null;
   loading: boolean;
+  onCancelEndorsement: () => void;
+  onChangeEndorsement: (form: EndorsementFormState) => void;
+  onStartEndorsement: () => void;
+  onSubmitEndorsement: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   if (loading) {
     return (
@@ -383,31 +492,140 @@ function CertificationDetailPanel({
         />
         <MetadataItem label="Certification ID" value={entry.certificationId} />
       </dl>
-      <div className="mt-4">
-        <h3 className="text-sm font-semibold text-text-primary">
-          Endorsements
-        </h3>
-        {certification.endorsements.length === 0 ? (
-          <p className="mt-1 text-sm text-text-muted">
-            No endorsements were returned for this Certification.
-          </p>
-        ) : (
-          <ul className="mt-2 flex flex-wrap gap-2">
-            {certification.endorsements.map((endorsement) => (
-              <li
-                className="rounded-component border border-border bg-elevated px-2 py-1 text-xs font-semibold text-text-primary"
-                key={`${certification.id}-${endorsement.endorsement}`}
-              >
-                {endorsement.endorsement}
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+      <EndorsementsSection
+        canEndorseCertification={canEndorseCertification}
+        certification={certification}
+        endorsementForm={endorsementForm}
+        endorsementMode={endorsementMode}
+        error={endorsementMutationError}
+        onCancel={onCancelEndorsement}
+        onChange={onChangeEndorsement}
+        onStart={onStartEndorsement}
+        onSubmit={onSubmitEndorsement}
+        successMessage={endorsementSuccess}
+        submitting={endorsing}
+      />
       <p className="mt-4 text-xs text-text-muted">
-        Endorsements and Operational Authorization lifecycle actions are read-only in this workspace slice.
+        Operational Authorization lifecycle actions are read-only in this workspace slice.
       </p>
     </Surface>
+  );
+}
+
+function EndorsementsSection({
+  canEndorseCertification,
+  certification,
+  endorsementForm,
+  endorsementMode,
+  error,
+  onCancel,
+  onChange,
+  onStart,
+  onSubmit,
+  successMessage,
+  submitting
+}: {
+  canEndorseCertification: boolean;
+  certification: CredentialsCertificationProjection;
+  endorsementForm: EndorsementFormState;
+  endorsementMode: boolean;
+  error: Error | null;
+  onCancel: () => void;
+  onChange: (form: EndorsementFormState) => void;
+  onStart: () => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  successMessage: string | null;
+  submitting: boolean;
+}) {
+  const endorsements = endorsementsByMostRecent(certification.endorsements);
+
+  return (
+    <section aria-labelledby="certification-endorsements-heading" className="mt-5 border-t border-border pt-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3
+            className="text-base font-semibold text-text-primary"
+            id="certification-endorsements-heading"
+          >
+            Endorsements
+          </h3>
+          <p className="mt-1 text-sm text-text-muted">
+            Endorsements are attached to the selected Certification record.
+          </p>
+        </div>
+        {canEndorseCertification && !endorsementMode ? (
+          <Button onClick={onStart} variant="secondary">
+            Add Endorsement
+          </Button>
+        ) : null}
+      </div>
+
+      {successMessage ? (
+        <p className="mt-3 rounded-component border border-border bg-elevated px-3 py-2 text-sm text-text-primary" role="status">
+          {successMessage}
+        </p>
+      ) : null}
+
+      {endorsements.length === 0 ? (
+        <p className="mt-3 text-sm text-text-muted">No endorsements recorded.</p>
+      ) : (
+        <ul className="mt-3 space-y-2">
+          {endorsements.map((endorsement) => (
+            <li
+              className="rounded-component border border-border bg-elevated px-3 py-2"
+              key={`${certification.id}-${endorsement.endorsement}`}
+            >
+              <p className="text-sm font-semibold text-text-primary">
+                {displayCode(endorsement.endorsement)}
+              </p>
+              <p className="mt-1 text-xs text-text-muted">
+                Recorded {formatDate(endorsement.created_at)}
+              </p>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {endorsementMode ? (
+        <form className="mt-4 space-y-4 rounded-component border border-border bg-surface p-4" onSubmit={onSubmit}>
+          <div>
+            <h4 className="text-sm font-semibold text-text-primary">
+              Add Endorsement
+            </h4>
+            <p className="mt-1 text-sm text-text-muted">
+              Endorsing {programLabel(certification)} certificate {certification.certification_number}.
+            </p>
+          </div>
+          {error ? <CertificationErrorState compact error={error} operation="endorsement" /> : null}
+          <label className="block text-sm font-semibold text-text-primary">
+            Endorsement
+            <select
+              className={inputClassName}
+              onChange={(event) =>
+                onChange({
+                  endorsement: event.currentTarget.value as CertificationEndorsement
+                })
+              }
+              value={endorsementForm.endorsement}
+            >
+              {certificationEndorsements.map((endorsement) => (
+                <option key={endorsement} value={endorsement}>
+                  {displayCode(endorsement)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="flex flex-wrap gap-2">
+            <Button disabled={submitting} type="submit">
+              {submitting ? "Adding Endorsement" : "Add Endorsement"}
+            </Button>
+            <Button disabled={submitting} onClick={onCancel} type="button" variant="secondary">
+              Cancel
+            </Button>
+          </div>
+        </form>
+      ) : null}
+    </section>
   );
 }
 
@@ -630,12 +848,14 @@ function findCertification(
 
 function CertificationErrorState({
   compact = false,
-  error
+  error,
+  operation = "certification"
 }: {
   compact?: boolean;
   error: Error;
+  operation?: "certification" | "endorsement";
 }) {
-  const title = certificationErrorTitle(error);
+  const title = certificationErrorTitle(error, operation);
 
   if (compact) {
     return (
@@ -648,28 +868,43 @@ function CertificationErrorState({
   return <SafeState title={title}>The Certification workspace returned an error.</SafeState>;
 }
 
-function certificationErrorTitle(error: Error) {
+function certificationErrorTitle(
+  error: Error,
+  operation: "certification" | "endorsement" = "certification"
+) {
   if (!isApiError(error)) {
-    return "Certifications could not be loaded.";
+    return operation === "endorsement"
+      ? "Certification endorsement could not be added."
+      : "Certifications could not be loaded.";
   }
 
-  if (error.status === 400) {
-    return "Certification input is invalid.";
+  if (error.status === 400 || error.status === 422) {
+    return operation === "endorsement"
+      ? "Certification endorsement input is invalid."
+      : "Certification input is invalid.";
   }
 
   if (error.status === 403) {
-    return "Certifications are not available with your current authorization.";
+    return operation === "endorsement"
+      ? "Certification endorsement is not available with your current authorization."
+      : "Certifications are not available with your current authorization.";
   }
 
   if (error.status === 404) {
-    return "Certification or Personnel detail was not found.";
+    return operation === "endorsement"
+      ? "Certification is unavailable or outside your scope."
+      : "Certification or Personnel detail was not found.";
   }
 
   if (error.status === 409) {
-    return "Certification could not be created because of a conflict.";
+    return operation === "endorsement"
+      ? "Certification endorsement could not be added because of a conflict."
+      : "Certification could not be created because of a conflict.";
   }
 
-  return "Certifications could not be loaded.";
+  return operation === "endorsement"
+    ? "Certification endorsement could not be added."
+    : "Certifications could not be loaded.";
 }
 
 function SafeState({
@@ -710,6 +945,14 @@ function StatusBadge({ value }: { value: string }) {
 
 function programLabel(certification: CredentialsCertificationProjection) {
   return certification.program?.display_name ?? certification.certification_level;
+}
+
+function endorsementsByMostRecent(
+  endorsements: CredentialsCertificationEndorsementProjection[]
+) {
+  return endorsements.slice().sort((left, right) =>
+    right.created_at.localeCompare(left.created_at)
+  );
 }
 
 function toIsoDate(value: string) {

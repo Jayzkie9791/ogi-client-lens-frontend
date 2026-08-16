@@ -48,6 +48,11 @@ const issueSession: AuthenticatedSession = {
   permissions: [...draftSession.permissions, "issue_certification"]
 };
 
+const endorsementSession: AuthenticatedSession = {
+  ...certificationSession,
+  permissions: [...certificationSession.permissions, "endorse_certification"]
+};
+
 const credentialsOnlySession: AuthenticatedSession = {
   ...certificationSession,
   permissions: ["view_staff_member"]
@@ -169,10 +174,38 @@ const anaDetail: CredentialsPersonnelDetailProjection = {
   operational_authorizations: []
 };
 
+const anaDetailWithoutEndorsements: CredentialsPersonnelDetailProjection = {
+  ...anaDetail,
+  certifications: anaDetail.certifications.map((certification) =>
+    certification.id === certificationId
+      ? { ...certification, endorsements: [] }
+      : certification
+  )
+};
+
+const anaDetailWithNewEndorsement: CredentialsPersonnelDetailProjection = {
+  ...anaDetail,
+  certifications: anaDetail.certifications.map((certification) =>
+    certification.id === certificationId
+      ? {
+          ...certification,
+          endorsements: [
+            ...certification.endorsements,
+            {
+              endorsement: "WATERFRONT",
+              created_at: "2026-01-03T00:00:00.000Z"
+            }
+          ]
+        }
+      : certification
+  )
+};
+
 interface MockResponse {
   status: number;
   body?: unknown;
   statusText?: string;
+  delayMs?: number;
 }
 
 interface MockRoute {
@@ -212,6 +245,10 @@ function mockFetchRoutes(routesToMock: MockRoute[]) {
 
     if (!next) {
       throw new Error(`Unexpected fetch call count: ${method} ${url}`);
+    }
+
+    if (next.delayMs) {
+      await new Promise((resolve) => window.setTimeout(resolve, next.delayMs));
     }
 
     return new Response(
@@ -258,12 +295,30 @@ function authRoutes(session = certificationSession): MockRoute[] {
   ];
 }
 
+function certificationRoutes(
+  detail: CredentialsPersonnelDetailProjection = anaDetail,
+  session: AuthenticatedSession = certificationSession
+): MockRoute[] {
+  return [
+    ...authRoutes(session),
+    {
+      url: "/api/v1/credentials",
+      responses: [{ status: 200, body: credentialsListResponse }]
+    },
+    {
+      url: `/api/v1/credentials/personnel/${staffMemberId}`,
+      responses: [{ status: 200, body: detail }]
+    }
+  ];
+}
+
 beforeEach(() => {
   window.sessionStorage.clear();
   window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
 });
 
 afterEach(() => {
+  cleanup();
   configureApiAuth(null);
   vi.unstubAllGlobals();
   window.sessionStorage.clear();
@@ -355,28 +410,20 @@ describe("Certification workspace frontend", () => {
     ]);
   });
 
-  it("selects a Certification and renders read-only detail, endorsements, and no command controls", async () => {
+  it("renders selected Certification detail and endorsement history without command controls for view-only actors", async () => {
     const user = userEvent.setup();
-    const { calls } = mockFetchRoutes([
-      ...authRoutes(),
-      {
-        url: "/api/v1/credentials",
-        responses: [{ status: 200, body: credentialsListResponse }]
-      },
-      {
-        url: `/api/v1/credentials/personnel/${staffMemberId}`,
-        responses: [{ status: 200, body: anaDetail }]
-      }
-    ]);
+    const { calls } = mockFetchRoutes(certificationRoutes());
 
     renderWithRoute(routes.certifications);
 
     await user.click(await screen.findByRole("button", { name: "View Certification" }));
 
     expect(await screen.findByText("CERT-001")).toBeInTheDocument();
-    expect(screen.getByText("OPEN_WATER")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Endorsements" })).toBeInTheDocument();
+    expect(screen.getByText("Open Water")).toBeInTheDocument();
+    expect(screen.getByText("Recorded 2026-01-02")).toBeInTheDocument();
     expect(screen.getByText(certificationId)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /endorse/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add Endorsement" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /renew/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /suspend/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /issue credential/i })).not.toBeInTheDocument();
@@ -386,6 +433,217 @@ describe("Certification workspace frontend", () => {
       "/api/v1/credentials",
       `/api/v1/credentials/personnel/${staffMemberId}`
     ]);
+  });
+
+  it("renders neutral empty endorsement state and exposes Add Endorsement only with permission", async () => {
+    const user = userEvent.setup();
+    mockFetchRoutes(certificationRoutes(anaDetailWithoutEndorsements, endorsementSession));
+
+    renderWithRoute(routes.certifications);
+
+    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+
+    expect(await screen.findByText("No endorsements recorded.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add Endorsement" })).toBeInTheDocument();
+  });
+
+  it("opens and cancels Add Endorsement without mutation", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetchRoutes(certificationRoutes(anaDetailWithoutEndorsements, endorsementSession));
+
+    renderWithRoute(routes.certifications);
+
+    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "Add Endorsement" }));
+
+    expect(screen.getByText("Endorsing Open Water Guardian certificate CERT-001.")).toBeInTheDocument();
+    expect(screen.getByLabelText("Endorsement")).toHaveValue("POOL");
+
+    await user.selectOptions(screen.getByLabelText("Endorsement"), "WATERFRONT");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByLabelText("Endorsement")).not.toBeInTheDocument();
+    expect(calls.some((call) => call.url.includes("/endorsements"))).toBe(false);
+  });
+
+  it("submits the exact endorsement contract, refetches authoritative detail, and keeps the Certification selected", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetchRoutes([
+      ...authRoutes(endorsementSession),
+      {
+        url: "/api/v1/credentials",
+        responses: [
+          { status: 200, body: credentialsListResponse },
+          { status: 200, body: credentialsListResponse }
+        ]
+      },
+      {
+        url: `/api/v1/credentials/personnel/${staffMemberId}`,
+        responses: [
+          { status: 200, body: anaDetailWithoutEndorsements },
+          { status: 200, body: anaDetailWithNewEndorsement }
+        ]
+      },
+      {
+        method: "POST",
+        url: `/api/v1/certifications/${certificationId}/endorsements`,
+        responses: [
+          {
+            status: 201,
+            body: {
+              success: true,
+              data: {
+                certification_id: certificationId,
+                endorsement: "WATERFRONT",
+                created_at: "2026-01-03T00:00:00.000Z"
+              }
+            }
+          }
+        ]
+      }
+    ]);
+
+    renderWithRoute(routes.certifications);
+
+    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "Add Endorsement" }));
+    await user.selectOptions(screen.getByLabelText("Endorsement"), "WATERFRONT");
+    const addButtons = screen.getAllByRole("button", { name: "Add Endorsement" });
+    const submitButton = addButtons[addButtons.length - 1];
+
+    expect(submitButton).toBeDefined();
+    await user.click(submitButton);
+
+    expect(await screen.findByText("Waterfront endorsement added successfully.")).toBeInTheDocument();
+    expect(await screen.findByText("Waterfront")).toBeInTheDocument();
+    expect(screen.getByText("CERT-001")).toBeInTheDocument();
+
+    const endorsementCall = calls.find(
+      (call) => call.url === `/api/v1/certifications/${certificationId}/endorsements`
+    );
+
+    expect(endorsementCall?.init?.method).toBe("POST");
+    expect(JSON.parse(String(endorsementCall?.init?.body))).toEqual({
+      endorsement: "WATERFRONT"
+    });
+    expect(
+      calls.filter((call) => call.url === `/api/v1/credentials/personnel/${staffMemberId}`)
+    ).toHaveLength(2);
+    expect(calls.map(({ url }) => url)).not.toContain("/api/v1/credentials/issuances");
+    expect(calls.map(({ url }) => url)).not.toContain("/api/v1/operational-authorizations");
+  });
+
+  it("prevents duplicate Add Endorsement submission while pending", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetchRoutes([
+      ...authRoutes(endorsementSession),
+      {
+        url: "/api/v1/credentials",
+        responses: [
+          { status: 200, body: credentialsListResponse },
+          { status: 200, body: credentialsListResponse }
+        ]
+      },
+      {
+        url: `/api/v1/credentials/personnel/${staffMemberId}`,
+        responses: [
+          { status: 200, body: anaDetailWithoutEndorsements },
+          { status: 200, body: anaDetailWithNewEndorsement }
+        ]
+      },
+      {
+        method: "POST",
+        url: `/api/v1/certifications/${certificationId}/endorsements`,
+        responses: [
+          {
+            status: 201,
+            delayMs: 50,
+            body: {
+              success: true,
+              data: {
+                certification_id: certificationId,
+                endorsement: "WATERFRONT",
+                created_at: "2026-01-03T00:00:00.000Z"
+              }
+            }
+          }
+        ]
+      }
+    ]);
+
+    renderWithRoute(routes.certifications);
+
+    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "Add Endorsement" }));
+    await user.selectOptions(screen.getByLabelText("Endorsement"), "WATERFRONT");
+    const addButtons = screen.getAllByRole("button", { name: "Add Endorsement" });
+    const submitButton = addButtons[addButtons.length - 1];
+
+    expect(submitButton).toBeDefined();
+    await user.click(submitButton);
+    await user.click(screen.getByRole("button", { name: "Adding Endorsement" }));
+
+    expect(await screen.findByText("Waterfront endorsement added successfully.")).toBeInTheDocument();
+    expect(
+      calls.filter((call) => call.url === `/api/v1/certifications/${certificationId}/endorsements`)
+    ).toHaveLength(1);
+  });
+
+  it.each([
+    [400, "Certification endorsement input is invalid."],
+    [403, "Certification endorsement is not available with your current authorization."],
+    [404, "Certification is unavailable or outside your scope."],
+    [409, "Certification endorsement could not be added because of a conflict."],
+    [500, "Certification endorsement could not be added."]
+  ])("maps endorsement %i errors safely and refetches authoritative detail", async (status, message) => {
+    const user = userEvent.setup();
+    const { calls } = mockFetchRoutes([
+      ...authRoutes(endorsementSession),
+      {
+        url: "/api/v1/credentials",
+        responses: [{ status: 200, body: credentialsListResponse }]
+      },
+      {
+        url: `/api/v1/credentials/personnel/${staffMemberId}`,
+        responses: [
+          { status: 200, body: anaDetailWithoutEndorsements },
+          { status: 200, body: anaDetailWithoutEndorsements }
+        ]
+      },
+      {
+        method: "POST",
+        url: `/api/v1/certifications/${certificationId}/endorsements`,
+        responses: [
+          {
+            status,
+            body: {
+              success: false,
+              code: "CERTIFICATION_ERROR",
+              message: "Backend detail should not be shown.",
+              status
+            }
+          }
+        ]
+      }
+    ]);
+
+    renderWithRoute(routes.certifications);
+
+    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "Add Endorsement" }));
+    const addButtons = screen.getAllByRole("button", { name: "Add Endorsement" });
+    const submitButton = addButtons[addButtons.length - 1];
+
+    expect(submitButton).toBeDefined();
+    await user.click(submitButton);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(message);
+    expect(screen.queryByText("Backend detail should not be shown.")).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        calls.filter((call) => call.url === `/api/v1/credentials/personnel/${staffMemberId}`)
+      ).toHaveLength(2)
+    );
   });
 
   it("renders loading, empty, and safe error states", async () => {
@@ -443,6 +701,7 @@ describe("Certification workspace frontend", () => {
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Create Certification" })).not.toBeInTheDocument();
 
+    cleanup();
     vi.unstubAllGlobals();
     window.sessionStorage.clear();
     window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
@@ -460,6 +719,7 @@ describe("Certification workspace frontend", () => {
     expect(screen.getByLabelText("Status")).toHaveValue("PENDING");
     expect(screen.getByRole("option", { name: "Draft" })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "Active" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add Endorsement" })).not.toBeInTheDocument();
   });
 
   it("submits the exact Certification create contract, refreshes projection, and selects the new Certification", async () => {
