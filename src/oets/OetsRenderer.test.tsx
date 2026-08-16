@@ -30,6 +30,7 @@ import { OetsDefinition, OetsEvidencePayload, OetsTemplateRuntimeDefinition } fr
 const session = {
   id: "user-1",
   email: "operator@example.test",
+  username: null,
   fullName: "Operator One",
   status: "ACTIVE",
   clientId: "00000000-0000-4000-8000-000000000101",

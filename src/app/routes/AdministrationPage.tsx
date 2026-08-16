@@ -88,7 +88,7 @@ function UserSummaryCard({ user }: { user: AdministrationUserSummary }) {
         <h2 className="text-lg font-semibold text-text-primary">
           {user.full_name}
         </h2>
-        <p className="mt-1 break-words text-sm text-text-muted">{user.email}</p>
+        <p className="mt-1 break-words text-sm text-text-muted">{userIdentityLabel(user)}</p>
       </div>
       <dl className="grid gap-3 text-sm text-text-muted sm:grid-cols-2 lg:min-w-[32rem] lg:grid-cols-3">
         <MetadataItem label="Status" value={user.status} />
@@ -99,6 +99,9 @@ function UserSummaryCard({ user }: { user: AdministrationUserSummary }) {
   );
 }
 
+function userIdentityLabel(user: AdministrationUserSummary) {
+  return user.email ?? user.username ?? "No login identifier";
+}
 function MetadataItem({
   label,
   lowEmphasis = false,

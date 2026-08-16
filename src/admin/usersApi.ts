@@ -2,7 +2,8 @@ import { apiRequest } from "../api/client";
 
 export interface AdministrationUserSummary {
   readonly id: string;
-  readonly email: string;
+  readonly email: string | null;
+  readonly username: string | null;
   readonly full_name: string;
   readonly status: string;
   readonly created_at: string;
@@ -31,11 +32,16 @@ function isAdministrationUserSummary(
 
   return (
     typeof value.id === "string" &&
-    typeof value.email === "string" &&
+    isNullableString(value.email) &&
+    isNullableString(value.username) &&
     typeof value.full_name === "string" &&
     typeof value.status === "string" &&
     typeof value.created_at === "string"
   );
+}
+
+function isNullableString(value: unknown): value is string | null {
+  return typeof value === "string" || value === null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

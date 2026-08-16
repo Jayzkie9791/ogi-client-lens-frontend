@@ -15,7 +15,8 @@ export function isLoginResponse(value: unknown): value is LoginResponse {
     typeof value.refreshToken === "string" &&
     value.refreshToken.length > 0 &&
     typeof value.user.id === "string" &&
-    typeof value.user.email === "string" &&
+    isNullableString(value.user.email) &&
+    isNullableString(value.user.username) &&
     typeof value.user.fullName === "string" &&
     typeof value.user.status === "string"
   );
@@ -35,7 +36,8 @@ export function isAuthenticatedSession(
   return (
     isRecord(value) &&
     typeof value.id === "string" &&
-    typeof value.email === "string" &&
+    isNullableString(value.email) &&
+    isNullableString(value.username) &&
     typeof value.fullName === "string" &&
     typeof value.status === "string" &&
     (typeof value.clientId === "string" || value.clientId === null) &&
@@ -43,6 +45,10 @@ export function isAuthenticatedSession(
     isStringArray(value.roles) &&
     isStringArray(value.permissions)
   );
+}
+
+function isNullableString(value: unknown): value is string | null {
+  return typeof value === "string" || value === null;
 }
 
 function isStringArray(value: unknown): value is string[] {

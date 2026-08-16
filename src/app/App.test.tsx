@@ -13,6 +13,7 @@ import { routes } from "./routePaths";
 const session = {
   id: "user-1",
   email: "operator@example.test",
+  username: null,
   fullName: "Operator One",
   status: "ACTIVE",
   clientId: "00000000-0000-4000-8000-000000000101",
@@ -36,13 +37,15 @@ const administrationUsersResponse = [
   {
     id: "00000000-0000-4000-8000-000000000901",
     email: "marvin.alcantara@ogiofficial.com",
+    username: null,
     full_name: "Marvin Alcantara",
     status: "ACTIVE",
     created_at: "2026-08-01T00:00:00.000Z"
   },
   {
     id: "00000000-0000-4000-8000-000000000902",
-    email: "braven.burrows@ogiofficial.com",
+    email: null,
+    username: "braven.burrows",
     full_name: "Braven Burrows",
     status: "INVITED",
     created_at: "2026-08-02T00:00:00.000Z"
@@ -382,6 +385,7 @@ describe("Client Lens authentication foundation", () => {
     expect(screen.getByText("2026-08-01T00:00:00.000Z")).toBeInTheDocument();
     expect(screen.getByText("00000000-0000-4000-8000-000000000901")).toBeInTheDocument();
     expect(screen.getByText("Braven Burrows")).toBeInTheDocument();
+    expect(screen.getByText("braven.burrows")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /create user/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /disable user/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /assign roles/i })).not.toBeInTheDocument();
@@ -540,6 +544,7 @@ describe("Client Lens authentication foundation", () => {
           user: {
             id: "user-1",
             email: "operator@example.test",
+            username: null,
             fullName: "Operator One",
             status: "ACTIVE"
           }
@@ -550,7 +555,7 @@ describe("Client Lens authentication foundation", () => {
 
     renderWithRoute(routes.login);
 
-    await user.type(screen.getByLabelText("Email"), "operator@example.test");
+    await user.type(screen.getByLabelText("Email or Username"), "operator@example.test");
     await user.type(screen.getByLabelText("Password"), "correct-password");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
 
@@ -565,6 +570,10 @@ describe("Client Lens authentication foundation", () => {
       "/api/v1/auth/login",
       "/api/v1/auth/me"
     ]);
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
+      identifier: "operator@example.test",
+      password: "correct-password"
+    });
   });
 
   it("restores a stored refresh token by refreshing and loading /me", async () => {
@@ -733,7 +742,7 @@ describe("Client Lens authentication foundation", () => {
 
     renderWithRoute(routes.login);
 
-    await user.type(screen.getByLabelText("Email"), "operator@example.test");
+    await user.type(screen.getByLabelText("Email or Username"), "operator@example.test");
     await user.type(screen.getByLabelText("Password"), "correct-password");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
 
@@ -749,7 +758,7 @@ describe("Client Lens authentication foundation", () => {
 
     await user.click(screen.getByRole("button", { name: "Sign in" }));
 
-    expect(screen.getByText("Enter your email and password.")).toBeInTheDocument();
+    expect(screen.getByText("Enter your email or username and password.")).toBeInTheDocument();
   });
 
   it("opens the review queue from primary navigation", async () => {

@@ -1,5 +1,5 @@
 export interface LoginRequest {
-  email: string;
+  identifier: string;
   password: string;
 }
 
@@ -8,7 +8,8 @@ export interface LoginResponse {
   refreshToken: string;
   user: {
     id: string;
-    email: string;
+    email: string | null;
+    username: string | null;
     fullName: string;
     status: string;
   };
@@ -24,7 +25,8 @@ export interface RefreshResponse {
 
 export interface AuthenticatedSession {
   id: string;
-  email: string;
+  email: string | null;
+  username: string | null;
   fullName: string;
   status: string;
   clientId: string | null;

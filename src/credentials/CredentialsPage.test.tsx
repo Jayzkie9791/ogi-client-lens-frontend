@@ -27,6 +27,7 @@ const secondStaffMemberId = "00000000-0000-4000-8000-000000300002";
 const credentialsSession: AuthenticatedSession = {
   id: "00000000-0000-4000-8000-000000000001",
   email: "operator@example.test",
+  username: null,
   fullName: "Operator One",
   status: "ACTIVE",
   clientId: null,

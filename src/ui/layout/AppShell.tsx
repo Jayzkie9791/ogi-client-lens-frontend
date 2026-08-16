@@ -104,7 +104,7 @@ export function AppShell() {
               <span>
                 {auth.session?.fullName}
                 <span className="ml-2 text-xs text-text-muted">
-                  {auth.session?.email}
+                  {sessionIdentityLabel(auth.session)}
                 </span>
               </span>
               <button
@@ -132,6 +132,11 @@ type NavigationItem = {
   readonly implemented: boolean;
 };
 
+function sessionIdentityLabel(
+  session: ReturnType<typeof useAuth>["session"]
+) {
+  return session?.email ?? session?.username ?? "";
+}
 function registrationLandingPath(auth: ReturnType<typeof useAuth>) {
   if (auth.canUsePermission("view_client")) {
     return routes.registrationClients;

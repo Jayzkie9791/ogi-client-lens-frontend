@@ -9,7 +9,7 @@ export function LoginPage() {
   const auth = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [fieldError, setFieldError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -23,8 +23,8 @@ export function LoginPage() {
     setFieldError(null);
     auth.clearAuthError();
 
-    if (!email.trim() || !password) {
-      setFieldError("Enter your email and password.");
+    if (!identifier.trim() || !password) {
+      setFieldError("Enter your email or username and password.");
       return;
     }
 
@@ -32,7 +32,7 @@ export function LoginPage() {
 
     try {
       await auth.login({
-        email: email.trim(),
+        identifier: identifier.trim(),
         password
       });
       navigate(readDestination(location.state) ?? routes.workbench, {
@@ -78,18 +78,18 @@ export function LoginPage() {
           <div>
             <label
               className="block text-sm font-semibold text-text-primary"
-              htmlFor="email"
+              htmlFor="identifier"
             >
-              Email
+              Email or Username
             </label>
             <input
-              autoComplete="email"
+              autoComplete="username"
               className="mt-1 min-h-11 w-full rounded-component border border-border bg-surface px-3 text-sm outline-none focus:border-focus focus:ring-2 focus:ring-focus"
-              id="email"
-              name="email"
-              onChange={(event) => setEmail(event.target.value)}
-              type="email"
-              value={email}
+              id="identifier"
+              name="identifier"
+              onChange={(event) => setIdentifier(event.target.value)}
+              type="text"
+              value={identifier}
             />
           </div>
 
