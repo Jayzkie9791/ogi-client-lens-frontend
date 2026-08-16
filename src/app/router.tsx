@@ -18,6 +18,7 @@ import { RegistrationPersonnelPage } from "../registration/RegistrationPersonnel
 import { AppShell } from "../ui/layout/AppShell";
 import { routes } from "./routePaths";
 import { AdministrationPage } from "./routes/AdministrationPage";
+import { ClientPocProvisioningPage } from "./routes/ClientPocProvisioningPage";
 import { LoginPage } from "./routes/LoginPage";
 import { NotFoundPage } from "./routes/NotFoundPage";
 import { OperationsPage } from "./routes/OperationsPage";
@@ -60,6 +61,10 @@ export const appRoutes: RouteObject[] = [
           {
             path: "workbench/administration",
             element: <AdministrationPage />
+          },
+          {
+            path: "workbench/administration/client-pocs",
+            element: <ClientPocProvisioningPage />
           },
           {
             path: "workbench/registration/clients",

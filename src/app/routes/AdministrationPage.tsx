@@ -1,18 +1,24 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, UseQueryResult } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 
 import { isApiError } from "../../api/errors";
 import {
+  AdministrationUsersResponse,
   AdministrationUserSummary,
   listAdministrationUsers
 } from "../../admin/usersApi";
+import { routes } from "../routePaths";
 import { useAuth } from "../../auth/useAuth";
+import { Button } from "../../ui/components/Button";
 import { Surface } from "../../ui/components/Surface";
 
 const viewUsersPermission = "view_users";
+const createUserPermission = "create_user";
 
 export function AdministrationPage() {
   const auth = useAuth();
   const canViewUsers = auth.canUsePermission(viewUsersPermission);
+  const canProvisionClientPoc = auth.canUsePermission(createUserPermission);
   const usersQuery = useQuery({
     queryKey: ["administration-users"],
     queryFn: () => listAdministrationUsers(),
@@ -20,14 +26,61 @@ export function AdministrationPage() {
     retry: false
   });
 
-  if (!canViewUsers) {
+  if (!canViewUsers && !canProvisionClientPoc) {
     return (
-      <SafeState title="You are not authorized to view users.">
-        Your current session does not include user-listing authority.
+      <SafeState title="You are not authorized to use Administration.">
+        Your current session does not include Administration authority.
       </SafeState>
     );
   }
 
+  return (
+    <section aria-labelledby="administration-users-heading" className="space-y-4">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-primary-blue">
+          Administration
+        </p>
+        <h1
+          className="mt-2 text-2xl font-semibold text-text-primary"
+          id="administration-users-heading"
+        >
+          Administration
+        </h1>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-text-muted">
+          Use only the administrative capabilities available through your current server-authorized session.
+        </p>
+      </div>
+
+      {canProvisionClientPoc ? <ClientPocProvisioningAction /> : null}
+
+      {canViewUsers ? <AuthorizedUsersPanel usersQuery={usersQuery} /> : null}
+    </section>
+  );
+}
+
+function ClientPocProvisioningAction() {
+  return (
+    <Surface className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <div>
+        <h2 className="text-base font-semibold text-text-primary">
+          Provision Client POC
+        </h2>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-text-muted">
+          Create one Client point-of-contact account through the purpose-built server-owned provisioning workflow.
+        </p>
+      </div>
+      <Button asChild>
+        <Link to={routes.administrationClientPocs}>Provision Client POC</Link>
+      </Button>
+    </Surface>
+  );
+}
+
+function AuthorizedUsersPanel({
+  usersQuery
+}: {
+  usersQuery: UseQueryResult<AdministrationUsersResponse, Error>;
+}) {
   if (usersQuery.isLoading) {
     return (
       <SafeState title="Loading users." role="status">
@@ -42,42 +95,23 @@ export function AdministrationPage() {
 
   const users = usersQuery.data ?? [];
 
-  return (
-    <section aria-labelledby="administration-users-heading" className="space-y-4">
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-wide text-primary-blue">
-          Administration
-        </p>
-        <h1
-          className="mt-2 text-2xl font-semibold text-text-primary"
-          id="administration-users-heading"
-        >
-          Users
-        </h1>
-        <p className="mt-2 max-w-3xl text-sm leading-6 text-text-muted">
-          View users available through your current administrative authority.
-        </p>
-      </div>
-
-      {users.length === 0 ? (
-        <Surface>
-          <h2 className="text-base font-semibold text-text-primary">
-            No users were returned.
-          </h2>
-          <p className="mt-2 text-sm leading-6 text-text-muted">
-            The backend did not return users for your current administrative authority.
-          </p>
-        </Surface>
-      ) : (
-        <ul aria-label="Authorized users" className="space-y-3">
-          {users.map((user) => (
-            <li key={user.id}>
-              <UserSummaryCard user={user} />
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
+  return users.length === 0 ? (
+    <Surface>
+      <h2 className="text-base font-semibold text-text-primary">
+        No users were returned.
+      </h2>
+      <p className="mt-2 text-sm leading-6 text-text-muted">
+        The backend did not return users for your current administrative authority.
+      </p>
+    </Surface>
+  ) : (
+    <ul aria-label="Authorized users" className="space-y-3">
+      {users.map((user) => (
+        <li key={user.id}>
+          <UserSummaryCard user={user} />
+        </li>
+      ))}
+    </ul>
   );
 }
 

@@ -372,12 +372,12 @@ describe("Client Lens authentication foundation", () => {
     await user.click(await screen.findByRole("button", { name: "Menu" }));
     await user.click(await screen.findByRole("link", { name: "Administration" }));
 
-    expect(
-      await screen.findByRole("heading", { name: "Users" })
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Administration" })).toBeInTheDocument();
     expect(screen.getAllByText("Administration").length).toBeGreaterThan(0);
     expect(
-      screen.getByText("View users available through your current administrative authority.")
+      screen.getByText(
+        "Use only the administrative capabilities available through your current server-authorized session."
+      )
     ).toBeInTheDocument();
     expect(screen.getByRole("list", { name: "Authorized users" })).toBeInTheDocument();
     expect(screen.getByText("Marvin Alcantara")).toBeInTheDocument();
@@ -425,7 +425,7 @@ describe("Client Lens authentication foundation", () => {
     expect(screen.getByRole("link", { name: "Reviews" })).toBeInTheDocument();
   });
 
-  it("blocks the Administration route without view_users and does not call the users endpoint", async () => {
+  it("blocks the Administration route without Administration authority and does not call the users endpoint", async () => {
     window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
     const { calls } = mockFetchQueue([
       { status: 200, body: { accessToken: "access-token" } },
@@ -441,7 +441,7 @@ describe("Client Lens authentication foundation", () => {
     renderWithRoute(routes.administration);
 
     expect(
-      await screen.findByRole("heading", { name: "You are not authorized to view users." })
+      await screen.findByRole("heading", { name: "You are not authorized to use Administration." })
     ).toBeInTheDocument();
     expect(calls.map(({ url }) => url)).toEqual([
       "/api/v1/auth/refresh",

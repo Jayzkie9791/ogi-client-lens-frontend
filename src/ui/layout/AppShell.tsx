@@ -36,7 +36,7 @@ const navigationItems = [
   },
   {
     label: "Administration",
-    permissions: ["view_users"],
+    permissions: ["view_users", "create_user"],
     to: routes.administration,
     implemented: true
   }

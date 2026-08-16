@@ -5,6 +5,7 @@ export const routes = {
   operations: "/workbench/operations",
   records: "/workbench/operations/records",
   administration: "/workbench/administration",
+  administrationClientPocs: "/workbench/administration/client-pocs",
   registrationClients: "/workbench/registration/clients",
   registrationFacilities: "/workbench/registration/facilities",
   registrationPersonnel: "/workbench/registration/personnel",
