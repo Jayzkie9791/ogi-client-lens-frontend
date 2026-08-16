@@ -421,6 +421,7 @@ function FacilityDetailsPanel({
             formState={editForm}
             isSubmitting={isSubmitting}
             lockClientSelection
+            canChangeOperationalStatus={canDeactivate}
             onChange={onEditChange}
             onSubmit={onSubmit}
           />
@@ -470,6 +471,7 @@ function FacilityFormSurface({
           formState={formState}
           isSubmitting={isSubmitting}
           lockClientSelection={lockClientSelection}
+          canChangeOperationalStatus
           onChange={onChange}
           onSubmit={onSubmit}
         />
@@ -480,6 +482,7 @@ function FacilityFormSurface({
 
 function FacilityForm({
   actionLabel,
+  canChangeOperationalStatus,
   clients,
   formId,
   formState,
@@ -489,6 +492,7 @@ function FacilityForm({
   onSubmit
 }: {
   actionLabel: string;
+  canChangeOperationalStatus: boolean;
   clients: RegistrationClient[];
   formId: string;
   formState: FacilityFormState;
@@ -554,6 +558,7 @@ function FacilityForm({
           Operational status
           <select
             className={inputClassName}
+            disabled={!canChangeOperationalStatus}
             onChange={(event) =>
               onChange({
                 ...formState,

@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -375,6 +375,143 @@ describe("Registration Facilities frontend", () => {
     expect(body.id).toBeUndefined();
     expect(body.created_at).toBeUndefined();
     expect(body.updated_at).toBeUndefined();
+  });
+
+  it("allows an authorized edit-form transition to INACTIVE and reflects the persisted response", async () => {
+    const user = userEvent.setup();
+    const inactiveFacility: RegistrationFacility = {
+      ...facilityA,
+      operational_status: "INACTIVE",
+      updated_at: "2026-08-09T00:00:00.000Z"
+    };
+    const { calls } = mockFetchRoutes([
+      ...authRoutes(),
+      {
+        url: "/api/v1/registration/clients",
+        responses: [{ status: 200, body: { clients: [clientA, clientB] } }]
+      },
+      {
+        url: "/api/v1/registration/facilities",
+        responses: [
+          { status: 200, body: { facilities: [facilityA, facilityB] } },
+          { status: 200, body: { facilities: [inactiveFacility, facilityB] } }
+        ]
+      },
+      {
+        url: `/api/v1/registration/facilities/${facilityA.id}`,
+        responses: [{ status: 200, body: facilityA }]
+      },
+      {
+        url: `/api/v1/registration/facilities/${facilityB.id}`,
+        responses: [{ status: 200, body: facilityB }]
+      },
+      {
+        method: "PATCH",
+        url: `/api/v1/registration/facilities/${facilityA.id}`,
+        responses: [{ status: 200, body: inactiveFacility }]
+      }
+    ]);
+
+    renderWithRoute(routes.registrationFacilities);
+
+    const editForm = await screen.findByRole("form", { name: "Save Facility" });
+    await user.selectOptions(within(editForm).getByLabelText("Operational status"), "INACTIVE");
+    await user.click(within(editForm).getByRole("button", { name: "Save Facility" }));
+
+    expect(await screen.findByText("Facility updated successfully.")).toBeInTheDocument();
+    const updateCall = calls.find(
+      (call) =>
+        call.url === `/api/v1/registration/facilities/${facilityA.id}` &&
+        call.init?.method === "PATCH"
+    );
+
+    expect(updateCall).toBeDefined();
+    expect(JSON.parse(String(updateCall?.init?.body))).toMatchObject({
+      operational_status: "INACTIVE"
+    });
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole("list", { name: "Facility records" })).getByText("Inactive")
+      ).toBeInTheDocument()
+    );
+    expect(within(editForm).getByLabelText("Operational status")).toHaveValue("INACTIVE");
+    expect(screen.queryByRole("button", { name: "Deactivate Facility" })).not.toBeInTheDocument();
+
+    const bluewaterListItem = screen.getByText("Bluewater Beach Zone").closest("li");
+    const makatiListItem = screen.getByText("Makati Training Pool").closest("li");
+
+    if (!bluewaterListItem || !makatiListItem) {
+      throw new Error("Expected Facility list items to render.");
+    }
+
+    await user.click(within(bluewaterListItem).getByRole("button", { name: "View details" }));
+    await screen.findByDisplayValue("Bluewater Beach Zone");
+    await user.click(within(makatiListItem).getByRole("button", { name: "View details" }));
+
+    expect(await screen.findByDisplayValue("Makati Training Pool")).toBeInTheDocument();
+    expect(within(screen.getByRole("form", { name: "Save Facility" })).getByLabelText(
+      "Operational status"
+    )).toHaveValue("INACTIVE");
+  });
+
+  it("keeps ordinary Facility edits available but blocks status changes without deactivate authority", async () => {
+    const user = userEvent.setup();
+    const updateOnlySession: AuthenticatedSession = {
+      ...baseSession,
+      permissions: ["view_client", "view_facility", "update_facility"]
+    };
+    const updatedFacility: RegistrationFacility = {
+      ...facilityA,
+      facility_name: "Makati Training Pool Updated"
+    };
+    const { calls } = mockFetchRoutes([
+      ...authRoutes(updateOnlySession),
+      {
+        url: "/api/v1/registration/clients",
+        responses: [{ status: 200, body: { clients: [clientA, clientB] } }]
+      },
+      {
+        url: "/api/v1/registration/facilities",
+        responses: [
+          { status: 200, body: { facilities: [facilityA] } },
+          { status: 200, body: { facilities: [updatedFacility] } }
+        ]
+      },
+      {
+        url: `/api/v1/registration/facilities/${facilityA.id}`,
+        responses: [{ status: 200, body: facilityA }]
+      },
+      {
+        method: "PATCH",
+        url: `/api/v1/registration/facilities/${facilityA.id}`,
+        responses: [{ status: 200, body: updatedFacility }]
+      }
+    ]);
+
+    renderWithRoute(routes.registrationFacilities);
+
+    const editForm = await screen.findByRole("form", { name: "Save Facility" });
+    const statusSelect = within(editForm).getByLabelText("Operational status");
+
+    expect(statusSelect).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Deactivate Facility" })).not.toBeInTheDocument();
+
+    await user.clear(within(editForm).getByLabelText("Facility name"));
+    await user.type(within(editForm).getByLabelText("Facility name"), "Makati Training Pool Updated");
+    await user.click(within(editForm).getByRole("button", { name: "Save Facility" }));
+
+    expect(await screen.findByText("Facility updated successfully.")).toBeInTheDocument();
+    const updateCall = calls.find(
+      (call) =>
+        call.url === `/api/v1/registration/facilities/${facilityA.id}` &&
+        call.init?.method === "PATCH"
+    );
+
+    expect(updateCall).toBeDefined();
+    expect(JSON.parse(String(updateCall?.init?.body))).toMatchObject({
+      facility_name: "Makati Training Pool Updated",
+      operational_status: "ACTIVE"
+    });
   });
 
   it("deactivates a Facility through PATCH operational_status INACTIVE and never DELETE", async () => {
