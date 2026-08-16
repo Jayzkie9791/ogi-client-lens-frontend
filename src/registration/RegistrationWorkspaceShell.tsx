@@ -26,7 +26,7 @@ export function RegistrationWorkspaceShell({
             Registration
           </h1>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-text-muted">
-            Manage Client, Facility, and Personnel registration records through the authorized backend registration contracts.
+            Manage organizations, facilities, and personnel registered with Client Lens.
           </p>
         </div>
 

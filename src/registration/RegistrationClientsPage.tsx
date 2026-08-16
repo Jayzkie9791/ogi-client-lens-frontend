@@ -52,6 +52,8 @@ export function RegistrationClientsPage() {
   const canUpdate = auth.canUsePermission(permissions.update);
   const canDeactivate = auth.canUsePermission(permissions.deactivate);
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
+  const [clientIdBeforeCreate, setClientIdBeforeCreate] = useState<string | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
   const [createForm, setCreateForm] = useState<ClientFormState>(emptyCreateForm);
   const [editForm, setEditForm] = useState<ClientFormState | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -91,6 +93,8 @@ export function RegistrationClientsPage() {
     onSuccess: (client) => {
       setMessage("Client / Organization created successfully.");
       setCreateForm(emptyCreateForm);
+      setIsCreating(false);
+      setClientIdBeforeCreate(null);
       setSelectedClientId(client.id);
       void queryClient.invalidateQueries({ queryKey: ["registration-clients"] });
       queryClient.setQueryData(["registration-client", client.id], client);
@@ -134,6 +138,28 @@ export function RegistrationClientsPage() {
     updateMutation.mutate({ status: "INACTIVE" });
   }
 
+  function startCreateClient() {
+    setMessage(null);
+    setClientIdBeforeCreate(selectedClientId);
+    setCreateForm(emptyCreateForm);
+    setIsCreating(true);
+  }
+
+  function cancelCreateClient() {
+    setMessage(null);
+    setCreateForm(emptyCreateForm);
+    setSelectedClientId(clientIdBeforeCreate);
+    setClientIdBeforeCreate(null);
+    setIsCreating(false);
+  }
+
+  function selectClient(clientId: string) {
+    setMessage(null);
+    setIsCreating(false);
+    setClientIdBeforeCreate(null);
+    setSelectedClientId(clientId);
+  }
+
   if (!canView) {
     return (
       <SafeState title="You are not authorized to view Client / Organization registration.">
@@ -144,10 +170,27 @@ export function RegistrationClientsPage() {
 
   return (
     <RegistrationWorkspaceShell
-      description="Manage Client / Organization registration records through the authorized backend registration contract."
+      description="Manage organizations registered with Client Lens."
       headingId="registration-clients-heading"
       title="Clients / Organizations"
     >
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-sm leading-6 text-text-muted">
+            Find existing organizations, review registration details, and maintain lifecycle information.
+          </p>
+        </div>
+        {canCreate ? (
+          <Button
+            aria-expanded={isCreating}
+            onClick={startCreateClient}
+            type="button"
+          >
+            Register Client
+          </Button>
+        ) : null}
+      </div>
+
       {message ? (
         <Surface role="status">
           <p className="text-sm font-semibold text-text-primary">{message}</p>
@@ -156,51 +199,42 @@ export function RegistrationClientsPage() {
 
       <RegistrationErrorAlert error={createMutation.error ?? updateMutation.error} />
 
-      {canCreate ? (
-        <ClientFormSurface
-          actionLabel="Create Client / Organization"
-          formId="create-registration-client"
-          formState={createForm}
-          isSubmitting={createMutation.isPending}
-          onChange={setCreateForm}
-          onSubmit={submitCreateForm}
-          title="Create Client / Organization"
-        />
-      ) : null}
-
       {clientsQuery.isLoading ? (
         <SafeState title="Loading Client / Organization records." role="status">
           Please wait.
         </SafeState>
       ) : clientsQuery.isError ? (
         <RegistrationClientsErrorState error={clientsQuery.error} />
-      ) : clients.length === 0 ? (
-        <Surface>
-          <h2 className="text-base font-semibold text-text-primary">
-            No Client / Organization records are currently available.
-          </h2>
-          <p className="mt-2 text-sm leading-6 text-text-muted">
-            The registration service did not return any Client / Organization records for your current authority.
-          </p>
-        </Surface>
       ) : (
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,28rem)]">
+        <div className="grid gap-4 lg:grid-cols-[minmax(16rem,0.8fr)_minmax(0,1.2fr)]">
           <ClientsList
             clients={clients}
-            onSelectClient={setSelectedClientId}
+            onSelectClient={selectClient}
             selectedClientId={selectedClientId}
           />
-          <ClientDetailsPanel
-            canDeactivate={canDeactivate}
-            canUpdate={canUpdate}
-            client={selectedClientQuery.data ?? null}
-            editForm={editForm}
-            isLoading={selectedClientQuery.isLoading}
-            isSubmitting={updateMutation.isPending}
-            onDeactivate={deactivateSelectedClient}
-            onEditChange={setEditForm}
-            onSubmit={submitEditForm}
-          />
+          {isCreating ? (
+            <ClientCreatePanel
+              formState={createForm}
+              isSubmitting={createMutation.isPending}
+              onCancel={cancelCreateClient}
+              onChange={setCreateForm}
+              onSubmit={submitCreateForm}
+            />
+          ) : clients.length === 0 ? (
+            <ClientEmptyDetailPanel canCreate={canCreate} />
+          ) : (
+            <ClientDetailsPanel
+              canDeactivate={canDeactivate}
+              canUpdate={canUpdate}
+              client={selectedClientQuery.data ?? null}
+              editForm={editForm}
+              isLoading={selectedClientQuery.isLoading}
+              isSubmitting={updateMutation.isPending}
+              onDeactivate={deactivateSelectedClient}
+              onEditChange={setEditForm}
+              onSubmit={submitEditForm}
+            />
+          )}
         </div>
       )}
     </RegistrationWorkspaceShell>
@@ -217,42 +251,59 @@ function ClientsList({
   selectedClientId: string | null;
 }) {
   return (
-    <ul aria-label="Client / Organization records" className="space-y-3">
-      {clients.map((client) => (
-        <li key={client.id}>
-          <Surface className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div className="min-w-0 space-y-3">
-              <div>
-                <h2 className="break-words text-lg font-semibold text-text-primary">
-                  {client.organization_name}
-                </h2>
-                <p className="mt-1 break-all text-sm text-text-muted">
-                  Client ID {client.id}
-                </p>
-              </div>
-              <dl className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
-                <MetadataItem label="Status" value={client.status} />
-                <MetadataItem
-                  label="Country"
-                  value={client.country ?? "Not specified"}
-                />
-                <MetadataItem
-                  label="Contact email"
-                  value={client.contact_email ?? "Not specified"}
-                />
-              </dl>
-            </div>
-            <Button
-              aria-pressed={selectedClientId === client.id}
-              onClick={() => onSelectClient(client.id)}
-              variant="secondary"
-            >
-              View details
-            </Button>
-          </Surface>
-        </li>
-      ))}
-    </ul>
+    <Surface>
+      <div className="mb-3">
+        <h2 className="text-base font-semibold text-text-primary">Clients</h2>
+        <p className="mt-1 text-sm text-text-muted">
+          Select an organization to review its registration details.
+        </p>
+      </div>
+      {clients.length === 0 ? (
+        <div className="rounded-component border border-dashed border-border p-4">
+          <h3 className="text-sm font-semibold text-text-primary">
+            No Clients registered yet.
+          </h3>
+          <p className="mt-2 text-sm text-text-muted">
+            Use Register Client to add the first organization when you have create authority.
+          </p>
+        </div>
+      ) : (
+        <ul aria-label="Client / Organization records" className="space-y-2">
+          {clients.map((client) => {
+            const isSelected = selectedClientId === client.id;
+
+            return (
+              <li key={client.id}>
+                <button
+                  aria-current={isSelected ? "true" : undefined}
+                  className={[
+                    "w-full rounded-component border px-3 py-3 text-left outline-none transition focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface",
+                    isSelected
+                      ? "border-primary-navy bg-elevated shadow-sm"
+                      : "border-border bg-surface hover:bg-elevated"
+                  ].join(" ")}
+                  onClick={() => onSelectClient(client.id)}
+                  type="button"
+                >
+                  <span className="block break-words text-sm font-semibold text-text-primary">
+                    {client.organization_name}
+                  </span>
+                  <span className="mt-2 flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-wide text-text-muted">
+                    <span>{client.status}</span>
+                    {client.country ? <span>{client.country}</span> : null}
+                  </span>
+                  {client.contact_email ? (
+                    <span className="mt-2 block break-words text-sm text-text-muted">
+                      {client.contact_email}
+                    </span>
+                  ) : null}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </Surface>
   );
 }
 
@@ -300,10 +351,13 @@ function ClientDetailsPanel({
           <h2 className="text-lg font-semibold text-text-primary">
             Client / Organization Details
           </h2>
-          <p className="mt-1 break-all text-sm text-text-muted">{client.id}</p>
+          <p className="mt-1 break-words text-sm font-semibold text-text-muted">
+            {client.organization_name}
+          </p>
         </div>
 
         <dl className="grid gap-2 text-sm sm:grid-cols-2">
+          <MetadataItem label="Client ID" value={client.id} subtle />
           <MetadataItem label="Created" value={client.created_at} />
           <MetadataItem label="Updated" value={client.updated_at} />
         </dl>
@@ -335,32 +389,33 @@ function ClientDetailsPanel({
   );
 }
 
-function ClientFormSurface({
-  actionLabel,
-  formId,
+function ClientCreatePanel({
   formState,
   isSubmitting,
+  onCancel,
   onChange,
-  onSubmit,
-  title
+  onSubmit
 }: {
-  actionLabel: string;
-  formId: string;
   formState: ClientFormState;
   isSubmitting: boolean;
+  onCancel: () => void;
   onChange: (formState: ClientFormState) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-  title: string;
 }) {
   return (
     <Surface>
-      <h2 className="text-base font-semibold text-text-primary">{title}</h2>
+      <h2 className="text-lg font-semibold text-text-primary">Register Client</h2>
+      <p className="mt-1 text-sm text-text-muted">
+        Create a Client / Organization registration record.
+      </p>
       <div className="mt-4">
         <ClientForm
-          actionLabel={actionLabel}
-          formId={formId}
+          actionLabel="Create Client"
+          cancelLabel="Cancel"
+          formId="create-registration-client"
           formState={formState}
           isSubmitting={isSubmitting}
+          onCancel={onCancel}
           onChange={onChange}
           onSubmit={onSubmit}
         />
@@ -369,18 +424,37 @@ function ClientFormSurface({
   );
 }
 
+function ClientEmptyDetailPanel({ canCreate }: { canCreate: boolean }) {
+  return (
+    <Surface>
+      <h2 className="text-base font-semibold text-text-primary">
+        No Client selected.
+      </h2>
+      <p className="mt-2 text-sm leading-6 text-text-muted">
+        {canCreate
+          ? "Use Register Client to create the first organization."
+          : "No Client / Organization records are currently available for your authority."}
+      </p>
+    </Surface>
+  );
+}
+
 function ClientForm({
   actionLabel,
+  cancelLabel,
   formId,
   formState,
   isSubmitting,
+  onCancel,
   onChange,
   onSubmit
 }: {
   actionLabel: string;
+  cancelLabel?: string;
   formId: string;
   formState: ClientFormState;
   isSubmitting: boolean;
+  onCancel?: () => void;
   onChange: (formState: ClientFormState) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
@@ -446,9 +520,21 @@ function ClientForm({
           value={formState.notes}
         />
       </label>
-      <Button disabled={isSubmitting || !formState.organizationName.trim()} type="submit">
-        {actionLabel}
-      </Button>
+      <div className="flex flex-wrap gap-2">
+        <Button disabled={isSubmitting || !formState.organizationName.trim()} type="submit">
+          {actionLabel}
+        </Button>
+        {onCancel && cancelLabel ? (
+          <Button
+            disabled={isSubmitting}
+            onClick={onCancel}
+            type="button"
+            variant="secondary"
+          >
+            {cancelLabel}
+          </Button>
+        ) : null}
+      </div>
     </form>
   );
 }
@@ -529,13 +615,28 @@ function RegistrationClientsErrorState({ error }: { error: Error }) {
   );
 }
 
-function MetadataItem({ label, value }: { label: string; value: string }) {
+function MetadataItem({
+  label,
+  subtle = false,
+  value
+}: {
+  label: string;
+  subtle?: boolean;
+  value: string;
+}) {
   return (
     <div className="min-w-0">
       <dt className="text-xs font-semibold uppercase tracking-wide text-text-muted">
         {label}
       </dt>
-      <dd className="mt-1 break-words text-text-primary">{value}</dd>
+      <dd
+        className={[
+          "mt-1 break-words",
+          subtle ? "text-xs text-text-muted" : "text-text-primary"
+        ].join(" ")}
+      >
+        {value}
+      </dd>
     </div>
   );
 }

@@ -158,6 +158,13 @@ describe("Registration Clients frontend", () => {
       "page"
     );
     expect(
+      screen.queryByRole("form", { name: "Create Client" })
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Register Client" })).toBeInTheDocument();
+    expect(
+      screen.queryByText(/backend|API contract|authorized backend/i)
+    ).not.toBeInTheDocument();
+    expect(
       screen.getByText("Ocean Guard International")
     ).toBeInTheDocument();
     expect(screen.getByText("Bluewater Resorts")).toBeInTheDocument();
@@ -172,6 +179,32 @@ describe("Registration Clients frontend", () => {
     ]);
   });
 
+  it("keeps the Clients workspace useful without create, update, or deactivate authority", async () => {
+    mockFetchQueue([
+      ...authResponses({
+        ...baseSession,
+        permissions: ["view_client"]
+      }),
+      { status: 200, body: { clients: [clientA] } },
+      { status: 200, body: clientA }
+    ]);
+
+    renderWithRoute(routes.registrationClients);
+
+    expect(
+      await screen.findByRole("heading", { name: "Clients / Organizations" })
+    ).toBeInTheDocument();
+    expect(await screen.findByText("Ocean Guard International")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Register Client" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("form", { name: "Save Client / Organization" })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Deactivate Client / Organization" })
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("admin@ogiofficial.com")).toBeInTheDocument();
+  });
+
   it("blocks registration without view_client and does not call registration endpoints", async () => {
     const { calls } = mockFetchQueue([
       ...authResponses({
@@ -183,16 +216,15 @@ describe("Registration Clients frontend", () => {
 
     renderWithRoute(routes.registrationClients);
 
-    expect(
-      await screen.findByRole("heading", {
-        name: "You are not authorized to view Client / Organization registration."
-      })
-    ).toBeInTheDocument();
+    await screen.findByText(
+      "Your current session does not include Client / Organization registration authority."
+    );
     expect(screen.queryByRole("link", { name: "Registration" })).not.toBeInTheDocument();
-    expect(calls.map(({ url }) => url)).toEqual([
-      "/api/v1/auth/refresh",
-      "/api/v1/auth/me"
-    ]);
+    expect(calls.map(({ url }) => url)).toContain("/api/v1/auth/refresh");
+    expect(calls.map(({ url }) => url)).toContain("/api/v1/auth/me");
+    expect(
+      calls.some((call) => call.url.startsWith("/api/v1/registration"))
+    ).toBe(false);
   });
 
   it("derives the Clients tab state directly from a direct Clients route load", async () => {
@@ -213,6 +245,65 @@ describe("Registration Clients frontend", () => {
     );
   });
 
+  it("enters and cancels explicit Register Client mode without mutation", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetchQueue([
+      ...authResponses(),
+      { status: 200, body: { clients: [clientA, clientB] } },
+      { status: 200, body: clientA },
+      { status: 200, body: clientB }
+    ]);
+
+    renderWithRoute(routes.registrationClients);
+
+    await screen.findByRole("heading", { name: "Client / Organization Details" });
+    await user.click(screen.getByRole("button", { name: /Bluewater Resorts/i }));
+
+    expect(await screen.findByDisplayValue("Bluewater Resorts")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Register Client" }));
+
+    const createForm = await screen.findByRole("form", { name: "Create Client" });
+    expect(within(createForm).getByLabelText("Organization name")).toHaveValue("");
+    expect(
+      screen.queryByRole("form", { name: "Save Client / Organization" })
+    ).not.toBeInTheDocument();
+
+    await user.click(within(createForm).getByRole("button", { name: "Cancel" }));
+
+    expect(await screen.findByDisplayValue("Bluewater Resorts")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("form", { name: "Create Client" })
+    ).not.toBeInTheDocument();
+    expect(
+      calls.some(
+        (call) =>
+          call.url === "/api/v1/registration/clients" &&
+          call.init?.method === "POST"
+      )
+    ).toBe(false);
+  });
+
+  it("renders an empty Clients workspace without permanently showing the create form", async () => {
+    const user = userEvent.setup();
+    mockFetchQueue([
+      ...authResponses(),
+      { status: 200, body: { clients: [] } }
+    ]);
+
+    renderWithRoute(routes.registrationClients);
+
+    expect(await screen.findByText("No Clients registered yet.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "No Client selected." })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("form", { name: "Create Client" })
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Register Client" }));
+
+    expect(await screen.findByRole("form", { name: "Create Client" })).toBeInTheDocument();
+  });
+
   it("creates a Client / Organization through the approved POST contract", async () => {
     const user = userEvent.setup();
     const createdClient: RegistrationClient = {
@@ -231,9 +322,12 @@ describe("Registration Clients frontend", () => {
 
     renderWithRoute(routes.registrationClients);
 
-    const createForm = await screen.findByRole("form", {
-      name: "Create Client / Organization"
-    });
+    expect(
+      screen.queryByRole("form", { name: "Create Client" })
+    ).not.toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "Register Client" }));
+
+    const createForm = await screen.findByRole("form", { name: "Create Client" });
     await user.type(
       within(createForm).getByLabelText("Organization name"),
       "New Aquatics Client"
@@ -245,7 +339,7 @@ describe("Registration Clients frontend", () => {
     await user.type(within(createForm).getByLabelText("Country"), "Canada");
     await user.click(
       within(createForm).getByRole("button", {
-        name: "Create Client / Organization"
+        name: "Create Client"
       })
     );
 
@@ -257,6 +351,14 @@ describe("Registration Clients frontend", () => {
     );
 
     expect(createCall).toBeDefined();
+    expect(await screen.findByDisplayValue("New Aquatics Client")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("form", { name: "Create Client" })
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /New Aquatics Client/i })).toHaveAttribute(
+      "aria-current",
+      "true"
+    );
     expect(JSON.parse(String(createCall?.init?.body))).toEqual({
       organization_name: "New Aquatics Client",
       status: "ACTIVE",
@@ -379,7 +481,7 @@ describe("Registration Clients frontend", () => {
       })
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "Create Client / Organization" })
+      screen.queryByRole("button", { name: "Register Client" })
     ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Save Client / Organization" })
