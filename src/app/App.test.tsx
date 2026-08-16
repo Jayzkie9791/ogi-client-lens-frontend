@@ -976,9 +976,23 @@ describe("Client Lens authentication foundation", () => {
       await screen.findByRole("heading", { name: "Forms & Audits" })
     ).toBeInTheDocument();
     expect(screen.getByText("Choose an operational form or audit to open.")).toBeInTheDocument();
+    expect(screen.getByLabelText("Module")).toHaveValue("");
+    expect(screen.getByRole("option", { name: "Select a module" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "All modules" })).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", {
+        name: "Choose a module to view available forms and audits."
+      })
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Weekly Safety Audit Checklist")).not.toBeInTheDocument();
+    expect(screen.queryByText("Risk Register")).not.toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText("Module"), "MODULE_A");
+
     expect(screen.getByText("Weekly Safety Audit Checklist")).toBeInTheDocument();
     expect(screen.getByText("Capture weekly operational safety audit evidence.")).toBeInTheDocument();
     expect(screen.getAllByText("MODULE_A").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Risk Register")).not.toBeInTheDocument();
     expect(screen.getByText("OGI_F001_WEEKLY_SAFETY_AUDIT_CHECKLIST")).toBeInTheDocument();
     expect(screen.getByText("OGI-F001 / Rev A")).toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: "Open Form" })[0]).toHaveAttribute(
@@ -1065,6 +1079,15 @@ describe("Client Lens authentication foundation", () => {
     renderWithRoute(routes.operations);
 
     await screen.findByRole("heading", { name: "Forms & Audits" });
+    expect(screen.getByLabelText("Module")).toHaveValue("");
+    expect(screen.queryByText("Weekly Safety Audit Checklist")).not.toBeInTheDocument();
+    expect(screen.queryByText("Risk Register")).not.toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText("Module"), "MODULE_A");
+
+    expect(screen.getByText("Weekly Safety Audit Checklist")).toBeInTheDocument();
+    expect(screen.queryByText("Risk Register")).not.toBeInTheDocument();
+
     await user.selectOptions(screen.getByLabelText("Module"), "MODULE_B");
 
     expect(screen.queryByText("Weekly Safety Audit Checklist")).not.toBeInTheDocument();
@@ -1075,6 +1098,16 @@ describe("Client Lens authentication foundation", () => {
     expect(
       screen.queryByRole("combobox", { name: /facility/i })
     ).not.toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText("Module"), "");
+
+    expect(
+      screen.getByRole("heading", {
+        name: "Choose a module to view available forms and audits."
+      })
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Weekly Safety Audit Checklist")).not.toBeInTheDocument();
+    expect(screen.queryByText("Risk Register")).not.toBeInTheDocument();
   });
 
   it("routes view-only actors to the existing read-only runtime form", async () => {
@@ -1085,6 +1118,9 @@ describe("Client Lens authentication foundation", () => {
       { status: 200, body: catalogResponse }
     ]);
     renderWithRoute(routes.operations);
+
+    await screen.findByRole("heading", { name: "Forms & Audits" });
+    await userEvent.selectOptions(screen.getByLabelText("Module"), "MODULE_A");
 
     const viewActions = await screen.findAllByRole("link", { name: "View Form" });
 

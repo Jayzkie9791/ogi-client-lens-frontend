@@ -31,7 +31,7 @@ export function OperationsPage() {
     () =>
       moduleFilter
         ? templates.filter((template) => template.module === moduleFilter)
-        : templates,
+        : emptyTemplates,
     [moduleFilter, templates]
   );
 
@@ -66,7 +66,7 @@ export function OperationsPage() {
 
       <OperationsChildNavigation />
 
-      {modules.length > 1 ? (
+      {modules.length > 0 ? (
         <Surface>
           <label className="block text-sm font-semibold text-text-primary">
             Module
@@ -75,7 +75,7 @@ export function OperationsPage() {
               onChange={(event) => setModuleFilter(event.target.value)}
               value={moduleFilter}
             >
-              <option value="">All modules</option>
+              <option value="">Select a module</option>
               {modules.map((module) => (
                 <option key={module} value={module}>
                   {module}
@@ -94,6 +94,24 @@ export function OperationsPage() {
           <p className="mt-2 text-sm leading-6 text-text-muted">
             The canonical template catalog did not return any discoverable
             forms or audits.
+          </p>
+        </Surface>
+      ) : !moduleFilter ? (
+        <Surface>
+          <h2 className="text-base font-semibold text-text-primary">
+            Choose a module to view available forms and audits.
+          </h2>
+          <p className="mt-2 text-sm leading-6 text-text-muted">
+            Select an operational module above to begin.
+          </p>
+        </Surface>
+      ) : visibleTemplates.length === 0 ? (
+        <Surface>
+          <h2 className="text-base font-semibold text-text-primary">
+            No forms or audits are available for this module.
+          </h2>
+          <p className="mt-2 text-sm leading-6 text-text-muted">
+            Choose another module to continue browsing.
           </p>
         </Surface>
       ) : (
