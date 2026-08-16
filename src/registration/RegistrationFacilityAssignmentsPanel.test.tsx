@@ -307,6 +307,7 @@ describe("Registration Facility Assignment frontend", () => {
     renderWithRoute(routes.registrationPersonnel);
 
     expect(await screen.findByText("Ana Santos")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Personnel Details" })).toBeInTheDocument();
     expect(screen.queryByLabelText("Facility assignment")).not.toBeInTheDocument();
     expect(
       calls.some((call) => call.url.includes("facility-assignments"))

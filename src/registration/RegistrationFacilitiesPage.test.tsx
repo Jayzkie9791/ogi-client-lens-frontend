@@ -229,9 +229,13 @@ describe("Registration Facilities frontend", () => {
     await user.click(screen.getByRole("link", { name: "Facilities" }));
 
     expect(await screen.findByRole("heading", { name: "Facilities" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Clients / Organizations" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Clients" })).toHaveAttribute(
       "href",
       routes.registrationClients
+    );
+    expect(screen.getByRole("link", { name: "Facilities" })).toHaveAttribute(
+      "aria-current",
+      "page"
     );
     expect(await screen.findByText("Makati Training Pool")).toBeInTheDocument();
     expect(screen.getByText("Bluewater Beach Zone")).toBeInTheDocument();
@@ -257,6 +261,10 @@ describe("Registration Facilities frontend", () => {
     renderWithRoute(routes.registrationFacilities);
 
     await screen.findByRole("heading", { name: "Facilities" });
+    expect(screen.getByRole("link", { name: "Facilities" })).toHaveAttribute(
+      "aria-current",
+      "page"
+    );
     const clientFilter = screen.getByLabelText("Client filter");
     await within(clientFilter).findByRole("option", { name: "Bluewater Resorts" });
     await user.selectOptions(clientFilter, clientB.id);
@@ -665,7 +673,7 @@ describe("Registration Facilities frontend", () => {
     await user.click(screen.getByRole("link", { name: "Registration" }));
 
     expect(await screen.findByRole("heading", { name: "Facilities" })).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Clients / Organizations" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Clients" })).not.toBeInTheDocument();
     expect(calls.some((call) => call.url === "/api/v1/registration/clients")).toBe(false);
   });
 });

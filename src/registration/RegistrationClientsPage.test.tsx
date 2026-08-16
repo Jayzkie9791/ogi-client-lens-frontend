@@ -152,6 +152,11 @@ describe("Registration Clients frontend", () => {
     expect(
       await screen.findByRole("heading", { name: "Clients / Organizations" })
     ).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { name: "Registration" })).toHaveLength(1);
+    expect(screen.getByRole("link", { name: "Clients" })).toHaveAttribute(
+      "aria-current",
+      "page"
+    );
     expect(
       screen.getByText("Ocean Guard International")
     ).toBeInTheDocument();
@@ -188,6 +193,24 @@ describe("Registration Clients frontend", () => {
       "/api/v1/auth/refresh",
       "/api/v1/auth/me"
     ]);
+  });
+
+  it("derives the Clients tab state directly from a direct Clients route load", async () => {
+    mockFetchQueue([
+      ...authResponses(),
+      { status: 200, body: { clients: [clientA] } },
+      { status: 200, body: clientA }
+    ]);
+
+    renderWithRoute(routes.registrationClients);
+
+    expect(
+      await screen.findByRole("heading", { name: "Clients / Organizations" })
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Clients" })).toHaveAttribute(
+      "aria-current",
+      "page"
+    );
   });
 
   it("creates a Client / Organization through the approved POST contract", async () => {

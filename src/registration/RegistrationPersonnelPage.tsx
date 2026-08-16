@@ -24,7 +24,7 @@ import {
   updateRegistrationPersonnel
 } from "./registrationPersonnelApi";
 import { RegistrationFacilityAssignmentsPanel } from "./RegistrationFacilityAssignmentsPanel";
-import { RegistrationNavigation } from "./RegistrationNavigation";
+import { RegistrationWorkspaceShell } from "./RegistrationWorkspaceShell";
 
 const permissions = {
   viewClients: "view_client",
@@ -218,24 +218,11 @@ export function RegistrationPersonnelPage() {
   }
 
   return (
-    <section aria-labelledby="registration-personnel-heading" className="space-y-4">
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-wide text-primary-blue">
-          Registration
-        </p>
-        <h1
-          className="mt-2 text-2xl font-semibold text-text-primary"
-          id="registration-personnel-heading"
-        >
-          Personnel
-        </h1>
-        <p className="mt-2 max-w-3xl text-sm leading-6 text-text-muted">
-          Manage durable workforce identity records without creating platform users, facility assignments, credentials, or Operational Evidence.
-        </p>
-      </div>
-
-      <RegistrationNavigation />
-
+    <RegistrationWorkspaceShell
+      description="Manage durable workforce identity records without creating platform users, facility assignments, credentials, or Operational Evidence."
+      headingId="registration-personnel-heading"
+      title="Personnel"
+    >
       {message ? (
         <Surface role="status">
           <p className="text-sm font-semibold text-text-primary">{message}</p>
@@ -319,7 +306,7 @@ export function RegistrationPersonnelPage() {
           />
         </div>
       )}
-    </section>
+    </RegistrationWorkspaceShell>
   );
 }
 

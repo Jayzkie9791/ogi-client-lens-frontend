@@ -261,7 +261,7 @@ describe("Registration Personnel frontend", () => {
     await user.click(screen.getByRole("link", { name: "Personnel" }));
 
     expect(await screen.findByRole("heading", { name: "Personnel" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Clients / Organizations" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Clients" })).toHaveAttribute(
       "href",
       routes.registrationClients
     );
@@ -272,6 +272,10 @@ describe("Registration Personnel frontend", () => {
     expect(screen.getByRole("link", { name: "Personnel" })).toHaveAttribute(
       "href",
       routes.registrationPersonnel
+    );
+    expect(screen.getByRole("link", { name: "Personnel" })).toHaveAttribute(
+      "aria-current",
+      "page"
     );
     expect(await screen.findByText("Ana Santos")).toBeInTheDocument();
     expect(screen.getByText("Jamie Brooks")).toBeInTheDocument();
@@ -306,6 +310,10 @@ describe("Registration Personnel frontend", () => {
     renderWithRoute(routes.registrationPersonnel);
 
     await screen.findByRole("heading", { name: "Personnel" });
+    expect(screen.getByRole("link", { name: "Personnel" })).toHaveAttribute(
+      "aria-current",
+      "page"
+    );
     const clientFilter = screen.getByLabelText("Client filter");
     await within(clientFilter).findByRole("option", { name: "Bluewater Resorts" });
     await user.selectOptions(clientFilter, clientB.id);
@@ -621,7 +629,7 @@ describe("Registration Personnel frontend", () => {
     await user.click(screen.getByRole("link", { name: "Registration" }));
 
     expect(await screen.findByRole("heading", { name: "Personnel" })).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Clients / Organizations" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Clients" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Facilities" })).not.toBeInTheDocument();
     expect(calls.some((call) => call.url === "/api/v1/registration/clients")).toBe(false);
     expect(calls.some((call) => call.url === "/api/v1/registration/facilities")).toBe(false);

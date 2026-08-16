@@ -21,7 +21,7 @@ import {
   registrationFacilityTypes,
   updateRegistrationFacility
 } from "./registrationFacilityApi";
-import { RegistrationNavigation } from "./RegistrationNavigation";
+import { RegistrationWorkspaceShell } from "./RegistrationWorkspaceShell";
 
 const permissions = {
   viewClients: "view_client",
@@ -184,24 +184,11 @@ export function RegistrationFacilitiesPage() {
   }
 
   return (
-    <section aria-labelledby="registration-facilities-heading" className="space-y-4">
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-wide text-primary-blue">
-          Registration
-        </p>
-        <h1
-          className="mt-2 text-2xl font-semibold text-text-primary"
-          id="registration-facilities-heading"
-        >
-          Facilities
-        </h1>
-        <p className="mt-2 max-w-3xl text-sm leading-6 text-text-muted">
-          Manage durable Facility registration records without changing Operational Evidence working context.
-        </p>
-      </div>
-
-      <RegistrationNavigation />
-
+    <RegistrationWorkspaceShell
+      description="Manage durable Facility registration records without changing Operational Evidence working context."
+      headingId="registration-facilities-heading"
+      title="Facilities"
+    >
       {message ? (
         <Surface role="status">
           <p className="text-sm font-semibold text-text-primary">{message}</p>
@@ -273,7 +260,7 @@ export function RegistrationFacilitiesPage() {
           />
         </div>
       )}
-    </section>
+    </RegistrationWorkspaceShell>
   );
 }
 

@@ -15,7 +15,7 @@ import {
   registrationClientStatuses,
   updateRegistrationClient
 } from "./registrationClientApi";
-import { RegistrationNavigation } from "./RegistrationNavigation";
+import { RegistrationWorkspaceShell } from "./RegistrationWorkspaceShell";
 
 const permissions = {
   view: "view_client",
@@ -143,24 +143,11 @@ export function RegistrationClientsPage() {
   }
 
   return (
-    <section aria-labelledby="registration-clients-heading" className="space-y-4">
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-wide text-primary-blue">
-          Registration
-        </p>
-        <h1
-          className="mt-2 text-2xl font-semibold text-text-primary"
-          id="registration-clients-heading"
-        >
-          Clients / Organizations
-        </h1>
-        <p className="mt-2 max-w-3xl text-sm leading-6 text-text-muted">
-          Manage Client / Organization registration records through the authorized backend registration contract.
-        </p>
-      </div>
-
-      <RegistrationNavigation />
-
+    <RegistrationWorkspaceShell
+      description="Manage Client / Organization registration records through the authorized backend registration contract."
+      headingId="registration-clients-heading"
+      title="Clients / Organizations"
+    >
       {message ? (
         <Surface role="status">
           <p className="text-sm font-semibold text-text-primary">{message}</p>
@@ -216,7 +203,7 @@ export function RegistrationClientsPage() {
           />
         </div>
       )}
-    </section>
+    </RegistrationWorkspaceShell>
   );
 }
 
