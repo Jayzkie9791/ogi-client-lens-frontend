@@ -63,6 +63,8 @@ export function RegistrationFacilitiesPage() {
   const canDeactivate = auth.canUsePermission(permissions.deactivate);
   const [clientFilter, setClientFilter] = useState("");
   const [selectedFacilityId, setSelectedFacilityId] = useState<string | null>(null);
+  const [facilityIdBeforeCreate, setFacilityIdBeforeCreate] = useState<string | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
   const [createForm, setCreateForm] = useState<FacilityFormState>({
     ...emptyCreateForm,
     clientId: auth.session?.clientId ?? ""
@@ -133,6 +135,8 @@ export function RegistrationFacilitiesPage() {
       setMessage("Facility created successfully.");
       setCreateForm({ ...emptyCreateForm, clientId: createForm.clientId });
       setSelectedFacilityId(facility.id);
+      setFacilityIdBeforeCreate(null);
+      setIsCreating(false);
       void queryClient.invalidateQueries({ queryKey: ["registration-facilities"] });
       queryClient.setQueryData(["registration-facility", facility.id], facility);
     }
@@ -175,6 +179,47 @@ export function RegistrationFacilitiesPage() {
     updateMutation.mutate({ operational_status: "INACTIVE" });
   }
 
+  function startCreateFacility() {
+    setMessage(null);
+    setFacilityIdBeforeCreate(selectedFacilityId);
+    setCreateForm({
+      ...emptyCreateForm,
+      clientId:
+        clientFilter ||
+        auth.session?.clientId ||
+        createForm.clientId ||
+        clients[0]?.id ||
+        ""
+    });
+    setIsCreating(true);
+  }
+
+  function cancelCreateFacility() {
+    setMessage(null);
+    setCreateForm({
+      ...emptyCreateForm,
+      clientId: clientFilter || auth.session?.clientId || createForm.clientId
+    });
+    setSelectedFacilityId(facilityIdBeforeCreate);
+    setFacilityIdBeforeCreate(null);
+    setIsCreating(false);
+  }
+
+  function selectFacility(facilityId: string) {
+    setIsCreating(false);
+    setFacilityIdBeforeCreate(null);
+    setSelectedFacilityId(facilityId);
+  }
+
+  function changeClientFilter(value: string) {
+    setClientFilter(value);
+    setSelectedFacilityId(null);
+
+    if (isCreating && value) {
+      setCreateForm((current) => ({ ...current, clientId: value }));
+    }
+  }
+
   if (!canView) {
     return (
       <SafeState title="You are not authorized to view Facility registration.">
@@ -185,10 +230,27 @@ export function RegistrationFacilitiesPage() {
 
   return (
     <RegistrationWorkspaceShell
-      description="Manage durable Facility registration records without changing Operational Evidence working context."
+      description="Manage facilities registered with Client Lens."
       headingId="registration-facilities-heading"
       title="Facilities"
     >
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-sm leading-6 text-text-muted">
+            Find existing facilities, review registration details, and maintain operational status.
+          </p>
+        </div>
+        {canCreate ? (
+          <Button
+            aria-expanded={isCreating}
+            onClick={startCreateFacility}
+            type="button"
+          >
+            Register Facility
+          </Button>
+        ) : null}
+      </div>
+
       {message ? (
         <Surface role="status">
           <p className="text-sm font-semibold text-text-primary">{message}</p>
@@ -197,29 +259,12 @@ export function RegistrationFacilitiesPage() {
 
       <RegistrationErrorAlert error={createMutation.error ?? updateMutation.error} />
 
-      {canCreate ? (
-        <FacilityFormSurface
-          actionLabel="Create Facility"
-          clients={clients}
-          formId="create-registration-facility"
-          formState={createForm}
-          isSubmitting={createMutation.isPending}
-          lockClientSelection={!canViewClients}
-          onChange={setCreateForm}
-          onSubmit={submitCreateForm}
-          title="Create Facility"
-        />
-      ) : null}
-
       {canViewClients ? (
         <ClientFilter
           clients={clients}
           disabled={clientsQuery.isLoading}
           value={clientFilter}
-          onChange={(value) => {
-            setClientFilter(value);
-            setSelectedFacilityId(null);
-          }}
+          onChange={changeClientFilter}
         />
       ) : null}
 
@@ -229,35 +274,41 @@ export function RegistrationFacilitiesPage() {
         </SafeState>
       ) : facilitiesQuery.isError ? (
         <RegistrationFacilitiesErrorState error={facilitiesQuery.error} />
-      ) : facilities.length === 0 ? (
-        <Surface>
-          <h2 className="text-base font-semibold text-text-primary">
-            No Facility records are currently available.
-          </h2>
-          <p className="mt-2 text-sm leading-6 text-text-muted">
-            The registration service did not return any Facility records for your current authority.
-          </p>
-        </Surface>
       ) : (
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,28rem)]">
+        <div className="grid gap-4 lg:grid-cols-[minmax(16rem,0.8fr)_minmax(0,1.2fr)]">
           <FacilitiesList
             clientNameById={clientNameById}
             facilities={facilities}
-            onSelectFacility={setSelectedFacilityId}
+            onSelectFacility={selectFacility}
             selectedFacilityId={selectedFacilityId}
+            scopedToClient={Boolean(clientFilter)}
           />
-          <FacilityDetailsPanel
-            canDeactivate={canDeactivate}
-            canUpdate={canUpdate}
-            clientNameById={clientNameById}
-            facility={selectedFacilityQuery.data ?? null}
-            editForm={editForm}
-            isLoading={selectedFacilityQuery.isLoading}
-            isSubmitting={updateMutation.isPending}
-            onDeactivate={deactivateSelectedFacility}
-            onEditChange={setEditForm}
-            onSubmit={submitEditForm}
-          />
+          {isCreating ? (
+            <FacilityCreatePanel
+              clients={clients}
+              formState={createForm}
+              isSubmitting={createMutation.isPending}
+              lockClientSelection={!canViewClients}
+              onCancel={cancelCreateFacility}
+              onChange={setCreateForm}
+              onSubmit={submitCreateForm}
+            />
+          ) : facilities.length === 0 ? (
+            <FacilityEmptyDetailPanel canCreate={canCreate} scopedToClient={Boolean(clientFilter)} />
+          ) : (
+            <FacilityDetailsPanel
+              canDeactivate={canDeactivate}
+              canUpdate={canUpdate}
+              clientNameById={clientNameById}
+              facility={selectedFacilityQuery.data ?? null}
+              editForm={editForm}
+              isLoading={selectedFacilityQuery.isLoading}
+              isSubmitting={updateMutation.isPending}
+              onDeactivate={deactivateSelectedFacility}
+              onEditChange={setEditForm}
+              onSubmit={submitEditForm}
+            />
+          )}
         </div>
       )}
     </RegistrationWorkspaceShell>
@@ -301,46 +352,70 @@ function FacilitiesList({
   clientNameById,
   facilities,
   onSelectFacility,
+  scopedToClient,
   selectedFacilityId
 }: {
   clientNameById: Map<string, string>;
   facilities: RegistrationFacility[];
   onSelectFacility: (facilityId: string) => void;
+  scopedToClient: boolean;
   selectedFacilityId: string | null;
 }) {
   return (
-    <ul aria-label="Facility records" className="space-y-3">
-      {facilities.map((facility) => (
-        <li key={facility.id}>
-          <Surface className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div className="min-w-0 space-y-3">
-              <div>
-                <h2 className="break-words text-lg font-semibold text-text-primary">
-                  {facility.facility_name}
-                </h2>
-                <p className="mt-1 break-all text-sm text-text-muted">
-                  Facility ID {facility.id}
-                </p>
-              </div>
-              <dl className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
-                <MetadataItem label="Client" value={clientLabel(facility.client_id, clientNameById)} />
-                <MetadataItem label="Type" value={displayCode(facility.facility_type)} />
-                <MetadataItem label="Status" value={displayCode(facility.operational_status)} />
-                <MetadataItem label="Country" value={facility.country ?? "Not specified"} />
-                <MetadataItem label="Timezone" value={facility.timezone ?? "Not specified"} />
-              </dl>
-            </div>
-            <Button
-              aria-pressed={selectedFacilityId === facility.id}
-              onClick={() => onSelectFacility(facility.id)}
-              variant="secondary"
-            >
-              View details
-            </Button>
-          </Surface>
-        </li>
-      ))}
-    </ul>
+    <Surface>
+      <div className="mb-3">
+        <h2 className="text-base font-semibold text-text-primary">Facility records</h2>
+        <p className="mt-1 text-sm text-text-muted">
+          Select a facility to review its registration details.
+        </p>
+      </div>
+      {facilities.length === 0 ? (
+        <div className="rounded-component border border-dashed border-border p-4">
+          <h3 className="text-sm font-semibold text-text-primary">
+            {scopedToClient
+              ? "No Facilities registered for this Client."
+              : "No Facilities registered."}
+          </h3>
+          <p className="mt-2 text-sm text-text-muted">
+            Use Register Facility to add a facility when you have create authority.
+          </p>
+        </div>
+      ) : (
+        <ul aria-label="Facility records" className="space-y-2">
+          {facilities.map((facility) => {
+            const isSelected = selectedFacilityId === facility.id;
+
+            return (
+              <li key={facility.id}>
+                <button
+                  aria-current={isSelected ? "true" : undefined}
+                  className={[
+                    "w-full rounded-component border px-3 py-3 text-left outline-none transition focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface",
+                    isSelected
+                      ? "border-primary-navy bg-elevated shadow-sm"
+                      : "border-border bg-surface hover:bg-elevated"
+                  ].join(" ")}
+                  onClick={() => onSelectFacility(facility.id)}
+                  type="button"
+                >
+                  <span className="block break-words text-sm font-semibold text-text-primary">
+                    {facility.facility_name}
+                  </span>
+                  <span className="mt-2 flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-wide text-text-muted">
+                    <span>{displayCode(facility.facility_type)}</span>
+                    <span>{displayCode(facility.operational_status)}</span>
+                    {facility.country ? <span>{facility.country}</span> : null}
+                  </span>
+                  <span className="mt-2 block break-words text-sm text-text-muted">
+                    {clientLabel(facility.client_id, clientNameById)}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </Surface>
   );
 }
 
@@ -390,11 +465,12 @@ function FacilityDetailsPanel({
           <h2 className="text-lg font-semibold text-text-primary">
             Facility Details
           </h2>
-          <p className="mt-1 break-all text-sm text-text-muted">{facility.id}</p>
+          <p className="mt-1 break-words text-sm text-text-muted">{facility.facility_name}</p>
         </div>
 
         <dl className="grid gap-2 text-sm sm:grid-cols-2">
           <MetadataItem label="Client" value={clientLabel(facility.client_id, clientNameById)} />
+          <MetadataItem label="Facility ID" value={facility.id} />
           <MetadataItem label="Client ID" value={facility.client_id} />
           <MetadataItem label="Created" value={facility.created_at} />
           <MetadataItem label="Updated" value={facility.updated_at} />
@@ -426,39 +502,40 @@ function FacilityDetailsPanel({
   );
 }
 
-function FacilityFormSurface({
-  actionLabel,
+function FacilityCreatePanel({
   clients,
-  formId,
   formState,
   isSubmitting,
   lockClientSelection,
+  onCancel,
   onChange,
-  onSubmit,
-  title
+  onSubmit
 }: {
-  actionLabel: string;
   clients: RegistrationClient[];
-  formId: string;
   formState: FacilityFormState;
   isSubmitting: boolean;
   lockClientSelection: boolean;
+  onCancel: () => void;
   onChange: (formState: FacilityFormState) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-  title: string;
 }) {
   return (
     <Surface>
-      <h2 className="text-base font-semibold text-text-primary">{title}</h2>
+      <h2 className="text-lg font-semibold text-text-primary">Register Facility</h2>
+      <p className="mt-1 text-sm text-text-muted">
+        Create a Facility registration record under the selected owning Client.
+      </p>
       <div className="mt-4">
         <FacilityForm
-          actionLabel={actionLabel}
+          actionLabel="Create Facility"
+          cancelLabel="Cancel"
           clients={clients}
-          formId={formId}
+          formId="create-registration-facility"
           formState={formState}
           isSubmitting={isSubmitting}
           lockClientSelection={lockClientSelection}
           canChangeOperationalStatus
+          onCancel={onCancel}
           onChange={onChange}
           onSubmit={onSubmit}
         />
@@ -467,24 +544,51 @@ function FacilityFormSurface({
   );
 }
 
+function FacilityEmptyDetailPanel({
+  canCreate,
+  scopedToClient
+}: {
+  canCreate: boolean;
+  scopedToClient: boolean;
+}) {
+  return (
+    <Surface>
+      <h2 className="text-base font-semibold text-text-primary">
+        No Facility selected.
+      </h2>
+      <p className="mt-2 text-sm leading-6 text-text-muted">
+        {canCreate
+          ? scopedToClient
+            ? "Use Register Facility to create the first facility for this Client."
+            : "Use Register Facility to create a facility under an authorized Client."
+          : "No Facility records are currently available for your authority."}
+      </p>
+    </Surface>
+  );
+}
+
 function FacilityForm({
   actionLabel,
+  cancelLabel,
   canChangeOperationalStatus,
   clients,
   formId,
   formState,
   isSubmitting,
   lockClientSelection,
+  onCancel,
   onChange,
   onSubmit
 }: {
   actionLabel: string;
+  cancelLabel?: string;
   canChangeOperationalStatus: boolean;
   clients: RegistrationClient[];
   formId: string;
   formState: FacilityFormState;
   isSubmitting: boolean;
   lockClientSelection: boolean;
+  onCancel?: () => void;
   onChange: (formState: FacilityFormState) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
@@ -588,9 +692,21 @@ function FacilityForm({
           value={formState.notes}
         />
       </label>
-      <Button disabled={isSubmitting || !canSubmit} type="submit">
-        {actionLabel}
-      </Button>
+      <div className="flex flex-wrap gap-2">
+        <Button disabled={isSubmitting || !canSubmit} type="submit">
+          {actionLabel}
+        </Button>
+        {onCancel && cancelLabel ? (
+          <Button
+            disabled={isSubmitting}
+            onClick={onCancel}
+            type="button"
+            variant="secondary"
+          >
+            {cancelLabel}
+          </Button>
+        ) : null}
+      </div>
     </form>
   );
 }
