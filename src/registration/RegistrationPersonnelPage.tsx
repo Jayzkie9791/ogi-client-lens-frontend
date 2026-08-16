@@ -23,6 +23,7 @@ import {
   registrationPersonnelEmploymentStatuses,
   updateRegistrationPersonnel
 } from "./registrationPersonnelApi";
+import { RegistrationFacilityAssignmentsPanel } from "./RegistrationFacilityAssignmentsPanel";
 import { RegistrationNavigation } from "./RegistrationNavigation";
 
 const permissions = {
@@ -513,51 +514,55 @@ function PersonnelDetailsPanel({
   }
 
   return (
-    <Surface>
-      <div className="space-y-4">
-        <div>
-          <h2 className="text-lg font-semibold text-text-primary">
-            Personnel Details
-          </h2>
-          <p className="mt-1 break-all text-sm text-text-muted">{staffMember.id}</p>
+    <div className="space-y-4">
+      <Surface>
+        <div className="space-y-4">
+          <div>
+            <h2 className="text-lg font-semibold text-text-primary">
+              Personnel Details
+            </h2>
+            <p className="mt-1 break-all text-sm text-text-muted">{staffMember.id}</p>
+          </div>
+
+          <dl className="grid gap-2 text-sm sm:grid-cols-2">
+            <MetadataItem
+              label="Client"
+              value={clientLabel(staffMember.client_id, clientNameById)}
+            />
+            <MetadataItem label="Client ID" value={staffMember.client_id} />
+            <MetadataItem
+              label="Platform user"
+              value={staffMember.user_id ?? "No linked user account"}
+            />
+            <MetadataItem label="Created" value={staffMember.created_at} />
+            <MetadataItem label="Updated" value={staffMember.updated_at} />
+          </dl>
+
+          {canUpdate ? (
+            <PersonnelForm
+              actionLabel="Save Personnel"
+              clients={[]}
+              formId="edit-registration-personnel"
+              formState={editForm}
+              isSubmitting={isSubmitting}
+              lockClientSelection
+              onChange={onEditChange}
+              onSubmit={onSubmit}
+            />
+          ) : (
+            <PersonnelReadOnlyDetails staffMember={staffMember} />
+          )}
+
+          {canDeactivate && staffMember.employment_status !== "INACTIVE" ? (
+            <Button disabled={isSubmitting} onClick={onDeactivate} variant="secondary">
+              Deactivate Personnel
+            </Button>
+          ) : null}
         </div>
+      </Surface>
 
-        <dl className="grid gap-2 text-sm sm:grid-cols-2">
-          <MetadataItem
-            label="Client"
-            value={clientLabel(staffMember.client_id, clientNameById)}
-          />
-          <MetadataItem label="Client ID" value={staffMember.client_id} />
-          <MetadataItem
-            label="Platform user"
-            value={staffMember.user_id ?? "No linked user account"}
-          />
-          <MetadataItem label="Created" value={staffMember.created_at} />
-          <MetadataItem label="Updated" value={staffMember.updated_at} />
-        </dl>
-
-        {canUpdate ? (
-          <PersonnelForm
-            actionLabel="Save Personnel"
-            clients={[]}
-            formId="edit-registration-personnel"
-            formState={editForm}
-            isSubmitting={isSubmitting}
-            lockClientSelection
-            onChange={onEditChange}
-            onSubmit={onSubmit}
-          />
-        ) : (
-          <PersonnelReadOnlyDetails staffMember={staffMember} />
-        )}
-
-        {canDeactivate && staffMember.employment_status !== "INACTIVE" ? (
-          <Button disabled={isSubmitting} onClick={onDeactivate} variant="secondary">
-            Deactivate Personnel
-          </Button>
-        ) : null}
-      </div>
-    </Surface>
+      <RegistrationFacilityAssignmentsPanel staffMember={staffMember} />
+    </div>
   );
 }
 
