@@ -30,6 +30,7 @@ export interface AuthenticatedSession {
   fullName: string;
   status: string;
   clientId: string | null;
+  facilityScopeMode: "EXPLICIT" | "CLIENT_WIDE" | null;
   facilityIds: string[];
   roles: string[];
   permissions: string[];

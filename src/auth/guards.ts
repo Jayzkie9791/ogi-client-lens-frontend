@@ -41,10 +41,17 @@ export function isAuthenticatedSession(
     typeof value.fullName === "string" &&
     typeof value.status === "string" &&
     (typeof value.clientId === "string" || value.clientId === null) &&
+    isFacilityScopeMode(value.facilityScopeMode) &&
     isStringArray(value.facilityIds) &&
     isStringArray(value.roles) &&
     isStringArray(value.permissions)
   );
+}
+
+function isFacilityScopeMode(
+  value: unknown
+): value is "EXPLICIT" | "CLIENT_WIDE" | null {
+  return value === "EXPLICIT" || value === "CLIENT_WIDE" || value === null;
 }
 
 function isNullableString(value: unknown): value is string | null {

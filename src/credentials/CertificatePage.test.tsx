@@ -20,6 +20,7 @@ const credentialsSession: AuthenticatedSession = {
   fullName: "Operator One",
   status: "ACTIVE",
   clientId: null,
+  facilityScopeMode: null,
   facilityIds: [],
   roles: ["Credentials"],
   permissions: ["view_certification"]

@@ -17,6 +17,7 @@ const baseSession = {
   fullName: "Operator One",
   status: "ACTIVE",
   clientId: null,
+  facilityScopeMode: null,
   facilityIds: [],
   roles: ["Registration"],
   permissions: [

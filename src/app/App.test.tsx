@@ -17,6 +17,7 @@ const session = {
   fullName: "Operator One",
   status: "ACTIVE",
   clientId: "00000000-0000-4000-8000-000000000101",
+  facilityScopeMode: "EXPLICIT",
   facilityIds: ["00000000-0000-4000-8000-000000000201"],
   roles: ["Operator"],
   permissions: ["view_operational_evidence"]

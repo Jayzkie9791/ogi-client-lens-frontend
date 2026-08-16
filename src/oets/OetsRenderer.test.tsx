@@ -14,6 +14,7 @@ import { afterEach, beforeEach, expect, vi } from "vitest";
 import { configureApiAuth } from "../api/client";
 import { AuthContext, AuthContextValue } from "../auth/AuthContext";
 import { getRefreshTokenStorageKey } from "../auth/storage";
+import { AuthenticatedSession } from "../auth/types";
 import { appRoutes } from "../app/router";
 import { AppProviders } from "../app/providers/AppProviders";
 import { narrowOetsDefinition } from "./definitionGuards";
@@ -27,13 +28,16 @@ import { transitionClaimedGovernanceReviewWithConclusion } from "./reviewConclus
 import { RuntimeTemplatePage } from "./RuntimeTemplatePage";
 import { OetsDefinition, OetsEvidencePayload, OetsTemplateRuntimeDefinition } from "./types";
 
-const session = {
+const testClientId = "00000000-0000-4000-8000-000000000101";
+
+const session: AuthenticatedSession = {
   id: "user-1",
   email: "operator@example.test",
   username: null,
   fullName: "Operator One",
   status: "ACTIVE",
-  clientId: "00000000-0000-4000-8000-000000000101",
+  clientId: testClientId,
+  facilityScopeMode: "EXPLICIT",
   facilityIds: ["00000000-0000-4000-8000-000000000201"],
   roles: ["Operator"],
   permissions: ["view_operational_evidence", "transition_operational_evidence"]
@@ -316,7 +320,7 @@ function renderOperationalEvidenceRecordPageWithSession({
 
 function clientContext() {
   return {
-    id: session.clientId,
+    id: testClientId,
     name: "Bahama Bay Resort",
     status: "ACTIVE"
   };
@@ -1380,7 +1384,7 @@ describe("Generic OETS renderer", () => {
     window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
     const { calls } = mockFetchQueue([
       { status: 200, body: { accessToken: "access-token" } },
-      { status: 200, body: { ...session, clientId: null } },
+      { status: 200, body: { ...session, clientId: null, facilityScopeMode: null } },
       { status: 200, body: { ...runtimeTemplate, definition_jsonb: definition } },
       { status: 200, body: { clients: [clientContext()] } }
     ]);
@@ -1398,7 +1402,7 @@ describe("Generic OETS renderer", () => {
     window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
     const { calls } = mockFetchQueue([
       { status: 200, body: { accessToken: "access-token" } },
-      { status: 200, body: { ...session, clientId: null, facilityIds: [] } },
+      { status: 200, body: { ...session, clientId: null, facilityScopeMode: null, facilityIds: [] } },
       { status: 200, body: { ...runtimeTemplate, definition_jsonb: definition } },
       { status: 200, body: { clients: [clientContext()] } },
       { status: 200, body: { facilities: [] } },
@@ -1410,7 +1414,7 @@ describe("Generic OETS renderer", () => {
 
     await user.selectOptions(
       await screen.findByLabelText("Client context"),
-      session.clientId
+      testClientId
     );
     await user.type(await screen.findByLabelText("Text Field"), "Submitted");
     await user.type(screen.getByLabelText("Number Field"), "5");
