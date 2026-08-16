@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { isApiError } from "../api/errors";
 import { routes } from "../app/routePaths";
+import { CertificationWorkspaceTabs } from "../certifications/CertificationWorkspaceTabs";
 import { useAuth } from "../auth/useAuth";
 import { Button } from "../ui/components/Button";
 import { Surface } from "../ui/components/Surface";
@@ -81,6 +82,7 @@ export function CredentialsListPage() {
 
   return (
     <section aria-labelledby="credentials-heading" className="space-y-4">
+      <CertificationWorkspaceTabs />
       <div>
         <p className="text-xs font-semibold uppercase tracking-wide text-primary-blue">
           Credentials
@@ -344,6 +346,7 @@ function CredentialsPersonnelDetail({
 }) {
   return (
     <section aria-labelledby="credentials-detail-heading" className="space-y-4">
+      <CertificationWorkspaceTabs />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-primary-blue">

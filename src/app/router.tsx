@@ -1,6 +1,7 @@
 import { createBrowserRouter, Navigate, RouteObject } from "react-router-dom";
 
 import { PublicOnlyRoute, RequireAuth } from "../auth/AuthGuards";
+import { CertificationsPage } from "../certifications/CertificationsPage";
 import {
   CredentialsDetailPage,
   CredentialsListPage
@@ -77,6 +78,10 @@ export const appRoutes: RouteObject[] = [
           {
             path: "workbench/registration/personnel",
             element: <RegistrationPersonnelPage />
+          },
+          {
+            path: "workbench/certifications",
+            element: <CertificationsPage />
           },
           {
             path: "workbench/credentials",

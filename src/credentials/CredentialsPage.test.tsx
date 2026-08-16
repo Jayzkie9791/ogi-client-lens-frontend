@@ -297,7 +297,7 @@ describe("Credentials V1 frontend", () => {
 
     await user.click(await screen.findByRole("button", { name: "Menu" }));
 
-    expect(screen.getByRole("link", { name: "Credentials" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Credentials & Certifications" })).toHaveAttribute(
       "href",
       routes.credentials
     );
@@ -326,7 +326,7 @@ describe("Credentials V1 frontend", () => {
 
     await userEvent.click(await screen.findByRole("button", { name: "Menu" }));
 
-    expect(screen.queryByRole("link", { name: "Credentials" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Credentials & Certifications" })).not.toBeInTheDocument();
   });
 
   it("renders loading, success, empty, and error states for the personnel-centered list", async () => {

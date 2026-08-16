@@ -29,9 +29,9 @@ const navigationItems = [
     implemented: true
   },
   {
-    label: "Credentials",
-    permissions: ["view_staff_member"],
-    to: routes.credentials,
+    label: "Credentials & Certifications",
+    permissions: ["view_staff_member", "view_certification"],
+    to: routes.certifications,
     implemented: true
   },
   {
@@ -93,7 +93,9 @@ export function AppShell() {
                   const navigationItem =
                     item.label === "Registration"
                       ? { ...item, to: registrationLandingPath(auth) }
-                      : item;
+                      : item.label === "Credentials & Certifications"
+                        ? { ...item, to: credentialsLandingPath(auth) }
+                        : item;
 
                   return <NavigationListItem item={navigationItem} key={item.label} />;
                 })}
@@ -137,6 +139,14 @@ function sessionIdentityLabel(
 ) {
   return session?.email ?? session?.username ?? "";
 }
+function credentialsLandingPath(auth: ReturnType<typeof useAuth>) {
+  if (auth.canUsePermission("view_certification")) {
+    return routes.certifications;
+  }
+
+  return routes.credentials;
+}
+
 function registrationLandingPath(auth: ReturnType<typeof useAuth>) {
   if (auth.canUsePermission("view_client")) {
     return routes.registrationClients;

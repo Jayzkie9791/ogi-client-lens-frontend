@@ -9,6 +9,7 @@ export const routes = {
   registrationClients: "/workbench/registration/clients",
   registrationFacilities: "/workbench/registration/facilities",
   registrationPersonnel: "/workbench/registration/personnel",
+  certifications: "/workbench/certifications",
   credentials: "/workbench/credentials",
   credentialsPersonnel: "/workbench/credentials/personnel/:staffMemberId",
   credentialsPersonnelPath: (staffMemberId: string) =>

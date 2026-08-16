@@ -63,9 +63,25 @@ export interface CredentialsCertificationEndorsementProjection {
   created_at: string;
 }
 
+export interface CredentialsCertificationProgramProjection {
+  program_code: string;
+  certification_level: string;
+  display_name: string;
+  qualification_label: string;
+  validity_period: {
+    unit: "YEAR";
+    value: 1;
+  };
+  teaching_authority_levels: string[];
+  certificate_eligible: boolean;
+  certificate_template_family_code: string;
+  certificate_template_variant_code: null;
+}
+
 export interface CredentialsCertificationProjection {
   id: string;
   certification_level: string;
+  program?: CredentialsCertificationProgramProjection;
   certification_number: string;
   certification_status: string;
   issue_date: string;
@@ -398,6 +414,8 @@ function isCredentialsCertificationProjection(
     isRecord(value) &&
     typeof value.id === "string" &&
     typeof value.certification_level === "string" &&
+    (value.program === undefined ||
+      isCredentialsCertificationProgramProjection(value.program)) &&
     typeof value.certification_number === "string" &&
     typeof value.certification_status === "string" &&
     typeof value.issue_date === "string" &&
@@ -411,6 +429,25 @@ function isCredentialsCertificationProjection(
   );
 }
 
+function isCredentialsCertificationProgramProjection(
+  value: unknown
+): value is CredentialsCertificationProgramProjection {
+  return (
+    isRecord(value) &&
+    typeof value.program_code === "string" &&
+    typeof value.certification_level === "string" &&
+    typeof value.display_name === "string" &&
+    typeof value.qualification_label === "string" &&
+    isRecord(value.validity_period) &&
+    value.validity_period.unit === "YEAR" &&
+    value.validity_period.value === 1 &&
+    Array.isArray(value.teaching_authority_levels) &&
+    value.teaching_authority_levels.every((item) => typeof item === "string") &&
+    typeof value.certificate_eligible === "boolean" &&
+    typeof value.certificate_template_family_code === "string" &&
+    value.certificate_template_variant_code === null
+  );
+}
 function isCredentialsCertificationEndorsementProjection(
   value: unknown
 ): value is CredentialsCertificationEndorsementProjection {
