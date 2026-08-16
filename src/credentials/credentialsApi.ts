@@ -283,7 +283,7 @@ function isCredentialsPersonnelDetailProjection(
   );
 }
 
-function isCredentialIssuanceResponse(
+export function isCredentialIssuanceResponse(
   value: unknown
 ): value is CredentialIssuanceResponse {
   return (

@@ -10,6 +10,7 @@ import { routes } from "../app/routePaths";
 import { getRefreshTokenStorageKey } from "../auth/storage";
 import { AuthenticatedSession } from "../auth/types";
 import {
+  CredentialIssuanceResponse,
   CredentialsListResponse,
   CredentialsOperationalAuthorizationProjection,
   CredentialsPersonnelDetailProjection,
@@ -23,6 +24,8 @@ const certificationId = "00000000-0000-4000-8000-000000400001";
 const newCertificationId = "00000000-0000-4000-8000-000000400002";
 const operationalAuthorizationId = "00000000-0000-4000-8000-000000500001";
 const renewedOperationalAuthorizationId = "00000000-0000-4000-8000-000000500002";
+const sourceEvidenceRecordId = "00000000-0000-4000-8000-000000800001";
+const credentialIssuanceId = "00000000-0000-4000-8000-000000900001";
 
 const certificationSession: AuthenticatedSession = {
   id: "00000000-0000-4000-8000-000000000001",
@@ -49,6 +52,15 @@ const draftSession: AuthenticatedSession = {
 const issueSession: AuthenticatedSession = {
   ...draftSession,
   permissions: [...draftSession.permissions, "issue_certification"]
+};
+
+const credentialIssuanceSession: AuthenticatedSession = {
+  ...certificationSession,
+  permissions: [
+    ...certificationSession.permissions,
+    "issue_certification",
+    "view_operational_authorization"
+  ]
 };
 
 const endorsementSession: AuthenticatedSession = {
@@ -307,6 +319,73 @@ function authorizationCommandResponse(
     }
   };
 }
+
+const credentialIssuance: CredentialIssuanceResponse = {
+  id: credentialIssuanceId,
+  source_certification_id: certificationId,
+  staff_member_id: staffMemberId,
+  client_id: clientId,
+  source_authorization_id: operationalAuthorizationId,
+  source_evidence_record_id: sourceEvidenceRecordId,
+  issued_by_user_id: credentialIssuanceSession.id,
+  credential_program_code_snapshot: "OPEN_WATER_GUARDIAN",
+  certification_level_snapshot: "L3",
+  program_display_name_snapshot: "Open Water Guardian",
+  qualification_label_snapshot: "Open Water Guardian",
+  required_training_hours: 60,
+  certificate_display: {
+    qualification_title: "Open Water Guardian Certification",
+    skills: [
+      {
+        key: "water-rescue",
+        label: "Water rescue",
+        source_section: "KEY_SKILLS_AND_TRAINING"
+      }
+    ],
+    qualified_to: [
+      {
+        key: "guardian-duty",
+        label: "Operate as an Open Water Guardian",
+        source_section: "HOLDER_IS_QUALIFIED_TO"
+      }
+    ],
+    training_standards: [
+      {
+        key: "ogi-standard",
+        label: "OGI standard",
+        source_section: "TRAINING_STANDARD"
+      }
+    ],
+    scope_limitations: [],
+    source_authority_refs: ["L1-L7 Certification Framework"]
+  },
+  validity_period: {
+    unit: "YEAR",
+    value: 1
+  },
+  certificate_template_code_snapshot: "OGI_L1_L7_CERTIFICATE_FAMILY",
+  certificate_template_version_snapshot: "1.0",
+  certificate_template_variant_code_snapshot: null,
+  holder_name_snapshot: "Ana Santos",
+  certification_number_snapshot: "OGI-OWG-000001",
+  issue_date_snapshot: "2026-01-05T00:00:00.000Z",
+  expiry_date_snapshot: "2027-01-05T00:00:00.000Z",
+  completion_date_snapshot: "2025-12-31",
+  training_location_snapshot: "Subic Bay",
+  instructor_snapshot: "Braven Burrows",
+  training_center_snapshot: "OGI Training Center",
+  certification_status_at_issuance: "ACTIVE",
+  issuing_organization_snapshot: "Ocean Guardian International Ltd.",
+  supporting_evidence_refs: [
+    {
+      evidence_record_id: sourceEvidenceRecordId,
+      template_code: "OGI_F048_DIGITAL_CREDENTIAL_ISSUANCE_FORM",
+      template_version_id: "00000000-0000-4000-8000-000000810001",
+      payload_checksum: "sha256:evidence"
+    }
+  ],
+  issued_at: "2026-01-05T00:00:00.000Z"
+};
 
 interface MockResponse {
   status: number;
@@ -1182,6 +1261,286 @@ describe("Certification workspace frontend", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Operational Authorization lifecycle action could not be completed because of a conflict."
     );
+    expect(screen.queryByText("Backend detail should not be shown.")).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        calls.filter((call) => call.url === `/api/v1/credentials/personnel/${staffMemberId}`)
+      ).toHaveLength(2)
+    );
+  });
+
+  it("shows Credential Issuance context for selected Certifications and gates Issue Credential by issue_certification", async () => {
+    const user = userEvent.setup();
+
+    mockFetchRoutes(certificationRoutes(anaDetail, certificationSession));
+
+    renderWithRoute(routes.certifications);
+
+    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Credential Issuance" })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("No issuance is available in the current credential view.")
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Issue Credential" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Endorsements" })).toBeInTheDocument();
+    expect(screen.queryByText("dev-preview")).not.toBeInTheDocument();
+
+    cleanup();
+    vi.unstubAllGlobals();
+    window.sessionStorage.clear();
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    mockFetchRoutes(certificationRoutes(anaDetail, issueSession));
+
+    renderWithRoute(routes.certifications);
+    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+
+    expect(await screen.findByRole("button", { name: "Issue Credential" })).toBeInTheDocument();
+  });
+
+  it("opens and cancels Credential Issuance without mutation", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetchRoutes(certificationRoutes(anaDetail, issueSession));
+
+    renderWithRoute(routes.certifications);
+
+    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "Issue Credential" }));
+
+    expect(screen.getByText("Issuing from selected certificate CERT-001.")).toBeInTheDocument();
+    expect(screen.getByLabelText("F-048 evidence record ID")).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Training location"), "Subic Bay");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByLabelText("F-048 evidence record ID")).not.toBeInTheDocument();
+    expect(calls.map(({ url }) => url)).not.toContain("/api/v1/credentials/issuances");
+  });
+
+  it("submits exact Credential Issuance contract, refetches projections, and links to the returned certificate", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetchRoutes([
+      ...authRoutes(credentialIssuanceSession),
+      {
+        url: "/api/v1/credentials",
+        responses: [
+          { status: 200, body: credentialsListResponse },
+          { status: 200, body: credentialsListResponse }
+        ]
+      },
+      {
+        url: `/api/v1/credentials/personnel/${staffMemberId}`,
+        responses: [
+          { status: 200, body: detailWithAuthorizations([activeOperationalAuthorization]) },
+          { status: 200, body: detailWithAuthorizations([activeOperationalAuthorization]) }
+        ]
+      },
+      {
+        method: "POST",
+        url: "/api/v1/credentials/issuances",
+        responses: [{ status: 201, body: credentialIssuance }]
+      }
+    ]);
+
+    renderWithRoute(routes.certifications);
+
+    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "Issue Credential" }));
+    await user.type(screen.getByLabelText("F-048 evidence record ID"), sourceEvidenceRecordId);
+    await user.type(screen.getByLabelText("Completion date"), "2025-12-31");
+    await user.type(screen.getByLabelText("Training location"), "Subic Bay");
+    await user.type(screen.getByLabelText("Instructor"), "Braven Burrows");
+    await user.type(screen.getByLabelText("Training center"), "OGI Training Center");
+    await user.click(screen.getByRole("button", { name: "Confirm Issue Credential" }));
+
+    expect(await screen.findByText("Credential issued successfully.")).toBeInTheDocument();
+    expect(await screen.findByText("Issued Credential")).toBeInTheDocument();
+    expect(screen.getByText("OGI-OWG-000001")).toBeInTheDocument();
+    expect(screen.getByText("Ocean Guardian International Ltd.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View Certificate" })).toHaveAttribute(
+      "href",
+      routes.credentialCertificatePath(credentialIssuanceId)
+    );
+    expect(screen.getByText("CERT-001")).toBeInTheDocument();
+
+    const issuanceCall = calls.find((call) => call.url === "/api/v1/credentials/issuances");
+
+    expect(issuanceCall?.init?.method).toBe("POST");
+    expect(JSON.parse(String(issuanceCall?.init?.body))).toEqual({
+      certification_id: certificationId,
+      source_evidence_record_id: sourceEvidenceRecordId,
+      source_authorization_id: operationalAuthorizationId,
+      completion_date: "2025-12-31",
+      training_location: "Subic Bay",
+      instructor: "Braven Burrows",
+      training_center: "OGI Training Center"
+    });
+    expect(
+      calls.filter((call) => call.url === `/api/v1/credentials/personnel/${staffMemberId}`)
+    ).toHaveLength(2);
+    expect(calls.map(({ url }) => url)).not.toContain("/api/v1/registration/facility-assignments");
+    expect(calls.map(({ url }) => url)).not.toContain("/api/v1/auth/user-facility-access");
+  });
+
+  it("does not include hidden Operational Authorization context when the actor lacks authorization visibility", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetchRoutes([
+      ...authRoutes(issueSession),
+      {
+        url: "/api/v1/credentials",
+        responses: [
+          { status: 200, body: credentialsListResponse },
+          { status: 200, body: credentialsListResponse }
+        ]
+      },
+      {
+        url: `/api/v1/credentials/personnel/${staffMemberId}`,
+        responses: [
+          { status: 200, body: detailWithAuthorizations([activeOperationalAuthorization]) },
+          { status: 200, body: detailWithAuthorizations([activeOperationalAuthorization]) }
+        ]
+      },
+      {
+        method: "POST",
+        url: "/api/v1/credentials/issuances",
+        responses: [
+          {
+            status: 201,
+            body: {
+              ...credentialIssuance,
+              source_authorization_id: null
+            }
+          }
+        ]
+      }
+    ]);
+
+    renderWithRoute(routes.certifications);
+
+    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    expect(screen.queryByRole("heading", { name: "Operational Authorization" })).not.toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "Issue Credential" }));
+    await user.type(screen.getByLabelText("F-048 evidence record ID"), sourceEvidenceRecordId);
+    await user.type(screen.getByLabelText("Completion date"), "2025-12-31");
+    await user.type(screen.getByLabelText("Training location"), "Subic Bay");
+    await user.type(screen.getByLabelText("Instructor"), "Braven Burrows");
+    await user.type(screen.getByLabelText("Training center"), "OGI Training Center");
+    await user.click(screen.getByRole("button", { name: "Confirm Issue Credential" }));
+
+    const issuanceCall = calls.find((call) => call.url === "/api/v1/credentials/issuances");
+
+    expect(JSON.parse(String(issuanceCall?.init?.body))).toEqual({
+      certification_id: certificationId,
+      source_evidence_record_id: sourceEvidenceRecordId,
+      completion_date: "2025-12-31",
+      training_location: "Subic Bay",
+      instructor: "Braven Burrows",
+      training_center: "OGI Training Center"
+    });
+  });
+
+  it("prevents duplicate Credential Issuance submission while pending", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetchRoutes([
+      ...authRoutes(issueSession),
+      {
+        url: "/api/v1/credentials",
+        responses: [
+          { status: 200, body: credentialsListResponse },
+          { status: 200, body: credentialsListResponse }
+        ]
+      },
+      {
+        url: `/api/v1/credentials/personnel/${staffMemberId}`,
+        responses: [
+          { status: 200, body: anaDetail },
+          { status: 200, body: anaDetail }
+        ]
+      },
+      {
+        method: "POST",
+        url: "/api/v1/credentials/issuances",
+        responses: [
+          {
+            status: 201,
+            delayMs: 50,
+            body: {
+              ...credentialIssuance,
+              source_authorization_id: null
+            }
+          }
+        ]
+      }
+    ]);
+
+    renderWithRoute(routes.certifications);
+
+    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "Issue Credential" }));
+    await user.type(screen.getByLabelText("F-048 evidence record ID"), sourceEvidenceRecordId);
+    await user.type(screen.getByLabelText("Completion date"), "2025-12-31");
+    await user.type(screen.getByLabelText("Training location"), "Subic Bay");
+    await user.type(screen.getByLabelText("Instructor"), "Braven Burrows");
+    await user.type(screen.getByLabelText("Training center"), "OGI Training Center");
+    await user.click(screen.getByRole("button", { name: "Confirm Issue Credential" }));
+    await user.click(screen.getByRole("button", { name: "Issuing Credential" }));
+
+    expect(await screen.findByText("Credential issued successfully.")).toBeInTheDocument();
+    expect(calls.filter((call) => call.url === "/api/v1/credentials/issuances")).toHaveLength(1);
+  });
+
+  it.each([
+    [400, "Credential issuance input is invalid."],
+    [403, "Credential issuance is not available with your current authorization."],
+    [404, "Credential issuance source is unavailable or outside your scope."],
+    [409, "Credential issuance could not be completed because of a conflict."],
+    [422, "Credential issuance input is invalid."],
+    [500, "Credential issuance could not be completed."]
+  ])("maps Credential Issuance %i errors safely and refetches authoritative state", async (status, message) => {
+    const user = userEvent.setup();
+    const { calls } = mockFetchRoutes([
+      ...authRoutes(issueSession),
+      {
+        url: "/api/v1/credentials",
+        responses: [{ status: 200, body: credentialsListResponse }]
+      },
+      {
+        url: `/api/v1/credentials/personnel/${staffMemberId}`,
+        responses: [
+          { status: 200, body: anaDetail },
+          { status: 200, body: anaDetail }
+        ]
+      },
+      {
+        method: "POST",
+        url: "/api/v1/credentials/issuances",
+        responses: [
+          {
+            status,
+            body: {
+              code: "CREDENTIAL_ISSUANCE_ERROR",
+              message: "Backend detail should not be shown.",
+              status
+            }
+          }
+        ]
+      }
+    ]);
+
+    renderWithRoute(routes.certifications);
+
+    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "Issue Credential" }));
+    await user.type(screen.getByLabelText("F-048 evidence record ID"), sourceEvidenceRecordId);
+    await user.type(screen.getByLabelText("Completion date"), "2025-12-31");
+    await user.type(screen.getByLabelText("Training location"), "Subic Bay");
+    await user.type(screen.getByLabelText("Instructor"), "Braven Burrows");
+    await user.type(screen.getByLabelText("Training center"), "OGI Training Center");
+    await user.click(screen.getByRole("button", { name: "Confirm Issue Credential" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(message);
     expect(screen.queryByText("Backend detail should not be shown.")).not.toBeInTheDocument();
     await waitFor(() =>
       expect(
