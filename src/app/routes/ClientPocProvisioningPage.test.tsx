@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -230,6 +230,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  cleanup();
   configureApiAuth(null);
   vi.unstubAllGlobals();
   window.sessionStorage.clear();

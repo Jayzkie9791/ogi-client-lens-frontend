@@ -1,5 +1,5 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -289,6 +289,10 @@ function assignmentRoutes(assignments: RegistrationFacilityAssignment[]) {
   ];
 }
 
+async function openFacilitiesTab(user: UserEvent) {
+  await user.click(await screen.findByRole("tab", { name: "Facilities" }));
+}
+
 beforeEach(() => {
   window.sessionStorage.clear();
   window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
@@ -307,7 +311,8 @@ describe("Registration Facility Assignment frontend", () => {
     renderWithRoute(routes.registrationPersonnel);
 
     expect(await screen.findByText("Ana Santos")).toBeInTheDocument();
-    expect(await screen.findByRole("heading", { name: "Personnel Details" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Ana Santos" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Facilities" })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Facility assignment")).not.toBeInTheDocument();
     expect(
       calls.some((call) => call.url.includes("facility-assignments"))
@@ -315,6 +320,7 @@ describe("Registration Facility Assignment frontend", () => {
   });
 
   it("renders Facility Assignment history with Facility labels, fallback IDs, and multiple active assignments", async () => {
+    const user = userEvent.setup();
     const session = sessionWithFacilityAssignmentPermissions(["view_facility_assignment"]);
     mockFetchRoutes(standardRoutesForSession(session, assignmentRoutes([
       activePrimaryAssignment,
@@ -323,9 +329,10 @@ describe("Registration Facility Assignment frontend", () => {
     ])));
 
     renderWithRoute(routes.registrationPersonnel);
+    await openFacilitiesTab(user);
 
     expect(await screen.findByRole("heading", { name: "Facility Assignments" })).toBeInTheDocument();
-    expect(await screen.findByText("Makati Training Pool")).toBeInTheDocument();
+    expect(await screen.findByLabelText("Facility Assignment Makati Training Pool")).toBeInTheDocument();
     expect(await screen.findByLabelText("Facility Assignment Bluewater Beach Zone")).toBeInTheDocument();
     expect(screen.getByText(completedAssignment.facility_id)).toBeInTheDocument();
     expect(within(await screen.findByLabelText("Facility Assignment Makati Training Pool")).getByText("Active")).toBeInTheDocument();
@@ -367,6 +374,7 @@ describe("Registration Facility Assignment frontend", () => {
     ]));
 
     renderWithRoute(routes.registrationPersonnel);
+    await openFacilitiesTab(user);
 
     const addForm = await screen.findByRole("form", {
       name: "Add Facility Assignment"
@@ -436,6 +444,7 @@ describe("Registration Facility Assignment frontend", () => {
     ]));
 
     renderWithRoute(routes.registrationPersonnel);
+    await openFacilitiesTab(user);
 
     const addForm = await screen.findByRole("form", {
       name: "Add Facility Assignment"
@@ -489,6 +498,7 @@ describe("Registration Facility Assignment frontend", () => {
     ]));
 
     renderWithRoute(routes.registrationPersonnel);
+    await openFacilitiesTab(user);
 
     const addForm = await screen.findByRole("form", {
       name: "Add Facility Assignment"
@@ -538,6 +548,7 @@ describe("Registration Facility Assignment frontend", () => {
     ]));
 
     renderWithRoute(routes.registrationPersonnel);
+    await openFacilitiesTab(user);
 
     const primaryRow = await screen.findByLabelText(
       "Facility Assignment Makati Training Pool"
@@ -588,6 +599,7 @@ describe("Registration Facility Assignment frontend", () => {
     ]));
 
     renderWithRoute(routes.registrationPersonnel);
+    await openFacilitiesTab(user);
 
     const activeRow = await screen.findByLabelText("Facility Assignment Makati Training Pool");
     const completedRow = await screen.findByLabelText(
@@ -654,6 +666,7 @@ describe("Registration Facility Assignment frontend", () => {
     ]));
 
     renderWithRoute(routes.registrationPersonnel);
+    await openFacilitiesTab(user);
 
     const secondaryRow = await screen.findByLabelText(
       "Facility Assignment Bluewater Beach Zone"

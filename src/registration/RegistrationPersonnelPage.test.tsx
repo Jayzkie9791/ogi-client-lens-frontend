@@ -29,7 +29,8 @@ const baseSession: AuthenticatedSession = {
     "view_staff_member",
     "create_staff_member",
     "update_staff_member",
-    "deactivate_staff_member"
+    "deactivate_staff_member",
+    "view_facility_assignment"
   ]
 };
 
@@ -221,6 +222,7 @@ function standardRoutes(overrides: MockRoute[] = []) {
       url: "/api/v1/registration/facilities",
       responses: [{ status: 200, body: { facilities: [facilityA, facilityB] } }]
     },
+    ...overrides,
     {
       url: "/api/v1/registration/personnel",
       responses: [{ status: 200, body: { personnel: [staffA, staffB] } }]
@@ -228,8 +230,7 @@ function standardRoutes(overrides: MockRoute[] = []) {
     {
       url: `/api/v1/registration/personnel/${staffA.id}`,
       responses: [{ status: 200, body: staffA }]
-    },
-    ...overrides
+    }
   ];
 }
 
@@ -279,6 +280,11 @@ describe("Registration Personnel frontend", () => {
     );
     expect(await screen.findByText("Ana Santos")).toBeInTheDocument();
     expect(screen.getByText("Jamie Brooks")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Register Personnel" })).toBeInTheDocument();
+    expect(screen.queryByRole("form", { name: "Create Personnel" })).not.toBeInTheDocument();
+    expect(
+      within(screen.getByRole("list", { name: "Personnel records" })).queryByText(staffA.id)
+    ).not.toBeInTheDocument();
     expect(calls.some((call) => call.url.includes("/registration/credentials"))).toBe(false);
   });
 
@@ -336,6 +342,149 @@ describe("Registration Personnel frontend", () => {
     );
   });
 
+  it("opens explicit Register Personnel mode with the active Client filter preselected", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetchRoutes(standardRoutes([
+      {
+        url: `/api/v1/registration/facilities?clientId=${clientB.id}`,
+        responses: [{ status: 200, body: { facilities: [facilityB] } }]
+      },
+      {
+        url: `/api/v1/registration/personnel?clientId=${clientB.id}`,
+        responses: [{ status: 200, body: { personnel: [staffB] } }]
+      },
+      {
+        url: `/api/v1/registration/personnel/${staffB.id}`,
+        responses: [{ status: 200, body: staffB }]
+      }
+    ]));
+
+    renderWithRoute(routes.registrationPersonnel);
+
+    const clientFilter = await screen.findByLabelText("Client filter");
+    await within(clientFilter).findByRole("option", { name: "Bluewater Resorts" });
+    await user.selectOptions(clientFilter, clientB.id);
+    await screen.findByText("Jamie Brooks");
+    await user.click(screen.getByRole("button", { name: "Register Personnel" }));
+
+    const createForm = await screen.findByRole("form", { name: "Create Personnel" });
+
+    expect(within(createForm).getByLabelText("Client")).toHaveValue(clientB.id);
+    expect(screen.getByLabelText("Client filter")).toHaveValue(clientB.id);
+    expect(
+      calls.some(
+        (call) =>
+          call.url === "/api/v1/registration/personnel" && call.init?.method === "POST"
+      )
+    ).toBe(false);
+  });
+
+  it("cancels Register Personnel mode without mutation and restores the prior selection", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetchRoutes(standardRoutes([
+      {
+        url: `/api/v1/registration/personnel/${staffB.id}`,
+        responses: [{ status: 200, body: staffB }]
+      }
+    ]));
+
+    renderWithRoute(routes.registrationPersonnel);
+
+    await user.click(await screen.findByRole("button", { name: /Jamie Brooks/ }));
+    await screen.findByDisplayValue("Jamie Brooks");
+    await user.click(screen.getByRole("button", { name: "Register Personnel" }));
+    await user.type(
+      within(await screen.findByRole("form", { name: "Create Personnel" })).getByLabelText(
+        "Full name"
+      ),
+      "Canceled Personnel"
+    );
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(await screen.findByDisplayValue("Jamie Brooks")).toBeInTheDocument();
+    expect(screen.queryByRole("form", { name: "Create Personnel" })).not.toBeInTheDocument();
+    expect(
+      calls.some(
+        (call) =>
+          call.url === "/api/v1/registration/personnel" && call.init?.method === "POST"
+      )
+    ).toBe(false);
+  });
+
+  it("renders Overview by default, switches to Facilities, and resets to Overview on Personnel change", async () => {
+    const user = userEvent.setup();
+    mockFetchRoutes(standardRoutes([
+      {
+        url: `/api/v1/registration/personnel/${staffB.id}`,
+        responses: [{ status: 200, body: staffB }]
+      },
+      {
+        url: `/api/v1/registration/personnel/${staffA.id}/facility-assignments`,
+        responses: [{ status: 200, body: { assignments: [] } }]
+      },
+      {
+        url: `/api/v1/registration/facilities?clientId=${staffA.client_id}`,
+        responses: [{ status: 200, body: { facilities: [facilityA] } }]
+      }
+    ]));
+
+    renderWithRoute(routes.registrationPersonnel);
+
+    expect(await screen.findByRole("tab", { name: "Overview" })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    );
+    expect(screen.getByRole("tab", { name: "Facilities" })).toBeInTheDocument();
+    expect(await screen.findByDisplayValue("Ana Santos")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Facilities" }));
+
+    expect(await screen.findByRole("heading", { name: "Facility Assignments" })).toBeInTheDocument();
+    expect(screen.getByText("Track where this person works.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Jamie Brooks/ }));
+
+    expect(await screen.findByDisplayValue("Jamie Brooks")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    );
+  });
+
+  it("hides the Facilities secondary tab without Facility Assignment view permission", async () => {
+    const sessionWithoutAssignments: AuthenticatedSession = {
+      ...baseSession,
+      permissions: baseSession.permissions.filter(
+        (permission) => permission !== "view_facility_assignment"
+      )
+    };
+    const { calls } = mockFetchRoutes([
+      ...authRoutes(sessionWithoutAssignments),
+      {
+        url: "/api/v1/registration/clients",
+        responses: [{ status: 200, body: { clients: [clientA, clientB] } }]
+      },
+      {
+        url: "/api/v1/registration/facilities",
+        responses: [{ status: 200, body: { facilities: [facilityA, facilityB] } }]
+      },
+      {
+        url: "/api/v1/registration/personnel",
+        responses: [{ status: 200, body: { personnel: [staffA, staffB] } }]
+      },
+      {
+        url: `/api/v1/registration/personnel/${staffA.id}`,
+        responses: [{ status: 200, body: staffA }]
+      }
+    ]);
+
+    renderWithRoute(routes.registrationPersonnel);
+
+    expect(await screen.findByRole("tab", { name: "Overview" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Facilities" })).not.toBeInTheDocument();
+    expect(calls.some((call) => call.url.includes("facility-assignments"))).toBe(false);
+  });
+
   it("creates Personnel without user, credential, or facility-assignment mutations", async () => {
     const user = userEvent.setup();
     const createdStaffMember: RegistrationPersonnel = {
@@ -351,14 +500,26 @@ describe("Registration Personnel frontend", () => {
     };
     const { calls } = mockFetchRoutes(standardRoutes([
       {
+        url: "/api/v1/registration/personnel",
+        responses: [
+          { status: 200, body: { personnel: [staffA, staffB] } },
+          { status: 200, body: { personnel: [createdStaffMember, staffA, staffB] } }
+        ]
+      },
+      {
         method: "POST",
         url: "/api/v1/registration/personnel",
         responses: [{ status: 201, body: createdStaffMember }]
+      },
+      {
+        url: `/api/v1/registration/personnel/${createdStaffMember.id}`,
+        responses: [{ status: 200, body: createdStaffMember }]
       }
     ]));
 
     renderWithRoute(routes.registrationPersonnel);
 
+    await user.click(await screen.findByRole("button", { name: "Register Personnel" }));
     const createForm = await screen.findByRole("form", { name: "Create Personnel" });
     await within(createForm).findByRole("option", { name: "Bluewater Resorts" });
     await user.selectOptions(within(createForm).getByLabelText("Client"), clientB.id);
@@ -371,6 +532,12 @@ describe("Registration Personnel frontend", () => {
     await user.click(within(createForm).getByRole("button", { name: "Create Personnel" }));
 
     expect(await screen.findByText("Personnel record created successfully.")).toBeInTheDocument();
+    expect(screen.queryByRole("form", { name: "Create Personnel" })).not.toBeInTheDocument();
+    expect(await screen.findByDisplayValue("Morgan Lee")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    );
     const createCall = calls.find(
       (call) => call.url === "/api/v1/registration/personnel" && call.init?.method === "POST"
     );
@@ -395,10 +562,12 @@ describe("Registration Personnel frontend", () => {
   });
 
   it("prevents invalid create submission before required Personnel fields are supplied", async () => {
+    const user = userEvent.setup();
     mockFetchRoutes(standardRoutes());
 
     renderWithRoute(routes.registrationPersonnel);
 
+    await user.click(await screen.findByRole("button", { name: "Register Personnel" }));
     const createForm = await screen.findByRole("form", { name: "Create Personnel" });
 
     expect(
@@ -513,7 +682,7 @@ describe("Registration Personnel frontend", () => {
     expect(await screen.findByText("Loading Personnel records.")).toBeInTheDocument();
     expect(
       await screen.findByRole("heading", {
-        name: "No Personnel records are currently available."
+        name: "No Personnel match the current filters."
       })
     ).toBeInTheDocument();
 
@@ -589,6 +758,7 @@ describe("Registration Personnel frontend", () => {
 
     renderWithRoute(routes.registrationPersonnel);
 
+    await user.click(await screen.findByRole("button", { name: "Register Personnel" }));
     const createForm = await screen.findByRole("form", { name: "Create Personnel" });
     await user.type(within(createForm).getByLabelText("Full name"), "Ana Santos");
     await user.click(within(createForm).getByRole("button", { name: "Create Personnel" }));

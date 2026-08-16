@@ -191,7 +191,7 @@ export function RegistrationFacilityAssignmentsPanel({
           Facility Assignments
         </h2>
         <p className="mt-1 text-sm leading-6 text-text-muted">
-          Track where this Personnel record works. This panel records workforce placement history only.
+          Track where this person works.
         </p>
       </div>
 

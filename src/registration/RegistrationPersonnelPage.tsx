@@ -32,8 +32,11 @@ const permissions = {
   view: "view_staff_member",
   create: "create_staff_member",
   update: "update_staff_member",
-  deactivate: "deactivate_staff_member"
+  deactivate: "deactivate_staff_member",
+  viewFacilityAssignments: "view_facility_assignment"
 } as const;
+
+type PersonnelSecondaryTab = "overview" | "facilities";
 
 interface PersonnelFormState {
   clientId: string;
@@ -64,12 +67,18 @@ export function RegistrationPersonnelPage() {
   const canCreate = auth.canUsePermission(permissions.create);
   const canUpdate = auth.canUsePermission(permissions.update);
   const canDeactivate = auth.canUsePermission(permissions.deactivate);
+  const canViewFacilityAssignments = auth.canUsePermission(
+    permissions.viewFacilityAssignments
+  );
   const [clientFilter, setClientFilter] = useState("");
   const [facilityFilter, setFacilityFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<
     RegistrationPersonnelEmploymentStatus | ""
   >("");
   const [selectedPersonnelId, setSelectedPersonnelId] = useState<string | null>(null);
+  const [personnelIdBeforeCreate, setPersonnelIdBeforeCreate] = useState<string | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
+  const [selectedTab, setSelectedTab] = useState<PersonnelSecondaryTab>("overview");
   const [createForm, setCreateForm] = useState<PersonnelFormState>({
     ...emptyCreateForm,
     clientId: auth.session?.clientId ?? ""
@@ -139,6 +148,12 @@ export function RegistrationPersonnelPage() {
       !personnel.some((staffMember) => staffMember.id === selectedPersonnelId)
     ) {
       setSelectedPersonnelId(personnel[0].id);
+      setSelectedTab("overview");
+    }
+
+    if (selectedPersonnelId && personnel.length === 0) {
+      setSelectedPersonnelId(null);
+      setSelectedTab("overview");
     }
   }, [personnel, selectedPersonnelId]);
 
@@ -161,6 +176,9 @@ export function RegistrationPersonnelPage() {
       setMessage("Personnel record created successfully.");
       setCreateForm({ ...emptyCreateForm, clientId: createForm.clientId });
       setSelectedPersonnelId(staffMember.id);
+      setPersonnelIdBeforeCreate(null);
+      setIsCreating(false);
+      setSelectedTab("overview");
       void queryClient.invalidateQueries({ queryKey: ["registration-personnel"] });
       queryClient.setQueryData(
         ["registration-personnel", staffMember.id],
@@ -209,6 +227,64 @@ export function RegistrationPersonnelPage() {
     updateMutation.mutate({ employment_status: "INACTIVE" });
   }
 
+  function startCreatePersonnel() {
+    setMessage(null);
+    setPersonnelIdBeforeCreate(selectedPersonnelId);
+    setCreateForm({
+      ...emptyCreateForm,
+      clientId:
+        clientFilter ||
+        auth.session?.clientId ||
+        createForm.clientId ||
+        clients[0]?.id ||
+        ""
+    });
+    setIsCreating(true);
+    setSelectedTab("overview");
+  }
+
+  function cancelCreatePersonnel() {
+    setMessage(null);
+    setCreateForm({
+      ...emptyCreateForm,
+      clientId: clientFilter || auth.session?.clientId || createForm.clientId
+    });
+    setSelectedPersonnelId(personnelIdBeforeCreate);
+    setPersonnelIdBeforeCreate(null);
+    setIsCreating(false);
+    setSelectedTab("overview");
+  }
+
+  function selectPersonnel(staffMemberId: string) {
+    setIsCreating(false);
+    setPersonnelIdBeforeCreate(null);
+    setSelectedPersonnelId(staffMemberId);
+    setSelectedTab("overview");
+  }
+
+  function changeClientFilter(value: string) {
+    setClientFilter(value);
+    setFacilityFilter("");
+    setSelectedPersonnelId(null);
+    setSelectedTab("overview");
+
+    if (isCreating && value) {
+      setCreateForm((current) => ({ ...current, clientId: value }));
+    }
+  }
+
+  function changeFacilityFilter(value: string) {
+    setFacilityFilter(value);
+    setSelectedPersonnelId(null);
+    setSelectedTab("overview");
+  }
+
+  function changeStatusFilter(value: RegistrationPersonnelEmploymentStatus | "") {
+    setStatusFilter(value);
+    setSelectedPersonnelId(null);
+    setSelectedTab("overview");
+  }
+
   if (!canView) {
     return (
       <SafeState title="You are not authorized to view Personnel registration.">
@@ -219,10 +295,27 @@ export function RegistrationPersonnelPage() {
 
   return (
     <RegistrationWorkspaceShell
-      description="Manage durable workforce identity records without creating platform users, facility assignments, credentials, or Operational Evidence."
+      description="Manage personnel registered with Client Lens."
       headingId="registration-personnel-heading"
       title="Personnel"
     >
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-sm leading-6 text-text-muted">
+            Find personnel, review profile details, and manage where each person works.
+          </p>
+        </div>
+        {canCreate ? (
+          <Button
+            aria-expanded={isCreating}
+            onClick={startCreatePersonnel}
+            type="button"
+          >
+            Register Personnel
+          </Button>
+        ) : null}
+      </div>
+
       {message ? (
         <Surface role="status">
           <p className="text-sm font-semibold text-text-primary">{message}</p>
@@ -230,20 +323,6 @@ export function RegistrationPersonnelPage() {
       ) : null}
 
       <RegistrationErrorAlert error={createMutation.error ?? updateMutation.error} />
-
-      {canCreate ? (
-        <PersonnelFormSurface
-          actionLabel="Create Personnel"
-          clients={clients}
-          formId="create-registration-personnel"
-          formState={createForm}
-          isSubmitting={createMutation.isPending}
-          lockClientSelection={!canViewClients}
-          onChange={setCreateForm}
-          onSubmit={submitCreateForm}
-          title="Create Personnel"
-        />
-      ) : null}
 
       <PersonnelFilters
         canViewClients={canViewClients}
@@ -253,19 +332,9 @@ export function RegistrationPersonnelPage() {
         facilityFilter={facilityFilter}
         facilities={facilities}
         facilitiesLoading={facilitiesQuery.isLoading}
-        onClientFilterChange={(value) => {
-          setClientFilter(value);
-          setFacilityFilter("");
-          setSelectedPersonnelId(null);
-        }}
-        onFacilityFilterChange={(value) => {
-          setFacilityFilter(value);
-          setSelectedPersonnelId(null);
-        }}
-        onStatusFilterChange={(value) => {
-          setStatusFilter(value);
-          setSelectedPersonnelId(null);
-        }}
+        onClientFilterChange={changeClientFilter}
+        onFacilityFilterChange={changeFacilityFilter}
+        onStatusFilterChange={changeStatusFilter}
         statusFilter={statusFilter}
       />
 
@@ -275,35 +344,43 @@ export function RegistrationPersonnelPage() {
         </SafeState>
       ) : personnelQuery.isError ? (
         <RegistrationPersonnelErrorState error={personnelQuery.error} />
-      ) : personnel.length === 0 ? (
-        <Surface>
-          <h2 className="text-base font-semibold text-text-primary">
-            No Personnel records are currently available.
-          </h2>
-          <p className="mt-2 text-sm leading-6 text-text-muted">
-            The registration service did not return any Personnel records for your current authority.
-          </p>
-        </Surface>
       ) : (
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,28rem)]">
+        <div className="grid gap-4 lg:grid-cols-[minmax(16rem,0.8fr)_minmax(0,1.2fr)]">
           <PersonnelList
             clientNameById={clientNameById}
-            onSelectPersonnel={setSelectedPersonnelId}
+            onSelectPersonnel={selectPersonnel}
             personnel={personnel}
             selectedPersonnelId={selectedPersonnelId}
           />
-          <PersonnelDetailsPanel
-            canDeactivate={canDeactivate}
-            canUpdate={canUpdate}
-            clientNameById={clientNameById}
-            editForm={editForm}
-            isLoading={selectedPersonnelQuery.isLoading}
-            isSubmitting={updateMutation.isPending}
-            onDeactivate={deactivateSelectedPersonnel}
-            onEditChange={setEditForm}
-            onSubmit={submitEditForm}
-            staffMember={selectedPersonnelQuery.data ?? null}
-          />
+          {isCreating ? (
+            <PersonnelCreatePanel
+              clients={clients}
+              formState={createForm}
+              isSubmitting={createMutation.isPending}
+              lockClientSelection={!canViewClients}
+              onCancel={cancelCreatePersonnel}
+              onChange={setCreateForm}
+              onSubmit={submitCreateForm}
+            />
+          ) : personnel.length === 0 ? (
+            <PersonnelEmptyDetailPanel canCreate={canCreate} />
+          ) : (
+            <PersonnelDetailsPanel
+              canDeactivate={canDeactivate}
+              canUpdate={canUpdate}
+              canViewFacilityAssignments={canViewFacilityAssignments}
+              clientNameById={clientNameById}
+              editForm={editForm}
+              isLoading={selectedPersonnelQuery.isLoading}
+              isSubmitting={updateMutation.isPending}
+              onDeactivate={deactivateSelectedPersonnel}
+              onEditChange={setEditForm}
+              onSubmit={submitEditForm}
+              onTabChange={setSelectedTab}
+              selectedTab={selectedTab}
+              staffMember={selectedPersonnelQuery.data ?? null}
+            />
+          )}
         </div>
       )}
     </RegistrationWorkspaceShell>
@@ -411,59 +488,69 @@ function PersonnelList({
   selectedPersonnelId: string | null;
 }) {
   return (
-    <ul aria-label="Personnel records" className="space-y-3">
-      {personnel.map((staffMember) => (
-        <li key={staffMember.id}>
-          <Surface className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div className="min-w-0 space-y-3">
-              <div>
-                <h2 className="break-words text-lg font-semibold text-text-primary">
-                  {staffMember.full_name}
-                </h2>
-                <p className="mt-1 break-all text-sm text-text-muted">
-                  Personnel ID {staffMember.id}
-                </p>
-              </div>
-              <dl className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
-                <MetadataItem
-                  label="Client"
-                  value={clientLabel(staffMember.client_id, clientNameById)}
-                />
-                <MetadataItem
-                  label="Employment status"
-                  value={displayCode(staffMember.employment_status)}
-                />
-                <MetadataItem
-                  label="Hire date"
-                  value={staffMember.hire_date ?? "Not specified"}
-                />
-                <MetadataItem
-                  label="Email"
-                  value={staffMember.email ?? "Not specified"}
-                />
-                <MetadataItem
-                  label="Phone"
-                  value={staffMember.phone_number ?? "Not specified"}
-                />
-              </dl>
-            </div>
-            <Button
-              aria-pressed={selectedPersonnelId === staffMember.id}
-              onClick={() => onSelectPersonnel(staffMember.id)}
-              variant="secondary"
-            >
-              View details
-            </Button>
-          </Surface>
-        </li>
-      ))}
-    </ul>
+    <Surface>
+      <div className="mb-3">
+        <h2 className="text-base font-semibold text-text-primary">Personnel records</h2>
+        <p className="mt-1 text-sm text-text-muted">
+          Select a person to review profile details.
+        </p>
+      </div>
+      {personnel.length === 0 ? (
+        <div className="rounded-component border border-dashed border-border p-4">
+          <h3 className="text-sm font-semibold text-text-primary">
+            No Personnel match the current filters.
+          </h3>
+          <p className="mt-2 text-sm text-text-muted">
+            Use Register Personnel to add a person when you have create authority.
+          </p>
+        </div>
+      ) : (
+        <ul aria-label="Personnel records" className="space-y-2">
+          {personnel.map((staffMember) => {
+            const isSelected = selectedPersonnelId === staffMember.id;
+
+            return (
+              <li key={staffMember.id}>
+                <button
+                  aria-current={isSelected ? "true" : undefined}
+                  className={[
+                    "w-full rounded-component border px-3 py-3 text-left outline-none transition focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface",
+                    isSelected
+                      ? "border-primary-navy bg-elevated shadow-sm"
+                      : "border-border bg-surface hover:bg-elevated"
+                  ].join(" ")}
+                  onClick={() => onSelectPersonnel(staffMember.id)}
+                  type="button"
+                >
+                  <span className="block break-words text-sm font-semibold text-text-primary">
+                    {staffMember.full_name}
+                  </span>
+                  <span className="mt-2 flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-wide text-text-muted">
+                    <span>{displayCode(staffMember.employment_status)}</span>
+                    {staffMember.hire_date ? <span>Hired {staffMember.hire_date}</span> : null}
+                  </span>
+                  <span className="mt-2 block break-words text-sm text-text-muted">
+                    {clientLabel(staffMember.client_id, clientNameById)}
+                  </span>
+                  {staffMember.email ? (
+                    <span className="mt-2 block break-words text-sm text-text-muted">
+                      {staffMember.email}
+                    </span>
+                  ) : null}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </Surface>
   );
 }
 
 function PersonnelDetailsPanel({
   canDeactivate,
   canUpdate,
+  canViewFacilityAssignments,
   clientNameById,
   editForm,
   isLoading,
@@ -471,10 +558,13 @@ function PersonnelDetailsPanel({
   onDeactivate,
   onEditChange,
   onSubmit,
+  onTabChange,
+  selectedTab,
   staffMember
 }: {
   canDeactivate: boolean;
   canUpdate: boolean;
+  canViewFacilityAssignments: boolean;
   clientNameById: Map<string, string>;
   editForm: PersonnelFormState | null;
   isLoading: boolean;
@@ -482,6 +572,8 @@ function PersonnelDetailsPanel({
   onDeactivate: () => void;
   onEditChange: (formState: PersonnelFormState) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onTabChange: (tab: PersonnelSecondaryTab) => void;
+  selectedTab: PersonnelSecondaryTab;
   staffMember: RegistrationPersonnel | null;
 }) {
   if (isLoading) {
@@ -506,85 +598,190 @@ function PersonnelDetailsPanel({
         <div className="space-y-4">
           <div>
             <h2 className="text-lg font-semibold text-text-primary">
-              Personnel Details
+              {staffMember.full_name}
             </h2>
-            <p className="mt-1 break-all text-sm text-text-muted">{staffMember.id}</p>
+            <p className="mt-1 break-words text-sm text-text-muted">
+              {displayCode(staffMember.employment_status)} - {clientLabel(staffMember.client_id, clientNameById)}
+            </p>
+            {staffMember.email ? (
+              <p className="mt-1 break-words text-sm text-text-muted">{staffMember.email}</p>
+            ) : null}
           </div>
 
-          <dl className="grid gap-2 text-sm sm:grid-cols-2">
-            <MetadataItem
-              label="Client"
-              value={clientLabel(staffMember.client_id, clientNameById)}
-            />
-            <MetadataItem label="Client ID" value={staffMember.client_id} />
-            <MetadataItem
-              label="Platform user"
-              value={staffMember.user_id ?? "No linked user account"}
-            />
-            <MetadataItem label="Created" value={staffMember.created_at} />
-            <MetadataItem label="Updated" value={staffMember.updated_at} />
-          </dl>
+          <PersonnelSecondaryNavigation
+            canViewFacilityAssignments={canViewFacilityAssignments}
+            onTabChange={onTabChange}
+            selectedTab={selectedTab}
+          />
 
-          {canUpdate ? (
-            <PersonnelForm
-              actionLabel="Save Personnel"
-              clients={[]}
-              formId="edit-registration-personnel"
-              formState={editForm}
+          {selectedTab === "overview" ? (
+            <PersonnelOverview
+              canDeactivate={canDeactivate}
+              canUpdate={canUpdate}
+              clientNameById={clientNameById}
+              editForm={editForm}
               isSubmitting={isSubmitting}
-              lockClientSelection
-              onChange={onEditChange}
+              onDeactivate={onDeactivate}
+              onEditChange={onEditChange}
               onSubmit={onSubmit}
+              staffMember={staffMember}
             />
-          ) : (
-            <PersonnelReadOnlyDetails staffMember={staffMember} />
-          )}
-
-          {canDeactivate && staffMember.employment_status !== "INACTIVE" ? (
-            <Button disabled={isSubmitting} onClick={onDeactivate} variant="secondary">
-              Deactivate Personnel
-            </Button>
           ) : null}
         </div>
       </Surface>
 
-      <RegistrationFacilityAssignmentsPanel staffMember={staffMember} />
+      {selectedTab === "facilities" && canViewFacilityAssignments ? (
+        <div
+          aria-labelledby="personnel-facilities-tab"
+          id="personnel-facilities-panel"
+          role="tabpanel"
+        >
+          <RegistrationFacilityAssignmentsPanel staffMember={staffMember} />
+        </div>
+      ) : null}
     </div>
   );
 }
 
-function PersonnelFormSurface({
-  actionLabel,
+function PersonnelSecondaryNavigation({
+  canViewFacilityAssignments,
+  onTabChange,
+  selectedTab
+}: {
+  canViewFacilityAssignments: boolean;
+  onTabChange: (tab: PersonnelSecondaryTab) => void;
+  selectedTab: PersonnelSecondaryTab;
+}) {
+  return (
+    <div aria-label="Personnel detail sections" className="flex flex-wrap gap-2" role="tablist">
+      <button
+        aria-controls="personnel-overview-panel"
+        aria-selected={selectedTab === "overview"}
+        className={tabClassName(selectedTab === "overview")}
+        id="personnel-overview-tab"
+        onClick={() => onTabChange("overview")}
+        role="tab"
+        type="button"
+      >
+        Overview
+      </button>
+      {canViewFacilityAssignments ? (
+        <button
+          aria-controls="personnel-facilities-panel"
+          aria-selected={selectedTab === "facilities"}
+          className={tabClassName(selectedTab === "facilities")}
+          id="personnel-facilities-tab"
+          onClick={() => onTabChange("facilities")}
+          role="tab"
+          type="button"
+        >
+          Facilities
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function PersonnelOverview({
+  canDeactivate,
+  canUpdate,
+  clientNameById,
+  editForm,
+  isSubmitting,
+  onDeactivate,
+  onEditChange,
+  onSubmit,
+  staffMember
+}: {
+  canDeactivate: boolean;
+  canUpdate: boolean;
+  clientNameById: Map<string, string>;
+  editForm: PersonnelFormState;
+  isSubmitting: boolean;
+  onDeactivate: () => void;
+  onEditChange: (formState: PersonnelFormState) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  staffMember: RegistrationPersonnel;
+}) {
+  return (
+    <div
+      aria-labelledby="personnel-overview-tab"
+      className="space-y-4"
+      id="personnel-overview-panel"
+      role="tabpanel"
+    >
+      <dl className="grid gap-2 text-sm sm:grid-cols-2">
+        <MetadataItem
+          label="Client"
+          value={clientLabel(staffMember.client_id, clientNameById)}
+        />
+        <MetadataItem label="Personnel ID" value={staffMember.id} />
+        <MetadataItem label="Client ID" value={staffMember.client_id} />
+        <MetadataItem
+          label="Platform user"
+          value={staffMember.user_id ?? "No linked user account"}
+        />
+        <MetadataItem label="Created" value={staffMember.created_at} />
+        <MetadataItem label="Updated" value={staffMember.updated_at} />
+      </dl>
+
+      {canUpdate ? (
+        <PersonnelForm
+          actionLabel="Save Personnel"
+          clients={[]}
+          formId="edit-registration-personnel"
+          formState={editForm}
+          isSubmitting={isSubmitting}
+          lockClientSelection
+          onChange={onEditChange}
+          onSubmit={onSubmit}
+        />
+      ) : (
+        <PersonnelReadOnlyDetails staffMember={staffMember} />
+      )}
+
+      {canDeactivate && staffMember.employment_status !== "INACTIVE" ? (
+        <Button disabled={isSubmitting} onClick={onDeactivate} variant="secondary">
+          Deactivate Personnel
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+function PersonnelCreatePanel({
   clients,
-  formId,
   formState,
   isSubmitting,
   lockClientSelection,
+  onCancel,
   onChange,
-  onSubmit,
-  title
+  onSubmit
 }: {
-  actionLabel: string;
   clients: RegistrationClient[];
-  formId: string;
   formState: PersonnelFormState;
   isSubmitting: boolean;
   lockClientSelection: boolean;
+  onCancel: () => void;
   onChange: (formState: PersonnelFormState) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-  title: string;
 }) {
   return (
     <Surface>
-      <h2 className="text-base font-semibold text-text-primary">{title}</h2>
+      <h2 className="text-lg font-semibold text-text-primary">Register Personnel</h2>
+      <p className="mt-1 text-sm text-text-muted">
+        Create a Personnel profile under the selected Client.
+      </p>
       <div className="mt-4">
         <PersonnelForm
-          actionLabel={actionLabel}
+          actionLabel="Create Personnel"
+          cancelLabel="Cancel"
           clients={clients}
-          formId={formId}
+          formId="create-registration-personnel"
           formState={formState}
           isSubmitting={isSubmitting}
           lockClientSelection={lockClientSelection}
+          onCancel={onCancel}
           onChange={onChange}
           onSubmit={onSubmit}
         />
@@ -593,22 +790,41 @@ function PersonnelFormSurface({
   );
 }
 
+function PersonnelEmptyDetailPanel({ canCreate }: { canCreate: boolean }) {
+  return (
+    <Surface>
+      <h2 className="text-base font-semibold text-text-primary">
+        No Personnel selected.
+      </h2>
+      <p className="mt-2 text-sm leading-6 text-text-muted">
+        {canCreate
+          ? "Use Register Personnel to create a Personnel profile under an authorized Client."
+          : "No Personnel records are currently available for your authority."}
+      </p>
+    </Surface>
+  );
+}
+
 function PersonnelForm({
   actionLabel,
+  cancelLabel,
   clients,
   formId,
   formState,
   isSubmitting,
   lockClientSelection,
+  onCancel,
   onChange,
   onSubmit
 }: {
   actionLabel: string;
+  cancelLabel?: string;
   clients: RegistrationClient[];
   formId: string;
   formState: PersonnelFormState;
   isSubmitting: boolean;
   lockClientSelection: boolean;
+  onCancel?: () => void;
   onChange: (formState: PersonnelFormState) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
@@ -694,9 +910,21 @@ function PersonnelForm({
           value={formState.notes}
         />
       </label>
-      <Button disabled={isSubmitting || !canSubmit} type="submit">
-        {actionLabel}
-      </Button>
+      <div className="flex flex-wrap gap-2">
+        <Button disabled={isSubmitting || !canSubmit} type="submit">
+          {actionLabel}
+        </Button>
+        {onCancel && cancelLabel ? (
+          <Button
+            disabled={isSubmitting}
+            onClick={onCancel}
+            type="button"
+            variant="secondary"
+          >
+            {cancelLabel}
+          </Button>
+        ) : null}
+      </div>
     </form>
   );
 }
@@ -872,6 +1100,15 @@ function nullableText(value: string) {
   const trimmed = value.trim();
 
   return trimmed ? trimmed : null;
+}
+
+function tabClassName(isSelected: boolean) {
+  return [
+    "inline-flex min-h-10 items-center rounded-component border px-3 text-sm font-semibold outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface",
+    isSelected
+      ? "border-primary-navy bg-primary-navy text-text-inverse shadow-sm"
+      : "border-border bg-surface text-text-primary hover:bg-elevated"
+  ].join(" ");
 }
 
 const inputClassName =
