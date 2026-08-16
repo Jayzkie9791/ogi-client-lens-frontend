@@ -26,7 +26,10 @@ import {
   createCertification
 } from "./certificationsApi";
 import { CertificationWorkspaceTabs } from "./CertificationWorkspaceTabs";
-import { issueCredential } from "./credentialIssuanceApi";
+import {
+  issueCredential,
+  listCredentialIssuancesByCertification
+} from "./credentialIssuanceApi";
 import {
   createOperationalAuthorization,
   GovernOperationalAuthorizationRequest,
@@ -178,8 +181,8 @@ export function CertificationsPage() {
     useState<CredentialIssuanceFormState>(emptyCredentialIssuanceForm);
   const [credentialIssuanceSuccess, setCredentialIssuanceSuccess] =
     useState<string | null>(null);
-  const [issuedCredential, setIssuedCredential] =
-    useState<CredentialIssuanceResponse | null>(null);
+  const [recentIssuedCredentialId, setRecentIssuedCredentialId] =
+    useState<string | null>(null);
 
   const credentialsQuery = useQuery({
     queryKey: ["credentials", "certifications-workspace"],
@@ -208,6 +211,17 @@ export function CertificationsPage() {
     queryKey: selectedDetailQueryKey,
     queryFn: () => getPersonnelCredentials(selectedEntry?.staffMemberId ?? ""),
     enabled: canViewCertifications && canViewPersonnel && Boolean(selectedEntry),
+    retry: false
+  });
+  const selectedIssuanceHistoryQueryKey = [
+    "credential-issuances",
+    "certification",
+    selectedCertificationId
+  ] as const;
+  const issuanceHistoryQuery = useQuery({
+    queryKey: selectedIssuanceHistoryQueryKey,
+    queryFn: () => listCredentialIssuancesByCertification(selectedCertificationId ?? ""),
+    enabled: canViewCertifications && Boolean(selectedCertificationId),
     retry: false
   });
 
@@ -341,13 +355,19 @@ export function CertificationsPage() {
     onSuccess: async (issuance) => {
       setCredentialIssuanceMode(false);
       setCredentialIssuanceForm(emptyCredentialIssuanceForm);
-      setIssuedCredential(issuance);
+      setRecentIssuedCredentialId(issuance.id);
       setCredentialIssuanceSuccess("Credential issued successfully.");
-      await invalidateAuthorizationQueries(queryClient, selectedDetailQueryKey);
+      await Promise.all([
+        invalidateAuthorizationQueries(queryClient, selectedDetailQueryKey),
+        queryClient.invalidateQueries({ queryKey: selectedIssuanceHistoryQueryKey })
+      ]);
     },
     onError: async () => {
       if (selectedEntry) {
-        await queryClient.invalidateQueries({ queryKey: selectedDetailQueryKey });
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: selectedDetailQueryKey }),
+          queryClient.invalidateQueries({ queryKey: selectedIssuanceHistoryQueryKey })
+        ]);
       }
     }
   });
@@ -423,7 +443,7 @@ export function CertificationsPage() {
                 setEndorsementSuccess(null);
                 setCredentialIssuanceMode(false);
                 setCredentialIssuanceSuccess(null);
-                setIssuedCredential(null);
+                setRecentIssuedCredentialId(null);
                 endorsementMutation.reset();
                 setSelectedCertificationId(entry.certificationId);
               }}
@@ -545,7 +565,10 @@ export function CertificationsPage() {
                     ...(authorization ? { sourceAuthorizationId: authorization.id } : {})
                   });
                 }}
-                issuedCredential={issuedCredential}
+                issuanceHistory={issuanceHistoryQuery.data?.issuances ?? []}
+                issuanceHistoryError={issuanceHistoryQuery.error}
+                issuanceHistoryLoading={issuanceHistoryQuery.isLoading}
+                recentIssuedCredentialId={recentIssuedCredentialId}
               />            ) : (
               <Surface>
                 <h2 className="text-base font-semibold text-text-primary">
@@ -700,7 +723,10 @@ function CertificationDetailPanel({
   onStartEndorsement,
   onSubmitAuthorization,
   onSubmitCredentialIssuance,
-  issuedCredential,
+  issuanceHistory,
+  issuanceHistoryError,
+  issuanceHistoryLoading,
+  recentIssuedCredentialId,
   onSubmitEndorsement
 }: {
   authorizationCommandError: Error | null;
@@ -752,7 +778,10 @@ function CertificationDetailPanel({
     event: FormEvent<HTMLFormElement>,
     authorization: CredentialsOperationalAuthorizationProjection | null
   ) => void;
-  issuedCredential: CredentialIssuanceResponse | null;
+  issuanceHistory: readonly CredentialIssuanceResponse[];
+  issuanceHistoryError: Error | null;
+  issuanceHistoryLoading: boolean;
+  recentIssuedCredentialId: string | null;
   onSubmitEndorsement: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   if (loading) {
@@ -780,10 +809,6 @@ function CertificationDetailPanel({
     certification.id
   );
   const currentAuthorization = currentOperationalAuthorization(linkedAuthorizations);
-  const knownIssuance =
-    issuedCredential?.source_certification_id === certification.id
-      ? issuedCredential
-      : null;
 
   return (
     <Surface>
@@ -861,12 +886,15 @@ function CertificationDetailPanel({
         certification={certification}
         error={credentialIssuanceError}
         form={credentialIssuanceForm}
-        issuedCredential={knownIssuance}
+        issuanceHistory={issuanceHistory}
+        issuanceHistoryError={issuanceHistoryError}
+        issuanceHistoryLoading={issuanceHistoryLoading}
         issueMode={credentialIssuanceMode}
         onCancel={onCancelCredentialIssuance}
         onChange={onChangeCredentialIssuance}
         onStart={onStartCredentialIssuance}
         onSubmit={onSubmitCredentialIssuance}
+        recentIssuedCredentialId={recentIssuedCredentialId}
         successMessage={credentialIssuanceSuccess}
         submitting={credentialIssuancePending}
       />
@@ -1000,7 +1028,10 @@ function CredentialIssuanceSection({
   certification,
   error,
   form,
-  issuedCredential,
+  issuanceHistory,
+  issuanceHistoryError,
+  issuanceHistoryLoading,
+  recentIssuedCredentialId,
   issueMode,
   onCancel,
   onChange,
@@ -1014,7 +1045,10 @@ function CredentialIssuanceSection({
   certification: CredentialsCertificationProjection;
   error: Error | null;
   form: CredentialIssuanceFormState;
-  issuedCredential: CredentialIssuanceResponse | null;
+  issuanceHistory: readonly CredentialIssuanceResponse[];
+  issuanceHistoryError: Error | null;
+  issuanceHistoryLoading: boolean;
+  recentIssuedCredentialId: string | null;
   issueMode: boolean;
   onCancel: () => void;
   onChange: (form: CredentialIssuanceFormState) => void;
@@ -1037,7 +1071,7 @@ function CredentialIssuanceSection({
             className="text-base font-semibold text-text-primary"
             id="credential-issuance-heading"
           >
-            Credential Issuance
+            Credential Issuances
           </h3>
           <p className="mt-1 text-sm text-text-muted">
             Issuance creates a governed credential record and immutable certificate snapshot.
@@ -1059,51 +1093,67 @@ function CredentialIssuanceSection({
         </p>
       ) : null}
 
-      {issuedCredential ? (
-        <div className="mt-3 rounded-component border border-border bg-elevated px-3 py-3">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <p className="text-sm font-semibold text-text-primary">
-                Issued Credential
-              </p>
-              <dl className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
-                <MetadataItem
-                  label="Credential number"
-                  value={issuedCredential.certification_number_snapshot}
-                />
-                <MetadataItem
-                  label="Issued date"
-                  value={formatDate(issuedCredential.issue_date_snapshot)}
-                />
-                <MetadataItem
-                  label="Expiry date"
-                  value={formatDate(issuedCredential.expiry_date_snapshot)}
-                />
-                <MetadataItem
-                  label="Status at issuance"
-                  value={displayCode(issuedCredential.certification_status_at_issuance)}
-                />
-                <MetadataItem
-                  label="Training center"
-                  value={issuedCredential.training_center_snapshot ?? "Not specified"}
-                />
-                <MetadataItem
-                  label="Issuing organization"
-                  value={issuedCredential.issuing_organization_snapshot}
-                />
-              </dl>
-            </div>
-            <Link
-              className="inline-flex items-center justify-center rounded-component bg-primary-blue px-3 py-2 text-sm font-semibold text-text-inverse outline-none transition-colors hover:bg-primary-navy focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-canvas active:bg-primary-navy"
-              to={routes.credentialCertificatePath(issuedCredential.id)}
+      {issuanceHistoryLoading ? (
+        <p className="mt-3 text-sm text-text-muted" role="status">
+          Loading credential issuance history.
+        </p>
+      ) : issuanceHistoryError ? (
+        <CertificationErrorState compact error={issuanceHistoryError} operation="issuance" />
+      ) : issuanceHistory.length > 0 ? (
+        <div className="mt-3 space-y-3">
+          {issuanceHistory.map((issuance) => (
+            <div
+              className="rounded-component border border-border bg-elevated px-3 py-3"
+              key={issuance.id}
             >
-              View Certificate
-            </Link>
-          </div>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-sm font-semibold text-text-primary">
+                      Credential {issuance.certification_number_snapshot}
+                    </p>
+                    {issuance.id === recentIssuedCredentialId ? (
+                      <span className="rounded-component border border-border bg-surface px-2 py-1 text-xs font-semibold uppercase tracking-wide text-primary-blue">
+                        Newly issued
+                      </span>
+                    ) : null}
+                  </div>
+                  <dl className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
+                    <MetadataItem
+                      label="Issued date"
+                      value={formatDate(issuance.issue_date_snapshot)}
+                    />
+                    <MetadataItem
+                      label="Expiry date"
+                      value={formatDate(issuance.expiry_date_snapshot)}
+                    />
+                    <MetadataItem
+                      label="Status at issuance"
+                      value={displayCode(issuance.certification_status_at_issuance)}
+                    />
+                    <MetadataItem
+                      label="Training center"
+                      value={issuance.training_center_snapshot ?? "Not specified"}
+                    />
+                    <MetadataItem
+                      label="Issuing organization"
+                      value={issuance.issuing_organization_snapshot}
+                    />
+                  </dl>
+                </div>
+                <Link
+                  className="inline-flex items-center justify-center rounded-component bg-primary-blue px-3 py-2 text-sm font-semibold text-text-inverse outline-none transition-colors hover:bg-primary-navy focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-canvas active:bg-primary-navy"
+                  to={routes.credentialCertificatePath(issuance.id)}
+                >
+                  View Certificate
+                </Link>
+              </div>
+            </div>
+          ))}
         </div>
       ) : (
         <p className="mt-3 text-sm text-text-muted">
-          No issuance is available in the current credential view.
+          No credentials have been issued from this certification.
         </p>
       )}
 

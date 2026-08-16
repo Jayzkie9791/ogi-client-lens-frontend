@@ -26,6 +26,7 @@ const operationalAuthorizationId = "00000000-0000-4000-8000-000000500001";
 const renewedOperationalAuthorizationId = "00000000-0000-4000-8000-000000500002";
 const sourceEvidenceRecordId = "00000000-0000-4000-8000-000000800001";
 const credentialIssuanceId = "00000000-0000-4000-8000-000000900001";
+const olderCredentialIssuanceId = "00000000-0000-4000-8000-000000900002";
 
 const certificationSession: AuthenticatedSession = {
   id: "00000000-0000-4000-8000-000000000001",
@@ -387,6 +388,13 @@ const credentialIssuance: CredentialIssuanceResponse = {
   issued_at: "2026-01-05T00:00:00.000Z"
 };
 
+const olderCredentialIssuance: CredentialIssuanceResponse = {
+  ...credentialIssuance,
+  id: olderCredentialIssuanceId,
+  certification_number_snapshot: "OGI-OWG-000000",
+  issued_at: "2026-01-04T00:00:00.000Z"
+};
+
 interface MockResponse {
   status: number;
   body?: unknown;
@@ -423,6 +431,14 @@ function mockFetchRoutes(routesToMock: MockRoute[]) {
 
     calls.push({ url, init });
 
+    if (!route && method === "GET" && url === issuanceHistoryUrl()) {
+      return new Response(JSON.stringify({ issuances: [] }), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json"
+        }
+      });
+    }
     if (!route) {
       throw new Error(`Unexpected fetch call: ${method} ${url}`);
     }
@@ -464,6 +480,19 @@ function readRequestPath(input: RequestInfo | URL) {
   const url = new URL(value);
 
   return `${url.pathname}${url.search}`;
+}
+
+function issuanceHistoryUrl() {
+  return `/api/v1/credentials/issuances?certificationId=${certificationId}`;
+}
+
+function issuanceHistoryRoute(
+  responses: MockResponse[] = [{ status: 200, body: { issuances: [] } }]
+): MockRoute {
+  return {
+    url: issuanceHistoryUrl(),
+    responses
+  };
 }
 
 function authRoutes(session = certificationSession): MockRoute[] {
@@ -617,7 +646,8 @@ describe("Certification workspace frontend", () => {
       "/api/v1/auth/refresh",
       "/api/v1/auth/me",
       "/api/v1/credentials",
-      `/api/v1/credentials/personnel/${staffMemberId}`
+      `/api/v1/credentials/personnel/${staffMemberId}`,
+      issuanceHistoryUrl()
     ]);
   });
 
@@ -715,7 +745,13 @@ describe("Certification workspace frontend", () => {
     expect(
       calls.filter((call) => call.url === `/api/v1/credentials/personnel/${staffMemberId}`)
     ).toHaveLength(2);
-    expect(calls.map(({ url }) => url)).not.toContain("/api/v1/credentials/issuances");
+    expect(
+      calls.some(
+        (call) =>
+          call.url === "/api/v1/credentials/issuances" &&
+          call.init?.method === "POST"
+      )
+    ).toBe(false);
     expect(calls.map(({ url }) => url)).not.toContain("/api/v1/operational-authorizations");
   });
 
@@ -936,7 +972,13 @@ describe("Certification workspace frontend", () => {
     expect(
       calls.filter((call) => call.url === `/api/v1/credentials/personnel/${staffMemberId}`)
     ).toHaveLength(2);
-    expect(calls.map(({ url }) => url)).not.toContain("/api/v1/credentials/issuances");
+    expect(
+      calls.some(
+        (call) =>
+          call.url === "/api/v1/credentials/issuances" &&
+          call.init?.method === "POST"
+      )
+    ).toBe(false);
     expect(calls.map(({ url }) => url)).not.toContain("/api/v1/registration/facility-assignments");
     expect(calls.map(({ url }) => url)).not.toContain("/api/v1/auth/user-facility-access");
   });
@@ -1269,7 +1311,7 @@ describe("Certification workspace frontend", () => {
     );
   });
 
-  it("shows Credential Issuance context for selected Certifications and gates Issue Credential by issue_certification", async () => {
+  it("shows Credential Issuances context for selected Certifications and gates Issue Credential by issue_certification", async () => {
     const user = userEvent.setup();
 
     mockFetchRoutes(certificationRoutes(anaDetail, certificationSession));
@@ -1279,10 +1321,10 @@ describe("Certification workspace frontend", () => {
     await user.click(await screen.findByRole("button", { name: "View Certification" }));
 
     expect(
-      await screen.findByRole("heading", { name: "Credential Issuance" })
+      await screen.findByRole("heading", { name: "Credential Issuances" })
     ).toBeInTheDocument();
     expect(
-      screen.getByText("No issuance is available in the current credential view.")
+      screen.getByText("No credentials have been issued from this certification.")
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Issue Credential" })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Endorsements" })).toBeInTheDocument();
@@ -1300,7 +1342,106 @@ describe("Certification workspace frontend", () => {
     expect(await screen.findByRole("button", { name: "Issue Credential" })).toBeInTheDocument();
   });
 
-  it("opens and cancels Credential Issuance without mutation", async () => {
+  it("loads persisted Credential Issuance history for a selected Certification", async () => {
+    const user = userEvent.setup();
+
+    mockFetchRoutes([
+      ...authRoutes(certificationSession),
+      {
+        url: "/api/v1/credentials",
+        responses: [{ status: 200, body: credentialsListResponse }]
+      },
+      {
+        url: `/api/v1/credentials/personnel/${staffMemberId}`,
+        responses: [{ status: 200, body: anaDetail }]
+      },
+      issuanceHistoryRoute([
+        {
+          status: 200,
+          body: { issuances: [credentialIssuance, olderCredentialIssuance] }
+        }
+      ])
+    ]);
+
+    renderWithRoute(routes.certifications);
+
+    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+
+    expect(await screen.findByText("Credential OGI-OWG-000001")).toBeInTheDocument();
+    expect(screen.getByText("Credential OGI-OWG-000000")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Issue Credential" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "View Certificate" })[0]).toHaveAttribute(
+      "href",
+      routes.credentialCertificatePath(credentialIssuanceId)
+    );
+  });
+
+  it("distinguishes Credential Issuance history loading and error states", async () => {
+    const user = userEvent.setup();
+
+    mockFetchRoutes([
+      ...authRoutes(certificationSession),
+      {
+        url: "/api/v1/credentials",
+        responses: [{ status: 200, body: credentialsListResponse }]
+      },
+      {
+        url: `/api/v1/credentials/personnel/${staffMemberId}`,
+        responses: [{ status: 200, body: anaDetail }]
+      },
+      issuanceHistoryRoute([
+        {
+          status: 200,
+          delayMs: 50,
+          body: { issuances: [] }
+        }
+      ])
+    ]);
+
+    renderWithRoute(routes.certifications);
+
+    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+
+    expect(await screen.findByText("Loading credential issuance history.")).toBeInTheDocument();
+    expect(await screen.findByText("No credentials have been issued from this certification.")).toBeInTheDocument();
+
+    cleanup();
+    vi.unstubAllGlobals();
+    window.sessionStorage.clear();
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    mockFetchRoutes([
+      ...authRoutes(certificationSession),
+      {
+        url: "/api/v1/credentials",
+        responses: [{ status: 200, body: credentialsListResponse }]
+      },
+      {
+        url: `/api/v1/credentials/personnel/${staffMemberId}`,
+        responses: [{ status: 200, body: anaDetail }]
+      },
+      issuanceHistoryRoute([
+        {
+          status: 500,
+          body: {
+            code: "CREDENTIAL_ISSUANCE_REQUEST_FAILED",
+            message: "Backend detail should not be shown.",
+            status: 500
+          }
+        }
+      ])
+    ]);
+
+    renderWithRoute(routes.certifications);
+    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Credential issuance could not be completed."
+    );
+    expect(screen.queryByText("No credentials have been issued from this certification.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Backend detail should not be shown.")).not.toBeInTheDocument();
+  });
+
+  it("opens and cancels Credential Issuances without mutation", async () => {
     const user = userEvent.setup();
     const { calls } = mockFetchRoutes(certificationRoutes(anaDetail, issueSession));
 
@@ -1316,10 +1457,16 @@ describe("Certification workspace frontend", () => {
     await user.click(screen.getByRole("button", { name: "Cancel" }));
 
     expect(screen.queryByLabelText("F-048 evidence record ID")).not.toBeInTheDocument();
-    expect(calls.map(({ url }) => url)).not.toContain("/api/v1/credentials/issuances");
+    expect(
+      calls.some(
+        (call) =>
+          call.url === "/api/v1/credentials/issuances" &&
+          call.init?.method === "POST"
+      )
+    ).toBe(false);
   });
 
-  it("submits exact Credential Issuance contract, refetches projections, and links to the returned certificate", async () => {
+  it("submits exact Credential Issuances contract, refetches projections, and links to the returned certificate", async () => {
     const user = userEvent.setup();
     const { calls } = mockFetchRoutes([
       ...authRoutes(credentialIssuanceSession),
@@ -1337,6 +1484,10 @@ describe("Certification workspace frontend", () => {
           { status: 200, body: detailWithAuthorizations([activeOperationalAuthorization]) }
         ]
       },
+      issuanceHistoryRoute([
+        { status: 200, body: { issuances: [] } },
+        { status: 200, body: { issuances: [credentialIssuance] } }
+      ]),
       {
         method: "POST",
         url: "/api/v1/credentials/issuances",
@@ -1356,8 +1507,8 @@ describe("Certification workspace frontend", () => {
     await user.click(screen.getByRole("button", { name: "Confirm Issue Credential" }));
 
     expect(await screen.findByText("Credential issued successfully.")).toBeInTheDocument();
-    expect(await screen.findByText("Issued Credential")).toBeInTheDocument();
-    expect(screen.getByText("OGI-OWG-000001")).toBeInTheDocument();
+    expect(await screen.findByText("Credential OGI-OWG-000001")).toBeInTheDocument();
+    expect(screen.getByText("Newly issued")).toBeInTheDocument();
     expect(screen.getByText("Ocean Guardian International Ltd.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "View Certificate" })).toHaveAttribute(
       "href",
@@ -1441,7 +1592,7 @@ describe("Certification workspace frontend", () => {
     });
   });
 
-  it("prevents duplicate Credential Issuance submission while pending", async () => {
+  it("prevents duplicate Credential Issuances submission while pending", async () => {
     const user = userEvent.setup();
     const { calls } = mockFetchRoutes([
       ...authRoutes(issueSession),
@@ -1498,7 +1649,7 @@ describe("Certification workspace frontend", () => {
     [409, "Credential issuance could not be completed because of a conflict."],
     [422, "Credential issuance input is invalid."],
     [500, "Credential issuance could not be completed."]
-  ])("maps Credential Issuance %i errors safely and refetches authoritative state", async (status, message) => {
+  ])("maps Credential Issuances %i errors safely and refetches authoritative state", async (status, message) => {
     const user = userEvent.setup();
     const { calls } = mockFetchRoutes([
       ...authRoutes(issueSession),
@@ -1708,7 +1859,13 @@ describe("Certification workspace frontend", () => {
       staff_member_id: staffMemberId
     });
     expect(await screen.findByText("CERT-002")).toBeInTheDocument();
-    expect(calls.map(({ url }) => url)).not.toContain("/api/v1/credentials/issuances");
+    expect(
+      calls.some(
+        (call) =>
+          call.url === "/api/v1/credentials/issuances" &&
+          call.init?.method === "POST"
+      )
+    ).toBe(false);
     expect(calls.map(({ url }) => url)).not.toContain("/api/v1/operational-authorizations");
     expect(calls.map(({ url }) => url)).not.toContain("/api/v1/registration/facility-assignments");
     expect(calls.map(({ url }) => url)).not.toContain("/api/v1/auth/user-facility-access");
