@@ -8,6 +8,7 @@ export function RegistrationNavigation() {
   const canViewClients = auth.canUsePermission("view_client");
   const canViewFacilities = auth.canUsePermission("view_facility");
   const canViewPersonnel = auth.canUsePermission("view_staff_member");
+  const canViewTraining = auth.canUsePermission("view_training");
 
   return (
     <nav aria-label="Registration resource tabs">
@@ -30,6 +31,13 @@ export function RegistrationNavigation() {
           <li>
             <NavLink className={childNavigationClassName} end to={routes.registrationPersonnel}>
               Personnel
+            </NavLink>
+          </li>
+        ) : null}
+        {canViewTraining ? (
+          <li>
+            <NavLink className={childNavigationClassName} end to={routes.registrationTraining}>
+              Training
             </NavLink>
           </li>
         ) : null}

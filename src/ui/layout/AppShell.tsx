@@ -24,7 +24,7 @@ const navigationItems = [
   },
   {
     label: "Registration",
-    permissions: ["view_client", "view_facility", "view_staff_member"],
+    permissions: ["view_client", "view_facility", "view_staff_member", "view_training"],
     to: routes.registrationClients,
     implemented: true
   },
@@ -156,7 +156,11 @@ function registrationLandingPath(auth: ReturnType<typeof useAuth>) {
     return routes.registrationFacilities;
   }
 
-  return routes.registrationPersonnel;
+  if (auth.canUsePermission("view_staff_member")) {
+    return routes.registrationPersonnel;
+  }
+
+  return routes.registrationTraining;
 }
 
 function NavigationListItem({ item }: { item: NavigationItem }) {

@@ -16,6 +16,7 @@ import { RuntimeTemplatePage } from "../oets/RuntimeTemplatePage";
 import { RegistrationClientsPage } from "../registration/RegistrationClientsPage";
 import { RegistrationFacilitiesPage } from "../registration/RegistrationFacilitiesPage";
 import { RegistrationPersonnelPage } from "../registration/RegistrationPersonnelPage";
+import { RegistrationTrainingPage } from "../training/RegistrationTrainingPage";
 import { AppShell } from "../ui/layout/AppShell";
 import { routes } from "./routePaths";
 import { AdministrationPage } from "./routes/AdministrationPage";
@@ -78,6 +79,10 @@ export const appRoutes: RouteObject[] = [
           {
             path: "workbench/registration/personnel",
             element: <RegistrationPersonnelPage />
+          },
+          {
+            path: "workbench/registration/training",
+            element: <RegistrationTrainingPage />
           },
           {
             path: "workbench/certifications",
