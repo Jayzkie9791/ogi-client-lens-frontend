@@ -15,14 +15,17 @@ import { RegistrationWorkspaceShell } from "../registration/RegistrationWorkspac
 import { Button } from "../ui/components/Button";
 import { Surface } from "../ui/components/Surface";
 import {
+  assignTrainingEnrollmentSession,
   createTrainingEnrollment,
   createTrainingTrainee,
   linkTrainingTraineeStaffMember,
   getTrainingTrainee,
   listTrainingEnrollments,
+  listTrainingSessions,
   listTrainingTrainees,
   TrainingEnrollment,
   TrainingProgramCode,
+  TrainingSession,
   trainingProgramOptions,
   TrainingTrainee
 } from "./trainingApi";
@@ -32,6 +35,7 @@ const permissions = {
   registerTrainee: "register_trainee",
   linkPersonnel: "link_training_staff_member",
   createEnrollment: "create_training_enrollment",
+  assignSession: "assign_training_session",
   viewClients: "view_client",
   viewPersonnel: "view_staff_member"
 } as const;
@@ -46,6 +50,7 @@ interface TraineeFormState {
 interface EnrollmentFormState {
   programCode: TrainingProgramCode | "";
   clientId: string;
+  trainingSessionId: string;
   notes: string;
 }
 
@@ -59,6 +64,7 @@ const emptyTraineeForm: TraineeFormState = {
 const emptyEnrollmentForm: EnrollmentFormState = {
   programCode: "",
   clientId: "",
+  trainingSessionId: "",
   notes: ""
 };
 
@@ -71,6 +77,7 @@ export function RegistrationTrainingPage() {
   const canCreateEnrollment = auth.canUsePermission(
     permissions.createEnrollment
   );
+  const canAssignSession = auth.canUsePermission(permissions.assignSession);
   const canViewClients = auth.canUsePermission(permissions.viewClients);
   const canViewPersonnel = auth.canUsePermission(permissions.viewPersonnel);
   const [selectedTraineeId, setSelectedTraineeId] = useState<string | null>(null);
@@ -80,6 +87,10 @@ export function RegistrationTrainingPage() {
   const [isCreatingTrainee, setIsCreatingTrainee] = useState(false);
   const [isLinkingPersonnel, setIsLinkingPersonnel] = useState(false);
   const [isAddingEnrollment, setIsAddingEnrollment] = useState(false);
+  const [assigningEnrollmentId, setAssigningEnrollmentId] = useState<
+    string | null
+  >(null);
+  const [assignmentSessionId, setAssignmentSessionId] = useState("");
   const [selectedStaffMemberId, setSelectedStaffMemberId] = useState("");
   const [traineeForm, setTraineeForm] =
     useState<TraineeFormState>(emptyTraineeForm);
@@ -139,6 +150,17 @@ export function RegistrationTrainingPage() {
   const clients = useMemo(
     () => clientsQuery.data?.clients ?? [],
     [clientsQuery.data]
+  );
+
+  const sessionsQuery = useQuery({
+    queryKey: ["training-sessions"],
+    queryFn: () => listTrainingSessions(),
+    enabled: canView && (isAddingEnrollment || assigningEnrollmentId !== null),
+    retry: false
+  });
+  const sessions = useMemo(
+    () => sessionsQuery.data?.sessions ?? [],
+    [sessionsQuery.data]
   );
 
   const personnelQuery = useQuery({
@@ -206,6 +228,26 @@ export function RegistrationTrainingPage() {
     }
   });
 
+  const assignSessionMutation = useMutation({
+    mutationFn: () => {
+      if (!assigningEnrollmentId) {
+        throw new Error("No Enrollment is selected.");
+      }
+
+      return assignTrainingEnrollmentSession(assigningEnrollmentId, {
+        training_session_id: assignmentSessionId
+      });
+    },
+    onSuccess: () => {
+      setMessage("Training Session assigned successfully.");
+      setAssigningEnrollmentId(null);
+      setAssignmentSessionId("");
+      void queryClient.invalidateQueries({
+        queryKey: ["training-enrollments", selectedTraineeId]
+      });
+    }
+  });
+
   function startRegisterTrainee() {
     setMessage(null);
     setTraineeIdBeforeCreate(selectedTraineeId);
@@ -213,6 +255,8 @@ export function RegistrationTrainingPage() {
     setIsCreatingTrainee(true);
     setIsLinkingPersonnel(false);
     setIsAddingEnrollment(false);
+    setAssigningEnrollmentId(null);
+    setAssignmentSessionId("");
   }
 
   function cancelRegisterTrainee() {
@@ -230,6 +274,8 @@ export function RegistrationTrainingPage() {
     setIsCreatingTrainee(false);
     setIsLinkingPersonnel(false);
     setIsAddingEnrollment(false);
+    setAssigningEnrollmentId(null);
+    setAssignmentSessionId("");
   }
 
   function submitRegisterTrainee(event: FormEvent<HTMLFormElement>) {
@@ -248,6 +294,12 @@ export function RegistrationTrainingPage() {
     event.preventDefault();
     setMessage(null);
     createEnrollmentMutation.mutate();
+  }
+
+  function submitSessionAssignment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setMessage(null);
+    assignSessionMutation.mutate();
   }
 
   if (!canView) {
@@ -289,7 +341,8 @@ export function RegistrationTrainingPage() {
         error={
           createTraineeMutation.error ??
           linkPersonnelMutation.error ??
-          createEnrollmentMutation.error
+          createEnrollmentMutation.error ??
+          assignSessionMutation.error
         }
       />
 
@@ -320,39 +373,65 @@ export function RegistrationTrainingPage() {
           ) : (
             <TraineeDetailsPanel
               canCreateEnrollment={canCreateEnrollment}
+              canAssignSession={canAssignSession}
               canLinkPersonnel={canLinkPersonnel}
               canViewClients={canViewClients}
               canViewPersonnel={canViewPersonnel}
+              assigningEnrollmentId={assigningEnrollmentId}
+              assignmentSessionId={assignmentSessionId}
               clients={clients}
               clientsLoading={clientsQuery.isLoading}
               enrollmentForm={enrollmentForm}
               enrollments={enrollmentsQuery.data?.enrollments ?? []}
               enrollmentsLoading={enrollmentsQuery.isLoading}
               isAddingEnrollment={isAddingEnrollment}
+              isAssigningSession={assignSessionMutation.isPending}
               isLinkingPersonnel={isLinkingPersonnel}
               isSubmittingEnrollment={createEnrollmentMutation.isPending}
               isSubmittingLink={linkPersonnelMutation.isPending}
-              onCancelEnrollment={() => setIsAddingEnrollment(false)}
+              onCancelEnrollment={() => {
+                setIsAddingEnrollment(false);
+                setEnrollmentForm(emptyEnrollmentForm);
+              }}
+              onCancelSessionAssignment={() => {
+                setAssigningEnrollmentId(null);
+                setAssignmentSessionId("");
+              }}
               onCancelLink={() => setIsLinkingPersonnel(false)}
+              onChangeAssignmentSessionId={setAssignmentSessionId}
               onChangeEnrollment={setEnrollmentForm}
               onChangeSelectedStaffMember={setSelectedStaffMemberId}
+              onStartSessionAssignment={(enrollmentId) => {
+                setMessage(null);
+                setAssigningEnrollmentId(enrollmentId);
+                setAssignmentSessionId("");
+                setIsAddingEnrollment(false);
+                setIsLinkingPersonnel(false);
+              }}
               onStartEnrollment={() => {
                 setMessage(null);
                 setEnrollmentForm(emptyEnrollmentForm);
                 setIsAddingEnrollment(true);
                 setIsLinkingPersonnel(false);
+                setAssigningEnrollmentId(null);
+                setAssignmentSessionId("");
               }}
               onStartLink={() => {
                 setMessage(null);
                 setSelectedStaffMemberId("");
                 setIsLinkingPersonnel(true);
                 setIsAddingEnrollment(false);
+                setAssigningEnrollmentId(null);
+                setAssignmentSessionId("");
               }}
               onSubmitEnrollment={submitEnrollment}
+              onSubmitSessionAssignment={submitSessionAssignment}
               onSubmitLink={submitPersonnelLink}
               personnel={personnel}
               personnelLoading={personnelQuery.isLoading}
               selectedStaffMemberId={selectedStaffMemberId}
+              sessions={sessions}
+              sessionsLoading={sessionsQuery.isLoading}
               trainee={selectedTraineeQuery.data ?? null}
               traineeLoading={selectedTraineeQuery.isLoading}
             />
@@ -426,6 +505,9 @@ function TraineeList({
 }
 
 function TraineeDetailsPanel({
+  assigningEnrollmentId,
+  assignmentSessionId,
+  canAssignSession,
   canCreateEnrollment,
   canLinkPersonnel,
   canViewClients,
@@ -436,23 +518,33 @@ function TraineeDetailsPanel({
   enrollments,
   enrollmentsLoading,
   isAddingEnrollment,
+  isAssigningSession,
   isLinkingPersonnel,
   isSubmittingEnrollment,
   isSubmittingLink,
   onCancelEnrollment,
+  onCancelSessionAssignment,
   onCancelLink,
+  onChangeAssignmentSessionId,
   onChangeEnrollment,
   onChangeSelectedStaffMember,
+  onStartSessionAssignment,
   onStartEnrollment,
   onStartLink,
   onSubmitEnrollment,
+  onSubmitSessionAssignment,
   onSubmitLink,
   personnel,
   personnelLoading,
   selectedStaffMemberId,
+  sessions,
+  sessionsLoading,
   trainee,
   traineeLoading
 }: {
+  assigningEnrollmentId: string | null;
+  assignmentSessionId: string;
+  canAssignSession: boolean;
   canCreateEnrollment: boolean;
   canLinkPersonnel: boolean;
   canViewClients: boolean;
@@ -463,20 +555,27 @@ function TraineeDetailsPanel({
   enrollments: readonly TrainingEnrollment[];
   enrollmentsLoading: boolean;
   isAddingEnrollment: boolean;
+  isAssigningSession: boolean;
   isLinkingPersonnel: boolean;
   isSubmittingEnrollment: boolean;
   isSubmittingLink: boolean;
   onCancelEnrollment: () => void;
+  onCancelSessionAssignment: () => void;
   onCancelLink: () => void;
+  onChangeAssignmentSessionId: (trainingSessionId: string) => void;
   onChangeEnrollment: (formState: EnrollmentFormState) => void;
   onChangeSelectedStaffMember: (staffMemberId: string) => void;
+  onStartSessionAssignment: (enrollmentId: string) => void;
   onStartEnrollment: () => void;
   onStartLink: () => void;
   onSubmitEnrollment: (event: FormEvent<HTMLFormElement>) => void;
+  onSubmitSessionAssignment: (event: FormEvent<HTMLFormElement>) => void;
   onSubmitLink: (event: FormEvent<HTMLFormElement>) => void;
   personnel: readonly RegistrationPersonnel[];
   personnelLoading: boolean;
   selectedStaffMemberId: string;
+  sessions: readonly TrainingSession[];
+  sessionsLoading: boolean;
   trainee: TrainingTrainee | null;
   traineeLoading: boolean;
 }) {
@@ -542,6 +641,9 @@ function TraineeDetailsPanel({
 
       <Surface>
         <EnrollmentSection
+          assigningEnrollmentId={assigningEnrollmentId}
+          assignmentSessionId={assignmentSessionId}
+          canAssignSession={canAssignSession}
           canCreateEnrollment={canCreateEnrollment}
           canViewClients={canViewClients}
           clients={clients}
@@ -549,12 +651,19 @@ function TraineeDetailsPanel({
           enrollmentForm={enrollmentForm}
           enrollments={enrollments}
           isAddingEnrollment={isAddingEnrollment}
+          isAssigningSession={isAssigningSession}
           isLoading={enrollmentsLoading}
           isSubmitting={isSubmittingEnrollment}
           onCancel={onCancelEnrollment}
+          onCancelSessionAssignment={onCancelSessionAssignment}
+          onChangeAssignmentSessionId={onChangeAssignmentSessionId}
           onChange={onChangeEnrollment}
+          onStartSessionAssignment={onStartSessionAssignment}
           onStartEnrollment={onStartEnrollment}
           onSubmit={onSubmitEnrollment}
+          onSubmitSessionAssignment={onSubmitSessionAssignment}
+          sessions={sessions}
+          sessionsLoading={sessionsLoading}
         />
       </Surface>
     </div>
@@ -694,6 +803,9 @@ function PersonnelLinkSection({
 }
 
 function EnrollmentSection({
+  assigningEnrollmentId,
+  assignmentSessionId,
+  canAssignSession,
   canCreateEnrollment,
   canViewClients,
   clients,
@@ -701,13 +813,23 @@ function EnrollmentSection({
   enrollmentForm,
   enrollments,
   isAddingEnrollment,
+  isAssigningSession,
   isLoading,
   isSubmitting,
   onCancel,
+  onCancelSessionAssignment,
+  onChangeAssignmentSessionId,
   onChange,
+  onStartSessionAssignment,
   onStartEnrollment,
-  onSubmit
+  onSubmit,
+  onSubmitSessionAssignment,
+  sessions,
+  sessionsLoading
 }: {
+  assigningEnrollmentId: string | null;
+  assignmentSessionId: string;
+  canAssignSession: boolean;
   canCreateEnrollment: boolean;
   canViewClients: boolean;
   clients: readonly RegistrationClient[];
@@ -715,12 +837,19 @@ function EnrollmentSection({
   enrollmentForm: EnrollmentFormState;
   enrollments: readonly TrainingEnrollment[];
   isAddingEnrollment: boolean;
+  isAssigningSession: boolean;
   isLoading: boolean;
   isSubmitting: boolean;
   onCancel: () => void;
+  onCancelSessionAssignment: () => void;
+  onChangeAssignmentSessionId: (trainingSessionId: string) => void;
   onChange: (formState: EnrollmentFormState) => void;
+  onStartSessionAssignment: (enrollmentId: string) => void;
   onStartEnrollment: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onSubmitSessionAssignment: (event: FormEvent<HTMLFormElement>) => void;
+  sessions: readonly TrainingSession[];
+  sessionsLoading: boolean;
 }) {
   return (
     <section aria-labelledby="training-enrollments-heading" className="space-y-3">
@@ -763,9 +892,21 @@ function EnrollmentSection({
               className="rounded-component border border-border p-3"
               key={enrollment.id}
             >
-              <h4 className="text-sm font-semibold text-text-primary">
-                {programLabel(enrollment.program)}
-              </h4>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <h4 className="text-sm font-semibold text-text-primary">
+                  {programLabel(enrollment.program)}
+                </h4>
+                {!enrollment.training_session && canAssignSession ? (
+                  <Button
+                    aria-expanded={assigningEnrollmentId === enrollment.id}
+                    onClick={() => onStartSessionAssignment(enrollment.id)}
+                    type="button"
+                    variant="secondary"
+                  >
+                    Assign Training Session
+                  </Button>
+                ) : null}
+              </div>
               <dl className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
                 <MetadataItem label="Enrolled" value={enrollment.enrolled_at} />
                 <MetadataItem
@@ -781,6 +922,53 @@ function EnrollmentSection({
                   value={enrollment.notes ?? "Not specified"}
                 />
               </dl>
+              {assigningEnrollmentId === enrollment.id ? (
+                <form
+                  aria-label="Assign Training Session"
+                  className="mt-3 space-y-3"
+                  onSubmit={onSubmitSessionAssignment}
+                >
+                  <label className="block text-sm font-semibold text-text-primary">
+                    Training Session
+                    <select
+                      className={inputClassName}
+                      disabled={sessionsLoading}
+                      onChange={(event) =>
+                        onChangeAssignmentSessionId(event.currentTarget.value)
+                      }
+                      required
+                      value={assignmentSessionId}
+                    >
+                      <option value="">Select Training Session</option>
+                      {sessions.map((session) => (
+                        <option key={session.id} value={session.id}>
+                          {sessionOptionLabel(session)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      disabled={
+                        isAssigningSession ||
+                        sessionsLoading ||
+                        !assignmentSessionId
+                      }
+                      type="submit"
+                    >
+                      Save Session Assignment
+                    </Button>
+                    <Button
+                      disabled={isAssigningSession}
+                      onClick={onCancelSessionAssignment}
+                      type="button"
+                      variant="secondary"
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </form>
+              ) : null}
             </li>
           ))}
         </ul>
@@ -834,9 +1022,27 @@ function EnrollmentSection({
             </label>
           ) : null}
 
-          <p className="text-sm text-text-muted">
-            Session selector deferred - no safe read source.
-          </p>
+          <label className="block text-sm font-semibold text-text-primary">
+            Training Session (optional)
+            <select
+              className={inputClassName}
+              disabled={sessionsLoading}
+              onChange={(event) =>
+                onChange({
+                  ...enrollmentForm,
+                  trainingSessionId: event.currentTarget.value
+                })
+              }
+              value={enrollmentForm.trainingSessionId}
+            >
+              <option value="">No Training Session</option>
+              {sessions.map((session) => (
+                <option key={session.id} value={session.id}>
+                  {sessionOptionLabel(session)}
+                </option>
+              ))}
+            </select>
+          </label>
 
           <label className="block text-sm font-semibold text-text-primary">
             Notes
@@ -1077,6 +1283,7 @@ function buildCreateEnrollmentRequest(formState: EnrollmentFormState) {
   return {
     program_code: formState.programCode as TrainingProgramCode,
     client_id: nullableText(formState.clientId),
+    training_session_id: nullableText(formState.trainingSessionId),
     notes: nullableText(formState.notes)
   };
 }
@@ -1107,6 +1314,23 @@ function personnelOptionLabel(staffMember: RegistrationPersonnel) {
     staffMember.full_name,
     staffMember.email ?? "no email",
     `Client ${staffMember.client_id}`
+  ].join(" - ");
+}
+
+function sessionOptionLabel(session: TrainingSession) {
+  const startDate = new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium"
+  }).format(new Date(session.training_start_date));
+  const instructor =
+    session.instructor_name ??
+    session.instructor_staff_member?.full_name ??
+    "Instructor not specified";
+
+  return [
+    startDate,
+    session.training_title,
+    instructor,
+    session.facility?.facility_name ?? "No facility"
   ].join(" - ");
 }
 

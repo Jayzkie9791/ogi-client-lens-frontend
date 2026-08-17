@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -11,13 +11,18 @@ import { getRefreshTokenStorageKey } from "../auth/storage";
 import { AuthenticatedSession } from "../auth/types";
 import { RegistrationClient } from "../registration/registrationClientApi";
 import { RegistrationPersonnel } from "../registration/registrationPersonnelApi";
-import { TrainingEnrollment, TrainingTrainee } from "./trainingApi";
+import {
+  TrainingEnrollment,
+  TrainingSession,
+  TrainingTrainee
+} from "./trainingApi";
 
 const traineeAId = "00000000-0000-4000-8000-000000810001";
 const traineeBId = "00000000-0000-4000-8000-000000810002";
 const staffAId = "00000000-0000-4000-8000-000000820001";
 const clientAId = "00000000-0000-4000-8000-000000830001";
 const clientBId = "00000000-0000-4000-8000-000000830002";
+const trainingSessionAId = "00000000-0000-4000-8000-000000860001";
 
 const baseSession: AuthenticatedSession = {
   id: "00000000-0000-4000-8000-000000000001",
@@ -36,7 +41,8 @@ const baseSession: AuthenticatedSession = {
     "view_training",
     "register_trainee",
     "link_training_staff_member",
-    "create_training_enrollment"
+    "create_training_enrollment",
+    "assign_training_session"
   ]
 };
 
@@ -189,6 +195,41 @@ const enrollmentA: TrainingEnrollment = {
   training_session: null
 };
 
+const trainingSessionA: TrainingSession = {
+  id: trainingSessionAId,
+  training_title: "Open Water Guardian Cohort A",
+  operational_skill: "OPEN_WATER_RESCUE",
+  training_start_date: "2026-08-22T08:00:00.000Z",
+  training_end_date: "2026-08-22T16:00:00.000Z",
+  duration_minutes: 480,
+  facility_id: "00000000-0000-4000-8000-000000870001",
+  instructor_name: "Braven Burrows",
+  instructor_license_number: "OGI-INS-2026-0001",
+  instructor_staff_member_id: null,
+  training_notes: "Pool and open water practical block.",
+  created_at: "2026-08-17T05:00:00.000Z",
+  updated_at: "2026-08-17T05:00:00.000Z",
+  facility: {
+    id: "00000000-0000-4000-8000-000000870001",
+    client_id: clientAId,
+    facility_name: "Makati Training Pool",
+    operational_status: "ACTIVE"
+  },
+  instructor_staff_member: null
+};
+
+const assignedEnrollmentA: TrainingEnrollment = {
+  ...enrollmentA,
+  training_session_id: trainingSessionAId,
+  training_session: {
+    id: trainingSessionAId,
+    training_title: trainingSessionA.training_title,
+    training_start_date: trainingSessionA.training_start_date,
+    training_end_date: trainingSessionA.training_end_date,
+    facility_id: trainingSessionA.facility_id
+  }
+};
+
 interface MockResponse {
   status: number;
   body?: unknown;
@@ -303,6 +344,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  cleanup();
   configureApiAuth(null);
   vi.unstubAllGlobals();
   window.sessionStorage.clear();
@@ -540,9 +582,13 @@ describe("Registration Training frontend", () => {
         responses: [{ status: 200, body: { clients: [clientA, clientB] } }]
       },
       {
+        url: "/api/v1/training/sessions",
+        responses: [{ status: 200, body: { sessions: [trainingSessionA] } }]
+      },
+      {
         method: "POST",
         url: `/api/v1/training/trainees/${traineeAId}/enrollments`,
-        responses: [{ status: 201, body: enrollmentA }]
+        responses: [{ status: 201, body: assignedEnrollmentA }]
       }
     ]);
 
@@ -559,11 +605,21 @@ describe("Registration Training frontend", () => {
     expect(screen.queryByLabelText(/Client UUID/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/Session UUID/i)).not.toBeInTheDocument();
     expect(
-      screen.getByText("Session selector deferred - no safe read source.")
+      screen.getByLabelText("Training Session (optional)")
+    ).toBeInTheDocument();
+    expect(screen.queryByText(trainingSessionAId)).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("option", {
+        name: /Open Water Guardian Cohort A.*Braven Burrows.*Makati Training Pool/
+      })
     ).toBeInTheDocument();
 
     await user.selectOptions(screen.getByLabelText("Program"), "MASTER_GUARDIAN_INSTRUCTOR");
     await user.selectOptions(screen.getByLabelText("Sponsoring Client (optional)"), clientBId);
+    await user.selectOptions(
+      screen.getByLabelText("Training Session (optional)"),
+      trainingSessionAId
+    );
     await user.click(screen.getByRole("button", { name: "Save Enrollment" }));
 
     await screen.findByText("Training enrollment added successfully.");
@@ -576,6 +632,7 @@ describe("Registration Training frontend", () => {
     expect(JSON.parse(String(enrollmentCall?.init?.body))).toEqual({
       program_code: "MASTER_GUARDIAN_INSTRUCTOR",
       client_id: clientBId,
+      training_session_id: trainingSessionAId,
       notes: null
     });
     expect(calls.filter((call) => call.url.endsWith("/enrollments"))).toHaveLength(3);
@@ -607,6 +664,10 @@ describe("Registration Training frontend", () => {
         responses: [{ status: 200, body: { clients: [clientA] } }]
       },
       {
+        url: "/api/v1/training/sessions",
+        responses: [{ status: 200, body: { sessions: [trainingSessionA] } }]
+      },
+      {
         method: "POST",
         url: `/api/v1/training/trainees/${traineeAId}/enrollments`,
         responses: [{ status: 201, body: { ...enrollmentA, client_id: null, client: null } }]
@@ -631,8 +692,85 @@ describe("Registration Training frontend", () => {
     expect(JSON.parse(String(enrollmentCall?.init?.body))).toEqual({
       program_code: "GUARDIAN_RESPONDER",
       client_id: null,
+      training_session_id: null,
       notes: null
     });
+  });
+
+  it("assigns an initial Training Session to an existing Enrollment through the governed action", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetchRoutes([
+      ...authRoutes(),
+      {
+        url: "/api/v1/training/trainees",
+        responses: [{ status: 200, body: { trainees: [traineeA] } }]
+      },
+      {
+        url: `/api/v1/training/trainees/${traineeAId}`,
+        responses: [{ status: 200, body: traineeA }]
+      },
+      {
+        url: `/api/v1/training/trainees/${traineeAId}/enrollments`,
+        responses: [
+          { status: 200, body: { enrollments: [enrollmentA] } },
+          { status: 200, body: { enrollments: [assignedEnrollmentA] } }
+        ]
+      },
+      {
+        url: "/api/v1/training/sessions",
+        responses: [{ status: 200, body: { sessions: [trainingSessionA] } }]
+      },
+      {
+        method: "POST",
+        url: `/api/v1/training/enrollments/${enrollmentA.id}/session-assignment`,
+        responses: [{ status: 200, body: assignedEnrollmentA }]
+      }
+    ]);
+
+    renderWithRoute(routes.registrationTraining);
+
+    expect(await screen.findByText("L3 - Open Water Guardian")).toBeInTheDocument();
+    expect(screen.getByText("None")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Assign Training Session" }));
+    expect(screen.queryByLabelText(/Session UUID/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(trainingSessionAId)).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("option", {
+        name: /Open Water Guardian Cohort A.*Braven Burrows.*Makati Training Pool/
+      })
+    ).toBeInTheDocument();
+
+    await user.selectOptions(
+      screen.getByLabelText("Training Session"),
+      trainingSessionAId
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Save Session Assignment" })
+    );
+
+    await screen.findByText("Training Session assigned successfully.");
+    expect(await screen.findByText("Open Water Guardian Cohort A")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Assign Training Session" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Change/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Reschedule/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Clear/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Attendance/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Completion/i })).not.toBeInTheDocument();
+
+    const assignmentCall = calls.find((call) =>
+      call.url.endsWith("/session-assignment")
+    );
+
+    expect(JSON.parse(String(assignmentCall?.init?.body))).toEqual({
+      training_session_id: trainingSessionAId
+    });
+    expect(
+      calls.filter(
+        (call) =>
+          call.url === `/api/v1/training/trainees/${traineeAId}/enrollments`
+      )
+    ).toHaveLength(2);
   });
 
   it("hides mutation actions without independent Training permissions", async () => {
@@ -663,5 +801,6 @@ describe("Registration Training frontend", () => {
     expect(screen.queryByRole("button", { name: "Register Trainee" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Link Personnel" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add Enrollment" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Assign Training Session" })).not.toBeInTheDocument();
   });
 });

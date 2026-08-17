@@ -108,6 +108,44 @@ export interface TrainingEnrollmentSessionSummary {
   readonly facility_id: string | null;
 }
 
+export interface TrainingSessionFacilitySummary {
+  readonly id: string;
+  readonly client_id: string;
+  readonly facility_name: string;
+  readonly operational_status: string;
+}
+
+export interface TrainingSessionInstructorStaffMemberSummary {
+  readonly id: string;
+  readonly client_id: string;
+  readonly full_name: string;
+  readonly email: string | null;
+}
+
+export interface TrainingSession {
+  readonly id: string;
+  readonly training_title: string;
+  readonly operational_skill: string;
+  readonly training_start_date: string;
+  readonly training_end_date: string | null;
+  readonly duration_minutes: number | null;
+  readonly facility_id: string | null;
+  readonly instructor_name: string | null;
+  readonly instructor_license_number: string | null;
+  readonly instructor_staff_member_id: string | null;
+  readonly training_notes: string | null;
+  readonly created_at: string;
+  readonly updated_at: string;
+  readonly facility: TrainingSessionFacilitySummary | null;
+  readonly instructor_staff_member:
+    | TrainingSessionInstructorStaffMemberSummary
+    | null;
+}
+
+export interface TrainingSessionListResponse {
+  readonly sessions: readonly TrainingSession[];
+}
+
 export interface TrainingEnrollment {
   readonly id: string;
   readonly trainee_id: string;
@@ -137,7 +175,12 @@ export interface TrainingEnrollmentListResponse {
 export interface CreateTrainingEnrollmentRequest {
   readonly program_code: TrainingProgramCode;
   readonly client_id?: string | null;
+  readonly training_session_id?: string | null;
   readonly notes?: string | null;
+}
+
+export interface AssignTrainingEnrollmentSessionRequest {
+  readonly training_session_id: string;
 }
 
 export function listTrainingTrainees() {
@@ -192,6 +235,26 @@ export function createTrainingEnrollment(
 ) {
   return apiRequest<TrainingEnrollment>(
     `/api/v1/training/trainees/${encodeURIComponent(traineeId)}/enrollments`,
+    {
+      method: "POST",
+      body: request,
+      validate: isTrainingEnrollment
+    }
+  );
+}
+
+export function listTrainingSessions() {
+  return apiRequest<TrainingSessionListResponse>("/api/v1/training/sessions", {
+    validate: isTrainingSessionListResponse
+  });
+}
+
+export function assignTrainingEnrollmentSession(
+  enrollmentId: string,
+  request: AssignTrainingEnrollmentSessionRequest
+) {
+  return apiRequest<TrainingEnrollment>(
+    `/api/v1/training/enrollments/${encodeURIComponent(enrollmentId)}/session-assignment`,
     {
       method: "POST",
       body: request,
@@ -323,6 +386,63 @@ function isTrainingEnrollmentSessionSummary(
     typeof value.training_start_date === "string" &&
     isNullableString(value.training_end_date) &&
     isNullableString(value.facility_id)
+  );
+}
+
+function isTrainingSessionListResponse(
+  value: unknown
+): value is TrainingSessionListResponse {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.sessions) &&
+    value.sessions.every(isTrainingSession)
+  );
+}
+
+function isTrainingSession(value: unknown): value is TrainingSession {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.training_title === "string" &&
+    typeof value.operational_skill === "string" &&
+    typeof value.training_start_date === "string" &&
+    isNullableString(value.training_end_date) &&
+    (value.duration_minutes === null ||
+      typeof value.duration_minutes === "number") &&
+    isNullableString(value.facility_id) &&
+    isNullableString(value.instructor_name) &&
+    isNullableString(value.instructor_license_number) &&
+    isNullableString(value.instructor_staff_member_id) &&
+    isNullableString(value.training_notes) &&
+    typeof value.created_at === "string" &&
+    typeof value.updated_at === "string" &&
+    (value.facility === null || isTrainingSessionFacilitySummary(value.facility)) &&
+    (value.instructor_staff_member === null ||
+      isTrainingSessionInstructorStaffMemberSummary(value.instructor_staff_member))
+  );
+}
+
+function isTrainingSessionFacilitySummary(
+  value: unknown
+): value is TrainingSessionFacilitySummary {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.client_id === "string" &&
+    typeof value.facility_name === "string" &&
+    typeof value.operational_status === "string"
+  );
+}
+
+function isTrainingSessionInstructorStaffMemberSummary(
+  value: unknown
+): value is TrainingSessionInstructorStaffMemberSummary {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.client_id === "string" &&
+    typeof value.full_name === "string" &&
+    isNullableString(value.email)
   );
 }
 
