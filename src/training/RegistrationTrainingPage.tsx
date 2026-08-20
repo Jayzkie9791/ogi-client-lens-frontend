@@ -1,7 +1,9 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 
 import { isApiError } from "../api/errors";
+import { routes } from "../app/routePaths";
 import { useAuth } from "../auth/useAuth";
 import {
   listRegistrationClients,
@@ -16,14 +18,19 @@ import { Button } from "../ui/components/Button";
 import { Surface } from "../ui/components/Surface";
 import {
   assignTrainingEnrollmentSession,
+  createTrainingEvidenceDraft,
   createTrainingEnrollment,
   createTrainingTrainee,
+  getTrainingEvidenceWorkspace,
   linkTrainingTraineeStaffMember,
   getTrainingTrainee,
   listTrainingEnrollments,
   listTrainingSessions,
   listTrainingTrainees,
   TrainingEnrollment,
+  TrainingEvidenceWorkspace,
+  TrainingEvidenceWorkspaceRecord,
+  TrainingEvidenceWorkspaceSlot,
   TrainingProgramCode,
   TrainingSession,
   trainingProgramOptions,
@@ -617,7 +624,6 @@ function TraineeDetailsPanel({
             <MetadataItem label="Notes" value={trainee.notes ?? "Not specified"} />
             <MetadataItem label="Created" value={trainee.created_at} />
             <MetadataItem label="Updated" value={trainee.updated_at} />
-            <MetadataItem label="Trainee ID" value={trainee.id} subtle />
           </dl>
         </div>
       </Surface>
@@ -736,11 +742,6 @@ function PersonnelLinkSection({
           <MetadataItem
             label="Personnel email"
             value={activeLink.staff_member.email ?? "Not specified"}
-          />
-          <MetadataItem
-            label="Personnel Client ID"
-            value={activeLink.staff_member.client_id}
-            subtle
           />
         </dl>
       ) : (
@@ -969,6 +970,7 @@ function EnrollmentSection({
                   </div>
                 </form>
               ) : null}
+              <TrainingEvidenceWorkspacePanel enrollment={enrollment} />
             </li>
           ))}
         </ul>
@@ -1077,6 +1079,319 @@ function EnrollmentSection({
         </form>
       ) : null}
     </section>
+  );
+}
+
+function TrainingEvidenceWorkspacePanel({
+  enrollment
+}: {
+  enrollment: TrainingEnrollment;
+}) {
+  const queryClient = useQueryClient();
+  const [message, setMessage] = useState<string | null>(null);
+  const workspaceQueryKey = [
+    "training",
+    "enrollment",
+    enrollment.id,
+    "evidence-workspace"
+  ] as const;
+  const workspaceQuery = useQuery({
+    queryKey: workspaceQueryKey,
+    queryFn: () => getTrainingEvidenceWorkspace(enrollment.id),
+    retry: false
+  });
+  const createDraftMutation = useMutation({
+    mutationFn: (slot: TrainingEvidenceWorkspaceSlot) =>
+      createTrainingEvidenceDraft(enrollment.id, {
+        template_code: slot.template_code
+      }),
+    onError(error) {
+      if (isApiError(error) && error.status === 409) {
+        setMessage("An active draft already exists. Workspace refreshed.");
+        void queryClient.invalidateQueries({ queryKey: workspaceQueryKey });
+        return;
+      }
+
+      setMessage(trainingEvidenceErrorMessage(error));
+    },
+    onSuccess() {
+      setMessage("Training evidence draft created.");
+      void queryClient.invalidateQueries({ queryKey: workspaceQueryKey });
+    }
+  });
+
+  return (
+    <section
+      aria-label={`${programLabel(enrollment.program)} Training Evidence`}
+      className="mt-4 space-y-3 rounded-component border border-border bg-canvas p-3"
+    >
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-primary-blue">
+          Training Evidence
+        </p>
+        <h5 className="mt-1 text-sm font-semibold text-text-primary">
+          Skills, Knowledge, and Readiness
+        </h5>
+      </div>
+
+      {workspaceQuery.isLoading ? (
+        <p className="text-sm text-text-muted" role="status">
+          Loading Training Evidence workspace.
+        </p>
+      ) : workspaceQuery.isError ? (
+        <p className="text-sm text-text-muted" role="alert">
+          {trainingEvidenceErrorMessage(workspaceQuery.error)}
+        </p>
+      ) : workspaceQuery.data ? (
+        <TrainingEvidenceWorkspaceContent
+          isCreatingDraft={createDraftMutation.isPending}
+          onCreateDraft={(slot) => {
+            setMessage(null);
+            createDraftMutation.mutate(slot);
+          }}
+          workspace={workspaceQuery.data}
+        />
+      ) : null}
+
+      {message ? (
+        <p className="text-sm font-semibold text-text-primary" role="status">
+          {message}
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+function TrainingEvidenceWorkspaceContent({
+  isCreatingDraft,
+  onCreateDraft,
+  workspace
+}: {
+  isCreatingDraft: boolean;
+  onCreateDraft: (slot: TrainingEvidenceWorkspaceSlot) => void;
+  workspace: TrainingEvidenceWorkspace;
+}) {
+  return (
+    <div className="space-y-3">
+      <dl className="grid gap-2 text-sm sm:grid-cols-2">
+        <MetadataItem
+          label="Trainee"
+          value={workspace.enrollment.trainee.full_name}
+        />
+        <MetadataItem
+          label="Student Number"
+          value={studentNumberValue(workspace.enrollment.trainee.student_number)}
+        />
+        <MetadataItem
+          label="Program"
+          value={programLabel(workspace.enrollment.program)}
+        />
+        <MetadataItem
+          label="Enrolled"
+          value={formatDateTime(workspace.enrollment.enrolled_at)}
+        />
+        <MetadataItem
+          label="Client"
+          value={
+            workspace.enrollment.client?.organization_name ??
+            "OGI Direct / Independent"
+          }
+        />
+        <MetadataItem
+          label="Facility"
+          value={
+            workspace.enrollment.training_session?.facility_id
+              ? "Assigned training facility"
+              : "None"
+          }
+        />
+        <MetadataItem
+          label="Training Session"
+          value={
+            workspace.enrollment.training_session?.training_title ??
+            "No Training Session assigned"
+          }
+        />
+        <MetadataItem
+          label="Session Dates"
+          value={sessionDateRange(workspace.enrollment.training_session)}
+        />
+      </dl>
+
+      <div className="grid gap-3 xl:grid-cols-3">
+        {workspace.slots.map((slot) => (
+          <TrainingEvidenceSlotCard
+            isCreatingDraft={isCreatingDraft}
+            key={slot.slot}
+            onCreateDraft={onCreateDraft}
+            slot={slot}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TrainingEvidenceSlotCard({
+  isCreatingDraft,
+  onCreateDraft,
+  slot
+}: {
+  isCreatingDraft: boolean;
+  onCreateDraft: (slot: TrainingEvidenceWorkspaceSlot) => void;
+  slot: TrainingEvidenceWorkspaceSlot;
+}) {
+  const title = trainingEvidenceSlotTitle(slot);
+
+  return (
+    <article className="space-y-3 rounded-component border border-border bg-surface p-3">
+      <div>
+        <h6 className="text-sm font-semibold text-text-primary">{title}</h6>
+        <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-text-muted">
+          Template: {slot.document_number}
+        </p>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        {slot.active_draft ? (
+          <Link
+            className={buttonLinkClassName}
+            state={{ returnTo: routes.registrationTraining }}
+            to={routes.evidenceRecordPath(
+              slot.active_draft.evidence.evidence_record_id
+            )}
+          >
+            Open Draft
+          </Link>
+        ) : slot.can_create_draft ? (
+          <Button
+            disabled={isCreatingDraft}
+            onClick={() => onCreateDraft(slot)}
+            type="button"
+            variant="secondary"
+          >
+            Create Draft
+          </Button>
+        ) : (
+          <p className="rounded-component border border-border px-3 py-2 text-sm text-text-muted">
+            Draft creation unavailable.
+          </p>
+        )}
+      </div>
+
+      {slot.history.length === 0 ? (
+        <p className="text-sm text-text-muted">
+          No {title.toLowerCase()} evidence yet.
+        </p>
+      ) : (
+        <ul aria-label={`${title} history`} className="space-y-2">
+          {slot.history.map((record) => (
+            <TrainingEvidenceHistoryItem
+              key={record.evidence.evidence_record_id}
+              record={record}
+            />
+          ))}
+        </ul>
+      )}
+    </article>
+  );
+}
+
+function TrainingEvidenceHistoryItem({
+  record
+}: {
+  record: TrainingEvidenceWorkspaceRecord;
+}) {
+  return (
+    <li className="rounded-component border border-border bg-canvas p-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-sm font-semibold text-text-primary">
+            {record.evidence.document_number ?? "Training Evidence"}
+          </p>
+          <p className="mt-1 text-sm text-text-muted">
+            {record.evidence.template_name ?? record.evidence.template_code}
+          </p>
+        </div>
+        <Link
+          className={buttonLinkClassName}
+          state={{ returnTo: routes.registrationTraining }}
+          to={routes.evidenceRecordPath(record.evidence.evidence_record_id)}
+        >
+          {record.evidence.lifecycle_state === "DRAFT"
+            ? "Open Draft"
+            : "View Evidence"}
+        </Link>
+      </div>
+      <dl className="mt-3 grid gap-2 text-sm">
+        <MetadataItem
+          label="Lifecycle"
+          value={humanizeCode(record.evidence.lifecycle_state)}
+        />
+        <MetadataItem
+          label="Created"
+          value={formatDateTime(record.evidence.created_at)}
+        />
+        <MetadataItem
+          label="Submitted"
+          value={formatDateTime(record.evidence.submitted_at)}
+        />
+        <MetadataItem
+          label="Link Status"
+          value={
+            record.evidence_link
+              ? "Linked to Enrollment"
+              : "Not yet linked"
+          }
+        />
+      </dl>
+      <TrainingEvidenceResultSummary record={record} />
+    </li>
+  );
+}
+
+function TrainingEvidenceResultSummary({
+  record
+}: {
+  record: TrainingEvidenceWorkspaceRecord;
+}) {
+  if (record.assessment_result) {
+    return (
+      <div className="mt-3 rounded-component border border-border bg-surface p-3 text-sm">
+        <p className="font-semibold text-text-primary">
+          {humanizeCode(record.assessment_result.assessment_type)} result:{" "}
+          {humanizeCode(record.assessment_result.result_status)}
+        </p>
+        <p className="mt-1 text-text-muted">
+          Recorded {formatDateTime(record.assessment_result.recorded_at)}
+        </p>
+      </div>
+    );
+  }
+
+  if (record.readiness_decision) {
+    return (
+      <div className="mt-3 rounded-component border border-border bg-surface p-3 text-sm">
+        <p className="font-semibold text-text-primary">
+          Readiness: {humanizeCode(record.readiness_decision.readiness_outcome)}
+        </p>
+        <p className="mt-1 text-text-muted">
+          Certification review required:{" "}
+          {record.readiness_decision.certification_review_required
+            ? "Yes"
+            : "No"}
+        </p>
+        <p className="mt-1 text-text-muted">
+          Decided {formatDateTime(record.readiness_decision.decided_at)}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <p className="mt-3 text-sm text-text-muted">
+      Result not recorded.
+    </p>
   );
 }
 
@@ -1334,11 +1649,66 @@ function sessionOptionLabel(session: TrainingSession) {
   ].join(" - ");
 }
 
+function trainingEvidenceSlotTitle(slot: TrainingEvidenceWorkspaceSlot) {
+  switch (slot.slot) {
+    case "SKILLS":
+      return "Skills Assessment";
+    case "KNOWLEDGE":
+      return "Knowledge Assessment";
+    case "READINESS":
+      return "Readiness Evaluation";
+  }
+}
+
+function trainingEvidenceErrorMessage(error: unknown) {
+  if (isApiError(error)) {
+    return error.message;
+  }
+
+  return "Training Evidence workspace request failed.";
+}
+
+function sessionDateRange(session: TrainingEnrollment["training_session"]) {
+  if (!session) {
+    return "Not scheduled";
+  }
+
+  const startDate = formatDateTime(session.training_start_date);
+
+  if (!session.training_end_date) {
+    return startDate;
+  }
+
+  return `${startDate} to ${formatDateTime(session.training_end_date)}`;
+}
+
+function formatDateTime(value: string | null) {
+  if (!value) {
+    return "Not recorded";
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short"
+  }).format(new Date(value));
+}
+
+function humanizeCode(value: string) {
+  return value
+    .toLowerCase()
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
 function nullableText(value: string) {
   const trimmed = value.trim();
 
   return trimmed ? trimmed : null;
 }
+
+const buttonLinkClassName =
+  "inline-flex min-h-10 items-center justify-center rounded-component border border-border bg-surface px-3 py-2 text-sm font-semibold text-text-primary transition hover:border-primary-blue hover:text-primary-blue focus:outline-none focus:ring-2 focus:ring-focus";
 
 const inputClassName =
   "mt-2 min-h-10 w-full rounded-component border border-border bg-surface px-3 py-2 text-sm text-text-primary outline-none focus:border-focus focus:ring-2 focus:ring-focus";

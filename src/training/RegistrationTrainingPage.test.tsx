@@ -13,6 +13,9 @@ import { RegistrationClient } from "../registration/registrationClientApi";
 import { RegistrationPersonnel } from "../registration/registrationPersonnelApi";
 import {
   TrainingEnrollment,
+  TrainingEvidenceWorkspace,
+  TrainingEvidenceWorkspaceRecord,
+  TrainingEvidenceWorkspaceSlot,
   TrainingSession,
   TrainingTrainee
 } from "./trainingApi";
@@ -42,7 +45,8 @@ const baseSession: AuthenticatedSession = {
     "register_trainee",
     "link_training_staff_member",
     "create_training_enrollment",
-    "assign_training_session"
+    "assign_training_session",
+    "submit_operational_evidence"
   ]
 };
 
@@ -230,6 +234,127 @@ const assignedEnrollmentA: TrainingEnrollment = {
   }
 };
 
+const independentEnrollmentB: TrainingEnrollment = {
+  id: "00000000-0000-4000-8000-000000850002",
+  trainee_id: traineeBId,
+  program_code: "GUARDIAN_RESPONDER",
+  program: {
+    program_code: "GUARDIAN_RESPONDER",
+    certification_level: "L1",
+    display_name: "Guardian Responder",
+    qualification_label: "Guardian Responder",
+    required_training_hours: 40,
+    minimum_age: 16
+  },
+  client_id: null,
+  training_session_id: null,
+  enrolled_at: "2026-08-18T04:00:00.000Z",
+  notes: null,
+  created_at: "2026-08-18T04:00:00.000Z",
+  updated_at: "2026-08-18T04:00:00.000Z",
+  deleted_at: null,
+  trainee: {
+    id: traineeBId,
+    student_number: "OGI-STU-2026-0002",
+    full_name: "John Santos",
+    email: null
+  },
+  client: null,
+  training_session: null
+};
+
+const skillsDraftId = "00000000-0000-4000-8000-000000880001";
+const knowledgeRecordId = "00000000-0000-4000-8000-000000880002";
+const readinessRecordId = "00000000-0000-4000-8000-000000880003";
+
+function trainingEvidenceRecord(
+  enrollment: TrainingEnrollment,
+  overrides: Partial<TrainingEvidenceWorkspaceRecord["evidence"]> = {}
+): TrainingEvidenceWorkspaceRecord {
+  return {
+    evidence: {
+      evidence_record_id: overrides.evidence_record_id ?? skillsDraftId,
+      template_code:
+        overrides.template_code ?? "OGI_F023_OPERATIONAL_SKILLS_ASSESSMENT",
+      template_name: overrides.template_name ?? "Operational Skills Assessment",
+      document_number: overrides.document_number ?? "OGI F-023",
+      lifecycle_state: overrides.lifecycle_state ?? "DRAFT",
+      client_id: overrides.client_id ?? enrollment.client_id,
+      facility_id:
+        overrides.facility_id ??
+        enrollment.training_session?.facility_id ??
+        null,
+      training_enrollment_id: enrollment.id,
+      training_session_id: enrollment.training_session_id,
+      submitted_at: overrides.submitted_at ?? null,
+      created_at: overrides.created_at ?? "2026-08-18T05:00:00.000Z",
+      updated_at: overrides.updated_at ?? "2026-08-18T05:00:00.000Z"
+    },
+    evidence_link: null,
+    assessment_result: null,
+    readiness_decision: null
+  };
+}
+
+function trainingEvidenceSlot(
+  slot: TrainingEvidenceWorkspaceSlot["slot"],
+  enrollment: TrainingEnrollment,
+  overrides: Partial<TrainingEvidenceWorkspaceSlot> = {}
+): TrainingEvidenceWorkspaceSlot {
+  const slotMetadata = {
+    SKILLS: {
+      evidence_purpose: "SKILLS_ASSESSMENT" as const,
+      template_code: "OGI_F023_OPERATIONAL_SKILLS_ASSESSMENT" as const,
+      document_number: "OGI F-023" as const
+    },
+    KNOWLEDGE: {
+      evidence_purpose: "KNOWLEDGE_ASSESSMENT" as const,
+      template_code: "OGI_F024_OPERATIONAL_KNOWLEDGE_ASSESSMENT_RECORD" as const,
+      document_number: "OGI F-024" as const
+    },
+    READINESS: {
+      evidence_purpose: "READINESS" as const,
+      template_code: "OGI_F025_OPERATIONAL_READINESS_EVALUATION" as const,
+      document_number: "OGI F-025" as const
+    }
+  }[slot];
+
+  return {
+    slot,
+    ...slotMetadata,
+    active_draft: null,
+    history: [],
+    can_create_draft: true,
+    ...overrides
+  };
+}
+
+function trainingEvidenceWorkspace(
+  enrollment: TrainingEnrollment,
+  slots: readonly TrainingEvidenceWorkspaceSlot[] = [
+    trainingEvidenceSlot("SKILLS", enrollment),
+    trainingEvidenceSlot("KNOWLEDGE", enrollment),
+    trainingEvidenceSlot("READINESS", enrollment)
+  ]
+): TrainingEvidenceWorkspace {
+  return {
+    enrollment,
+    slots
+  };
+}
+
+function workspaceRoute(
+  enrollment: TrainingEnrollment,
+  workspaces: readonly TrainingEvidenceWorkspace[] = [
+    trainingEvidenceWorkspace(enrollment)
+  ]
+): MockRoute {
+  return {
+    url: `/api/v1/training/enrollments/${enrollment.id}/evidence-workspace`,
+    responses: workspaces.map((workspace) => ({ status: 200, body: workspace }))
+  };
+}
+
 interface MockResponse {
   status: number;
   body?: unknown;
@@ -247,11 +372,14 @@ function renderWithRoute(initialPath: string) {
     initialEntries: [initialPath]
   });
 
-  return render(
-    <AppProviders>
-      <RouterProvider router={router} />
-    </AppProviders>
-  );
+  return {
+    router,
+    ...render(
+      <AppProviders>
+        <RouterProvider router={router} />
+      </AppProviders>
+    )
+  };
 }
 
 function mockFetchRoutes(routesToMock: MockRoute[]) {
@@ -334,7 +462,8 @@ function standardRoutes(overrides: MockRoute[] = []): MockRoute[] {
     {
       url: `/api/v1/training/trainees/${traineeAId}/enrollments`,
       responses: [{ status: 200, body: { enrollments: [enrollmentA] } }]
-    }
+    },
+    workspaceRoute(enrollmentA)
   ];
 }
 
@@ -413,7 +542,7 @@ describe("Registration Training frontend", () => {
     renderWithRoute(routes.registrationTraining);
 
     expect(await screen.findByText("Jane Smith")).toBeInTheDocument();
-    expect(screen.getByText("John Santos")).toBeInTheDocument();
+    expect(screen.getAllByText("John Santos").length).toBeGreaterThan(0);
     expect(screen.getByText("Student number pending")).toBeInTheDocument();
     expect(screen.getByText("OGI-STU-2026-0002")).toBeInTheDocument();
 
@@ -577,6 +706,7 @@ describe("Registration Training frontend", () => {
           { status: 200, body: { enrollments: [enrollmentA] } }
         ]
       },
+      workspaceRoute(enrollmentA),
       {
         url: "/api/v1/registration/clients",
         responses: [{ status: 200, body: { clients: [clientA, clientB] } }]
@@ -697,6 +827,321 @@ describe("Registration Training frontend", () => {
     });
   });
 
+  it("renders independent Training Evidence context without client or facility selectors", async () => {
+    mockFetchRoutes([
+      ...authRoutes(),
+      {
+        url: "/api/v1/training/trainees",
+        responses: [{ status: 200, body: { trainees: [traineeB] } }]
+      },
+      {
+        url: `/api/v1/training/trainees/${traineeBId}`,
+        responses: [{ status: 200, body: traineeB }]
+      },
+      {
+        url: `/api/v1/training/trainees/${traineeBId}/enrollments`,
+        responses: [{ status: 200, body: { enrollments: [independentEnrollmentB] } }]
+      },
+      workspaceRoute(independentEnrollmentB)
+    ]);
+
+    renderWithRoute(routes.registrationTraining);
+
+    expect(await screen.findByText("Skills, Knowledge, and Readiness")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Skills Assessment" })).toBeInTheDocument();
+    expect(screen.getAllByText("John Santos").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("OGI-STU-2026-0002").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("L1 - Guardian Responder").length).toBeGreaterThan(0);
+    expect(screen.getByText("OGI Direct / Independent")).toBeInTheDocument();
+    expect(screen.getByText("No Training Session assigned")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Create Draft" })).toHaveLength(3);
+    expect(screen.getByText("Template: OGI F-023")).toBeInTheDocument();
+    expect(screen.getByText("Template: OGI F-024")).toBeInTheDocument();
+    expect(screen.getByText("Template: OGI F-025")).toBeInTheDocument();
+    expect(screen.queryByText(/F-022/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^Client$/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^Facility$/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/StaffMember/i)).not.toBeInTheDocument();
+  });
+
+  it("creates Training-scoped F-023, F-024, and F-025 drafts with only the template_code contract", async () => {
+    const user = userEvent.setup();
+    const draftRequests = [
+      {
+        title: "Skills Assessment",
+        evidenceRecordId: skillsDraftId,
+        templateCode: "OGI_F023_OPERATIONAL_SKILLS_ASSESSMENT"
+      },
+      {
+        title: "Knowledge Assessment",
+        evidenceRecordId: knowledgeRecordId,
+        templateCode: "OGI_F024_OPERATIONAL_KNOWLEDGE_ASSESSMENT_RECORD"
+      },
+      {
+        title: "Readiness Evaluation",
+        evidenceRecordId: readinessRecordId,
+        templateCode: "OGI_F025_OPERATIONAL_READINESS_EVALUATION"
+      }
+    ] as const;
+    const { calls } = mockFetchRoutes([
+      ...authRoutes(),
+      {
+        url: "/api/v1/training/trainees",
+        responses: [{ status: 200, body: { trainees: [traineeB] } }]
+      },
+      {
+        url: `/api/v1/training/trainees/${traineeBId}`,
+        responses: [{ status: 200, body: traineeB }]
+      },
+      {
+        url: `/api/v1/training/trainees/${traineeBId}/enrollments`,
+        responses: [{ status: 200, body: { enrollments: [independentEnrollmentB] } }]
+      },
+      workspaceRoute(independentEnrollmentB, [
+        trainingEvidenceWorkspace(independentEnrollmentB),
+        trainingEvidenceWorkspace(independentEnrollmentB),
+        trainingEvidenceWorkspace(independentEnrollmentB),
+        trainingEvidenceWorkspace(independentEnrollmentB)
+      ]),
+      {
+        method: "POST",
+        url: `/api/v1/training/enrollments/${independentEnrollmentB.id}/evidence-drafts`,
+        responses: draftRequests.map((request) => ({
+          status: 201,
+          body: {
+            evidence_record_id: request.evidenceRecordId,
+            template_code: request.templateCode,
+            template_version_id: `template-version-${request.evidenceRecordId}`,
+            template_version: "1.0",
+            schema_version: "1.0",
+            client_id: null,
+            facility_id: null,
+            lifecycle_state: "DRAFT",
+            payload_checksum: "sha256:test",
+            scope_kind: "TRAINING_SCOPED",
+            created_at: "2026-08-18T05:00:00.000Z",
+            submitted_at: null,
+            updated_at: "2026-08-18T05:00:00.000Z"
+          }
+        }))
+      }
+    ]);
+
+    renderWithRoute(routes.registrationTraining);
+
+    for (const request of draftRequests) {
+      const slotHeading = await screen.findByRole("heading", {
+        name: request.title
+      });
+      await user.click(
+        within(slotHeading.closest("article") as HTMLElement).getByRole(
+          "button",
+          {
+            name: "Create Draft"
+          }
+        )
+      );
+      await screen.findByText("Training evidence draft created.");
+    }
+
+    const draftCalls = calls.filter((call) => call.url.endsWith("/evidence-drafts"));
+
+    expect(draftCalls.map((call) => JSON.parse(String(call.init?.body)))).toEqual(
+      draftRequests.map((request) => ({ template_code: request.templateCode }))
+    );
+    expect(draftCalls.map((call) => String(call.init?.body)).join("\n")).not.toContain(
+      "client_id"
+    );
+    expect(draftCalls.map((call) => String(call.init?.body)).join("\n")).not.toContain(
+      "facility_id"
+    );
+    expect(draftCalls.map((call) => String(call.init?.body)).join("\n")).not.toContain(
+      "staff_member"
+    );
+    expect(draftCalls.map((call) => String(call.init?.body)).join("\n")).not.toContain(
+      "assessment"
+    );
+  });
+
+  it("renders active drafts, linked history, and assessment/readiness summaries", async () => {
+    const skillsRecord = trainingEvidenceRecord(assignedEnrollmentA, {
+      evidence_record_id: skillsDraftId,
+      template_code: "OGI_F023_OPERATIONAL_SKILLS_ASSESSMENT",
+      template_name: "Operational Skills Assessment",
+      document_number: "OGI F-023",
+      lifecycle_state: "DRAFT"
+    });
+    const knowledgeRecord: TrainingEvidenceWorkspaceRecord = {
+      ...trainingEvidenceRecord(assignedEnrollmentA, {
+        evidence_record_id: knowledgeRecordId,
+        template_code: "OGI_F024_OPERATIONAL_KNOWLEDGE_ASSESSMENT_RECORD",
+        template_name: "Operational Knowledge Assessment Record",
+        document_number: "OGI F-024",
+        lifecycle_state: "SUBMITTED",
+        submitted_at: "2026-08-18T06:00:00.000Z"
+      }),
+      evidence_link: {
+        id: "00000000-0000-4000-8000-000000890001",
+        training_enrollment_id: assignedEnrollmentA.id,
+        operational_evidence_record_id: knowledgeRecordId,
+        evidence_purpose: "KNOWLEDGE_ASSESSMENT",
+        created_by_user_id: null,
+        linked_at: "2026-08-18T06:30:00.000Z",
+        evidence: {
+          evidence_record_id: knowledgeRecordId,
+          template_code: "OGI_F024_OPERATIONAL_KNOWLEDGE_ASSESSMENT_RECORD",
+          template_name: "Operational Knowledge Assessment Record",
+          document_number: "OGI F-024",
+          lifecycle_state: "SUBMITTED",
+          client_id: clientAId,
+          facility_id: trainingSessionA.facility_id,
+          submitted_at: "2026-08-18T06:00:00.000Z",
+          created_at: "2026-08-18T05:30:00.000Z"
+        }
+      },
+      assessment_result: {
+        id: "00000000-0000-4000-8000-0000008a0001",
+        assessment_type: "KNOWLEDGE",
+        result_status: "COMPETENT",
+        score: 92,
+        remediation_required: false,
+        reassessment_required: false,
+        recorded_at: "2026-08-18T07:00:00.000Z",
+        recorded_by_user_id: null,
+        evidence_link_id: "00000000-0000-4000-8000-000000890001"
+      }
+    };
+    const readinessRecord: TrainingEvidenceWorkspaceRecord = {
+      ...trainingEvidenceRecord(assignedEnrollmentA, {
+        evidence_record_id: readinessRecordId,
+        template_code: "OGI_F025_OPERATIONAL_READINESS_EVALUATION",
+        template_name: "Operational Readiness Evaluation",
+        document_number: "OGI F-025",
+        lifecycle_state: "SUBMITTED",
+        submitted_at: "2026-08-18T08:00:00.000Z"
+      }),
+      readiness_decision: {
+        id: "00000000-0000-4000-8000-0000008b0001",
+        readiness_outcome: "READY_FOR_CERTIFICATION_REVIEW",
+        remediation_required: false,
+        certification_review_required: true,
+        decided_at: "2026-08-18T09:00:00.000Z",
+        decided_by_user_id: null,
+        readiness_evidence_link_id: "00000000-0000-4000-8000-000000890002"
+      }
+    };
+
+    mockFetchRoutes([
+      ...authRoutes(),
+      {
+        url: "/api/v1/training/trainees",
+        responses: [{ status: 200, body: { trainees: [traineeA] } }]
+      },
+      {
+        url: `/api/v1/training/trainees/${traineeAId}`,
+        responses: [{ status: 200, body: traineeA }]
+      },
+      {
+        url: `/api/v1/training/trainees/${traineeAId}/enrollments`,
+        responses: [{ status: 200, body: { enrollments: [assignedEnrollmentA] } }]
+      },
+      workspaceRoute(assignedEnrollmentA, [
+        trainingEvidenceWorkspace(assignedEnrollmentA, [
+          trainingEvidenceSlot("SKILLS", assignedEnrollmentA, {
+            active_draft: skillsRecord,
+            history: [skillsRecord],
+            can_create_draft: false
+          }),
+          trainingEvidenceSlot("KNOWLEDGE", assignedEnrollmentA, {
+            history: [knowledgeRecord]
+          }),
+          trainingEvidenceSlot("READINESS", assignedEnrollmentA, {
+            history: [readinessRecord]
+          })
+        ])
+      ])
+    ]);
+
+    renderWithRoute(routes.registrationTraining);
+
+    expect(await screen.findByText("Open Water Guardian Cohort A")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Skills Assessment" })).toBeInTheDocument();
+    expect(screen.getByText("Assigned training facility")).toBeInTheDocument();
+    expect(screen.getAllByText("OGI F-023").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("OGI F-024").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("OGI F-025").length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("link", { name: "Open Draft" })[0]).toHaveAttribute(
+      "href",
+      routes.evidenceRecordPath(skillsDraftId)
+    );
+    expect(screen.getByText("Linked to Enrollment")).toBeInTheDocument();
+    expect(screen.getAllByText("Not yet linked").length).toBeGreaterThan(0);
+    expect(screen.getByText("Knowledge result: Competent")).toBeInTheDocument();
+    expect(screen.getByText("Readiness: Ready For Certification Review")).toBeInTheDocument();
+    expect(screen.queryByText(assignedEnrollmentA.id)).not.toBeInTheDocument();
+    expect(screen.queryByText(trainingSessionAId)).not.toBeInTheDocument();
+    expect(screen.queryByText(clientAId)).not.toBeInTheDocument();
+  });
+
+  it("refreshes the workspace instead of duplicating a draft when backend reports conflict", async () => {
+    const user = userEvent.setup();
+    const activeDraft = trainingEvidenceRecord(independentEnrollmentB);
+    mockFetchRoutes([
+      ...authRoutes(),
+      {
+        url: "/api/v1/training/trainees",
+        responses: [{ status: 200, body: { trainees: [traineeB] } }]
+      },
+      {
+        url: `/api/v1/training/trainees/${traineeBId}`,
+        responses: [{ status: 200, body: traineeB }]
+      },
+      {
+        url: `/api/v1/training/trainees/${traineeBId}/enrollments`,
+        responses: [{ status: 200, body: { enrollments: [independentEnrollmentB] } }]
+      },
+      workspaceRoute(independentEnrollmentB, [
+        trainingEvidenceWorkspace(independentEnrollmentB),
+        trainingEvidenceWorkspace(independentEnrollmentB, [
+          trainingEvidenceSlot("SKILLS", independentEnrollmentB, {
+            active_draft: activeDraft,
+            history: [activeDraft],
+            can_create_draft: false
+          }),
+          trainingEvidenceSlot("KNOWLEDGE", independentEnrollmentB),
+          trainingEvidenceSlot("READINESS", independentEnrollmentB)
+        ])
+      ]),
+      {
+        method: "POST",
+        url: `/api/v1/training/enrollments/${independentEnrollmentB.id}/evidence-drafts`,
+        responses: [
+          {
+            status: 409,
+            body: { message: "Active Training Evidence draft already exists." }
+          }
+        ]
+      }
+    ]);
+
+    renderWithRoute(routes.registrationTraining);
+
+    const skillsCard = await screen.findByRole("heading", {
+      name: "Skills Assessment"
+    });
+    await user.click(
+      within(skillsCard.closest("article") as HTMLElement).getByRole("button", {
+        name: "Create Draft"
+      })
+    );
+
+    expect(await screen.findByText("An active draft already exists. Workspace refreshed.")).toBeInTheDocument();
+    expect((await screen.findAllByRole("link", { name: "Open Draft" }))[0]).toHaveAttribute(
+      "href",
+      routes.evidenceRecordPath(skillsDraftId)
+    );
+  });
+
   it("assigns an initial Training Session to an existing Enrollment through the governed action", async () => {
     const user = userEvent.setup();
     const { calls } = mockFetchRoutes([
@@ -716,6 +1161,8 @@ describe("Registration Training frontend", () => {
           { status: 200, body: { enrollments: [assignedEnrollmentA] } }
         ]
       },
+      workspaceRoute(enrollmentA),
+      workspaceRoute(assignedEnrollmentA),
       {
         url: "/api/v1/training/sessions",
         responses: [{ status: 200, body: { sessions: [trainingSessionA] } }]

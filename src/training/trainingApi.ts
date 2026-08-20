@@ -168,6 +168,121 @@ export interface TrainingEnrollment {
   readonly training_session: TrainingEnrollmentSessionSummary | null;
 }
 
+export type TrainingEvidenceDraftTemplateCode =
+  | "OGI_F023_OPERATIONAL_SKILLS_ASSESSMENT"
+  | "OGI_F024_OPERATIONAL_KNOWLEDGE_ASSESSMENT_RECORD"
+  | "OGI_F025_OPERATIONAL_READINESS_EVALUATION";
+
+export type TrainingEvidenceWorkspaceSlotKey =
+  | "SKILLS"
+  | "KNOWLEDGE"
+  | "READINESS";
+
+export interface TrainingContextualEvidenceMetadata {
+  readonly evidence_record_id: string;
+  readonly template_code: TrainingEvidenceDraftTemplateCode;
+  readonly template_name: string | null;
+  readonly document_number: string | null;
+  readonly lifecycle_state: string;
+  readonly client_id: string | null;
+  readonly facility_id: string | null;
+  readonly training_enrollment_id: string;
+  readonly training_session_id: string | null;
+  readonly submitted_at: string | null;
+  readonly created_at: string;
+  readonly updated_at: string;
+}
+
+export interface TrainingEvidenceLinkSummary {
+  readonly id: string;
+  readonly training_enrollment_id: string;
+  readonly operational_evidence_record_id: string;
+  readonly evidence_purpose:
+    | "SKILLS_ASSESSMENT"
+    | "KNOWLEDGE_ASSESSMENT"
+    | "READINESS";
+  readonly created_by_user_id: string | null;
+  readonly linked_at: string;
+  readonly evidence: {
+    readonly evidence_record_id: string;
+    readonly template_code: string;
+    readonly template_name: string | null;
+    readonly document_number: string | null;
+    readonly lifecycle_state: string;
+    readonly client_id: string | null;
+    readonly facility_id: string | null;
+    readonly submitted_at: string | null;
+    readonly created_at: string;
+  };
+}
+
+export interface TrainingAssessmentResultSummary {
+  readonly id: string;
+  readonly assessment_type: "SKILLS" | "KNOWLEDGE";
+  readonly result_status: string;
+  readonly score: number;
+  readonly remediation_required: boolean;
+  readonly reassessment_required: boolean;
+  readonly recorded_at: string;
+  readonly recorded_by_user_id: string | null;
+  readonly evidence_link_id: string;
+}
+
+export interface TrainingReadinessDecisionSummary {
+  readonly id: string;
+  readonly readiness_outcome: string;
+  readonly remediation_required: boolean;
+  readonly certification_review_required: boolean;
+  readonly decided_at: string;
+  readonly decided_by_user_id: string | null;
+  readonly readiness_evidence_link_id: string;
+}
+
+export interface TrainingEvidenceWorkspaceRecord {
+  readonly evidence: TrainingContextualEvidenceMetadata;
+  readonly evidence_link: TrainingEvidenceLinkSummary | null;
+  readonly assessment_result: TrainingAssessmentResultSummary | null;
+  readonly readiness_decision: TrainingReadinessDecisionSummary | null;
+}
+
+export interface TrainingEvidenceWorkspaceSlot {
+  readonly slot: TrainingEvidenceWorkspaceSlotKey;
+  readonly evidence_purpose:
+    | "SKILLS_ASSESSMENT"
+    | "KNOWLEDGE_ASSESSMENT"
+    | "READINESS";
+  readonly template_code: TrainingEvidenceDraftTemplateCode;
+  readonly document_number: "OGI F-023" | "OGI F-024" | "OGI F-025";
+  readonly active_draft: TrainingEvidenceWorkspaceRecord | null;
+  readonly history: readonly TrainingEvidenceWorkspaceRecord[];
+  readonly can_create_draft: boolean;
+}
+
+export interface TrainingEvidenceWorkspace {
+  readonly enrollment: TrainingEnrollment;
+  readonly slots: readonly TrainingEvidenceWorkspaceSlot[];
+}
+
+export interface CreateTrainingEvidenceDraftRequest {
+  readonly template_code: TrainingEvidenceDraftTemplateCode;
+}
+
+export interface TrainingEvidenceDraft {
+  readonly evidence_record_id: string;
+  readonly template_code: TrainingEvidenceDraftTemplateCode;
+  readonly template_version_id: string;
+  readonly template_version: string;
+  readonly schema_version: string;
+  readonly client_id: string | null;
+  readonly facility_id: string | null;
+  readonly lifecycle_state: string;
+  readonly payload_checksum: string;
+  readonly scope_kind: "TRAINING_SCOPED";
+  readonly created_at: string;
+  readonly submitted_at: string | null;
+  readonly updated_at: string;
+}
+
 export interface TrainingEnrollmentListResponse {
   readonly enrollments: readonly TrainingEnrollment[];
 }
@@ -263,6 +378,29 @@ export function assignTrainingEnrollmentSession(
   );
 }
 
+export function getTrainingEvidenceWorkspace(enrollmentId: string) {
+  return apiRequest<TrainingEvidenceWorkspace>(
+    `/api/v1/training/enrollments/${encodeURIComponent(enrollmentId)}/evidence-workspace`,
+    {
+      validate: isTrainingEvidenceWorkspace
+    }
+  );
+}
+
+export function createTrainingEvidenceDraft(
+  enrollmentId: string,
+  request: CreateTrainingEvidenceDraftRequest
+) {
+  return apiRequest<TrainingEvidenceDraft>(
+    `/api/v1/training/enrollments/${encodeURIComponent(enrollmentId)}/evidence-drafts`,
+    {
+      method: "POST",
+      body: request,
+      validate: isTrainingEvidenceDraft
+    }
+  );
+}
+
 function isTrainingTraineeListResponse(
   value: unknown
 ): value is TrainingTraineeListResponse {
@@ -348,6 +486,136 @@ function isTrainingEnrollment(value: unknown): value is TrainingEnrollment {
     (value.client === null || isTrainingEnrollmentClientSummary(value.client)) &&
     (value.training_session === null ||
       isTrainingEnrollmentSessionSummary(value.training_session))
+  );
+}
+
+function isTrainingEvidenceWorkspace(
+  value: unknown
+): value is TrainingEvidenceWorkspace {
+  return (
+    isRecord(value) &&
+    isTrainingEnrollment(value.enrollment) &&
+    Array.isArray(value.slots) &&
+    value.slots.every(isTrainingEvidenceWorkspaceSlot)
+  );
+}
+
+function isTrainingEvidenceWorkspaceSlot(
+  value: unknown
+): value is TrainingEvidenceWorkspaceSlot {
+  return (
+    isRecord(value) &&
+    isTrainingEvidenceWorkspaceSlotKey(value.slot) &&
+    isTrainingEvidencePurpose(value.evidence_purpose) &&
+    isTrainingEvidenceDraftTemplateCode(value.template_code) &&
+    typeof value.document_number === "string" &&
+    (value.active_draft === null ||
+      isTrainingEvidenceWorkspaceRecord(value.active_draft)) &&
+    Array.isArray(value.history) &&
+    value.history.every(isTrainingEvidenceWorkspaceRecord) &&
+    typeof value.can_create_draft === "boolean"
+  );
+}
+
+function isTrainingEvidenceWorkspaceRecord(
+  value: unknown
+): value is TrainingEvidenceWorkspaceRecord {
+  return (
+    isRecord(value) &&
+    isTrainingContextualEvidenceMetadata(value.evidence) &&
+    (value.evidence_link === null ||
+      isTrainingEvidenceLinkSummary(value.evidence_link)) &&
+    (value.assessment_result === null ||
+      isTrainingAssessmentResultSummary(value.assessment_result)) &&
+    (value.readiness_decision === null ||
+      isTrainingReadinessDecisionSummary(value.readiness_decision))
+  );
+}
+
+function isTrainingContextualEvidenceMetadata(
+  value: unknown
+): value is TrainingContextualEvidenceMetadata {
+  return (
+    isRecord(value) &&
+    typeof value.evidence_record_id === "string" &&
+    isTrainingEvidenceDraftTemplateCode(value.template_code) &&
+    isNullableString(value.template_name) &&
+    isNullableString(value.document_number) &&
+    typeof value.lifecycle_state === "string" &&
+    isNullableString(value.client_id) &&
+    isNullableString(value.facility_id) &&
+    typeof value.training_enrollment_id === "string" &&
+    isNullableString(value.training_session_id) &&
+    isNullableString(value.submitted_at) &&
+    typeof value.created_at === "string" &&
+    typeof value.updated_at === "string"
+  );
+}
+
+function isTrainingEvidenceLinkSummary(
+  value: unknown
+): value is TrainingEvidenceLinkSummary {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.training_enrollment_id === "string" &&
+    typeof value.operational_evidence_record_id === "string" &&
+    isTrainingEvidencePurpose(value.evidence_purpose) &&
+    isNullableString(value.created_by_user_id) &&
+    typeof value.linked_at === "string" &&
+    isRecord(value.evidence)
+  );
+}
+
+function isTrainingAssessmentResultSummary(
+  value: unknown
+): value is TrainingAssessmentResultSummary {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    (value.assessment_type === "SKILLS" ||
+      value.assessment_type === "KNOWLEDGE") &&
+    typeof value.result_status === "string" &&
+    typeof value.score === "number" &&
+    typeof value.remediation_required === "boolean" &&
+    typeof value.reassessment_required === "boolean" &&
+    typeof value.recorded_at === "string" &&
+    isNullableString(value.recorded_by_user_id) &&
+    typeof value.evidence_link_id === "string"
+  );
+}
+
+function isTrainingReadinessDecisionSummary(
+  value: unknown
+): value is TrainingReadinessDecisionSummary {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.readiness_outcome === "string" &&
+    typeof value.remediation_required === "boolean" &&
+    typeof value.certification_review_required === "boolean" &&
+    typeof value.decided_at === "string" &&
+    isNullableString(value.decided_by_user_id) &&
+    typeof value.readiness_evidence_link_id === "string"
+  );
+}
+
+function isTrainingEvidenceDraft(value: unknown): value is TrainingEvidenceDraft {
+  return (
+    isRecord(value) &&
+    typeof value.evidence_record_id === "string" &&
+    isTrainingEvidenceDraftTemplateCode(value.template_code) &&
+    typeof value.template_version_id === "string" &&
+    typeof value.template_version === "string" &&
+    typeof value.schema_version === "string" &&
+    isNullableString(value.client_id) &&
+    isNullableString(value.facility_id) &&
+    typeof value.lifecycle_state === "string" &&
+    typeof value.payload_checksum === "string" &&
+    value.scope_kind === "TRAINING_SCOPED" &&
+    typeof value.created_at === "string" &&
+    isNullableString(value.submitted_at) &&
+    typeof value.updated_at === "string"
   );
 }
 
@@ -450,6 +718,32 @@ function isTrainingProgramCode(value: unknown): value is TrainingProgramCode {
   return (
     typeof value === "string" &&
     trainingProgramOptions.some((program) => program.program_code === value)
+  );
+}
+
+function isTrainingEvidenceDraftTemplateCode(
+  value: unknown
+): value is TrainingEvidenceDraftTemplateCode {
+  return (
+    value === "OGI_F023_OPERATIONAL_SKILLS_ASSESSMENT" ||
+    value === "OGI_F024_OPERATIONAL_KNOWLEDGE_ASSESSMENT_RECORD" ||
+    value === "OGI_F025_OPERATIONAL_READINESS_EVALUATION"
+  );
+}
+
+function isTrainingEvidenceWorkspaceSlotKey(
+  value: unknown
+): value is TrainingEvidenceWorkspaceSlotKey {
+  return value === "SKILLS" || value === "KNOWLEDGE" || value === "READINESS";
+}
+
+function isTrainingEvidencePurpose(
+  value: unknown
+): value is TrainingEvidenceWorkspaceSlot["evidence_purpose"] {
+  return (
+    value === "SKILLS_ASSESSMENT" ||
+    value === "KNOWLEDGE_ASSESSMENT" ||
+    value === "READINESS"
   );
 }
 
