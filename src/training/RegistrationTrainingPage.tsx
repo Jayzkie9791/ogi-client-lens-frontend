@@ -18,16 +18,22 @@ import { Button } from "../ui/components/Button";
 import { Surface } from "../ui/components/Surface";
 import {
   assignTrainingEnrollmentSession,
+  createTrainingAttendanceEvidenceDraft,
   createTrainingEvidenceDraft,
   createTrainingEnrollment,
   createTrainingTrainee,
+  getTrainingAttendanceEvidenceWorkspace,
   getTrainingEvidenceWorkspace,
+  linkTrainingAttendanceEvidence,
   linkTrainingTraineeStaffMember,
   getTrainingTrainee,
   listTrainingEnrollments,
   listTrainingSessions,
   listTrainingTrainees,
+  TrainingAttendanceEvidenceRecord,
+  TrainingAttendanceEvidenceWorkspace,
   TrainingEnrollment,
+  TrainingEnrollmentSessionSummary,
   TrainingEvidenceWorkspace,
   TrainingEvidenceWorkspaceRecord,
   TrainingEvidenceWorkspaceSlot,
@@ -645,6 +651,8 @@ function TraineeDetailsPanel({
         />
       </Surface>
 
+      <TrainingAttendanceEvidencePanel enrollments={enrollments} />
+
       <Surface>
         <EnrollmentSection
           assigningEnrollmentId={assigningEnrollmentId}
@@ -1082,6 +1090,440 @@ function EnrollmentSection({
   );
 }
 
+function TrainingAttendanceEvidencePanel({
+  enrollments
+}: {
+  enrollments: readonly TrainingEnrollment[];
+}) {
+  const queryClient = useQueryClient();
+  const [selectedSessionId, setSelectedSessionId] = useState("");
+  const [selectedEnrollmentIds, setSelectedEnrollmentIds] = useState<string[]>([]);
+  const [message, setMessage] = useState<string | null>(null);
+  const sessionOptions = useMemo(
+    () => uniqueEnrollmentSessionSummaries(enrollments),
+    [enrollments]
+  );
+  const workspaceQueryKey = [
+    "training",
+    "session",
+    selectedSessionId,
+    "attendance-evidence-workspace"
+  ] as const;
+  const workspaceQuery = useQuery({
+    queryKey: workspaceQueryKey,
+    queryFn: () => getTrainingAttendanceEvidenceWorkspace(selectedSessionId),
+    enabled: selectedSessionId !== "",
+    retry: false
+  });
+  const workspace = workspaceQuery.data ?? null;
+  const createDraftMutation = useMutation({
+    mutationFn: () =>
+      createTrainingAttendanceEvidenceDraft(selectedSessionId, {
+        enrollment_ids: selectedEnrollmentIds
+      }),
+    onError(error) {
+      if (isApiError(error) && error.status === 409) {
+        setMessage(attendanceEvidenceConflictMessage(error));
+        void queryClient.invalidateQueries({ queryKey: workspaceQueryKey });
+        return;
+      }
+
+      setMessage(attendanceEvidenceErrorMessage(error, "create"));
+    },
+    onSuccess() {
+      setMessage("Attendance evidence draft created.");
+      setSelectedEnrollmentIds([]);
+      void queryClient.invalidateQueries({ queryKey: workspaceQueryKey });
+    }
+  });
+  const linkEvidenceMutation = useMutation({
+    mutationFn: (record: TrainingAttendanceEvidenceRecord) =>
+      linkTrainingAttendanceEvidence(
+        selectedSessionId,
+        record.evidence.evidence_record_id
+      ),
+    onError(error) {
+      if (isApiError(error) && error.status === 409) {
+        setMessage("Evidence is not currently eligible for linking. Workspace refreshed.");
+        void queryClient.invalidateQueries({ queryKey: workspaceQueryKey });
+        return;
+      }
+
+      setMessage(attendanceEvidenceErrorMessage(error, "link"));
+    },
+    onSuccess(_result, record) {
+      setMessage("Attendance evidence linked to persisted roster.");
+      void queryClient.invalidateQueries({ queryKey: workspaceQueryKey });
+      record.roster.forEach((enrollment) => {
+        void queryClient.invalidateQueries({
+          queryKey: [
+            "training",
+            "enrollment",
+            enrollment.id,
+            "evidence-workspace"
+          ]
+        });
+      });
+    }
+  });
+
+  const eligibleEnrollmentIds =
+    workspace?.eligible_enrollments.map((item) => item.enrollment.id) ?? [];
+  const canCreateAttendanceDraft = Boolean(
+    workspace &&
+      workspace.can_create_draft &&
+      selectedEnrollmentIds.length > 0 &&
+      !createDraftMutation.isPending &&
+      !workspace.active_draft
+  );
+
+  function selectSession(trainingSessionId: string) {
+    setSelectedSessionId(trainingSessionId);
+    setSelectedEnrollmentIds([]);
+    setMessage(null);
+  }
+
+  function toggleEnrollment(enrollmentId: string) {
+    setSelectedEnrollmentIds((current) =>
+      current.includes(enrollmentId)
+        ? current.filter((id) => id !== enrollmentId)
+        : [...current, enrollmentId]
+    );
+  }
+
+  return (
+    <Surface>
+      <section aria-labelledby="training-attendance-evidence-heading" className="space-y-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-primary-blue">
+            Attendance Evidence
+          </p>
+          <h3
+            className="text-base font-semibold text-text-primary"
+            id="training-attendance-evidence-heading"
+          >
+            F-022 Session Roster
+          </h3>
+          <p className="mt-1 text-sm text-text-muted">
+            Session-level shared roster evidence for enrolled Trainees.
+          </p>
+        </div>
+
+        {sessionOptions.length === 0 ? (
+          <p className="rounded-component border border-dashed border-border p-3 text-sm text-text-muted">
+            Select a Training Session to manage attendance evidence.
+          </p>
+        ) : (
+          <label className="block text-sm font-semibold text-text-primary">
+            Attendance Training Session
+            <select
+              className={inputClassName}
+              onChange={(event) => selectSession(event.currentTarget.value)}
+              value={selectedSessionId}
+            >
+              <option value="">Select a Training Session</option>
+              {sessionOptions.map((session) => (
+                <option key={session.id} value={session.id}>
+                  {sessionSummaryOptionLabel(session)}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+
+        {!selectedSessionId ? (
+          <p className="text-sm text-text-muted">
+            Select a Training Session to manage attendance evidence.
+          </p>
+        ) : workspaceQuery.isLoading ? (
+          <p className="text-sm text-text-muted" role="status">
+            Loading Attendance Evidence workspace.
+          </p>
+        ) : workspaceQuery.isError ? (
+          <p className="text-sm text-text-muted" role="alert">
+            {attendanceEvidenceErrorMessage(workspaceQuery.error, "workspace")}
+          </p>
+        ) : workspace ? (
+          <div className="space-y-4">
+            <TrainingAttendanceSessionSummary workspace={workspace} />
+            <TrainingAttendanceRosterSelection
+              canCreate={canCreateAttendanceDraft}
+              isCreating={createDraftMutation.isPending}
+              onClearSelection={() => setSelectedEnrollmentIds([])}
+              onCreate={() => {
+                setMessage(null);
+                createDraftMutation.mutate();
+              }}
+              onSelectAll={() => setSelectedEnrollmentIds(eligibleEnrollmentIds)}
+              onToggleEnrollment={toggleEnrollment}
+              selectedEnrollmentIds={selectedEnrollmentIds}
+              workspace={workspace}
+            />
+            <TrainingAttendanceHistory
+              isLinking={linkEvidenceMutation.isPending}
+              onLink={(record) => {
+                setMessage(null);
+                linkEvidenceMutation.mutate(record);
+              }}
+              workspace={workspace}
+            />
+          </div>
+        ) : null}
+
+        {message ? (
+          <p className="text-sm font-semibold text-text-primary" role="status">
+            {message}
+          </p>
+        ) : null}
+      </section>
+    </Surface>
+  );
+}
+
+function TrainingAttendanceSessionSummary({
+  workspace
+}: {
+  workspace: TrainingAttendanceEvidenceWorkspace;
+}) {
+  return (
+    <dl className="grid gap-2 text-sm sm:grid-cols-2">
+      <MetadataItem label="Session" value={workspace.session.training_title} />
+      <MetadataItem
+        label="Session Dates"
+        value={sessionRecordDateRange(workspace.session)}
+      />
+      <MetadataItem
+        label="Instructor"
+        value={
+          workspace.session.instructor_name ??
+          workspace.session.instructor_staff_member?.full_name ??
+          "Not specified"
+        }
+      />
+      <MetadataItem
+        label="Facility"
+        value={workspace.session.facility?.facility_name ?? "None"}
+      />
+      <MetadataItem
+        label="Client context"
+        value={attendanceClientContextLabel(workspace)}
+      />
+      <MetadataItem
+        label="Roster context"
+        value={`${workspace.eligible_enrollments.length} eligible enrollments`}
+      />
+    </dl>
+  );
+}
+
+function TrainingAttendanceRosterSelection({
+  canCreate,
+  isCreating,
+  onClearSelection,
+  onCreate,
+  onSelectAll,
+  onToggleEnrollment,
+  selectedEnrollmentIds,
+  workspace
+}: {
+  canCreate: boolean;
+  isCreating: boolean;
+  onClearSelection: () => void;
+  onCreate: () => void;
+  onSelectAll: () => void;
+  onToggleEnrollment: (enrollmentId: string) => void;
+  selectedEnrollmentIds: readonly string[];
+  workspace: TrainingAttendanceEvidenceWorkspace;
+}) {
+  if (workspace.eligible_enrollments.length === 0) {
+    return (
+      <div className="rounded-component border border-dashed border-border p-3">
+        <p className="text-sm text-text-muted">
+          No eligible enrollments are assigned to this Training Session.
+        </p>
+        <Button disabled type="button" variant="secondary">
+          Create Attendance Evidence
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap gap-2">
+        <Button onClick={onSelectAll} type="button" variant="secondary">
+          Select All
+        </Button>
+        <Button onClick={onClearSelection} type="button" variant="secondary">
+          Clear Selection
+        </Button>
+        <Button disabled={!canCreate || isCreating} onClick={onCreate} type="button">
+          Create Attendance Evidence
+        </Button>
+      </div>
+
+      {workspace.active_draft ? (
+        <div className="rounded-component border border-border bg-canvas p-3">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-text-primary">
+                Active Attendance Draft
+              </p>
+              <p className="mt-1 text-sm text-text-muted">
+                {workspace.active_draft.evidence.document_number ?? "OGI F-022"} - {humanizeCode(workspace.active_draft.evidence.lifecycle_state)}
+              </p>
+              <p className="mt-1 text-sm text-text-muted">
+                Roster: {workspace.active_draft.roster_count} enrollments
+              </p>
+            </div>
+            <Link
+              className={buttonLinkClassName}
+              state={{ returnTo: routes.registrationTraining }}
+              to={routes.evidenceRecordPath(
+                workspace.active_draft.evidence.evidence_record_id
+              )}
+            >
+              Open Attendance Draft
+            </Link>
+          </div>
+        </div>
+      ) : null}
+
+      <ul aria-label="Eligible attendance roster" className="space-y-2">
+        {workspace.eligible_enrollments.map((item) => {
+          const enrollment = item.enrollment;
+          const checked = selectedEnrollmentIds.includes(enrollment.id);
+
+          return (
+            <li
+              className="rounded-component border border-border bg-surface p-3"
+              key={enrollment.id}
+            >
+              <label className="flex items-start gap-3 text-sm text-text-primary">
+                <input
+                  checked={checked}
+                  className="mt-1 size-4"
+                  onChange={() => onToggleEnrollment(enrollment.id)}
+                  type="checkbox"
+                />
+                <span className="min-w-0">
+                  <span className="block font-semibold">
+                    {enrollment.trainee.full_name}
+                  </span>
+                  <span className="mt-1 block text-text-muted">
+                    {studentNumberValue(enrollment.trainee.student_number)} - {programLabel(enrollment.program)}
+                  </span>
+                  <span className="mt-1 block text-text-muted">
+                    Client: {enrollment.client?.organization_name ?? "OGI Direct / Independent"}
+                  </span>
+                </span>
+              </label>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+function TrainingAttendanceHistory({
+  isLinking,
+  onLink,
+  workspace
+}: {
+  isLinking: boolean;
+  onLink: (record: TrainingAttendanceEvidenceRecord) => void;
+  workspace: TrainingAttendanceEvidenceWorkspace;
+}) {
+  if (workspace.history.length === 0) {
+    return <p className="text-sm text-text-muted">No F-022 attendance evidence history yet.</p>;
+  }
+
+  return (
+    <div className="space-y-2">
+      <h4 className="text-sm font-semibold text-text-primary">
+        F-022 History
+      </h4>
+      <ul aria-label="F-022 attendance evidence history" className="space-y-2">
+        {workspace.history.map((record) => (
+          <TrainingAttendanceHistoryItem
+            isLinking={isLinking}
+            key={record.evidence.evidence_record_id}
+            onLink={onLink}
+            record={record}
+          />
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function TrainingAttendanceHistoryItem({
+  isLinking,
+  onLink,
+  record
+}: {
+  isLinking: boolean;
+  onLink: (record: TrainingAttendanceEvidenceRecord) => void;
+  record: TrainingAttendanceEvidenceRecord;
+}) {
+  return (
+    <li className="rounded-component border border-border bg-canvas p-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-sm font-semibold text-text-primary">
+            {record.evidence.document_number ?? "OGI F-022"}
+          </p>
+          <p className="mt-1 text-sm text-text-muted">
+            {record.evidence.template_name ?? "Course Attendance Verification"}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Link
+            className={buttonLinkClassName}
+            state={{ returnTo: routes.registrationTraining }}
+            to={routes.evidenceRecordPath(record.evidence.evidence_record_id)}
+          >
+            {record.evidence.lifecycle_state === "DRAFT"
+              ? "Open Attendance Draft"
+              : "View Attendance Evidence"}
+          </Link>
+          {record.can_link ? (
+            <Button
+              disabled={isLinking}
+              onClick={() => onLink(record)}
+              type="button"
+              variant="secondary"
+            >
+              Link Attendance Evidence
+            </Button>
+          ) : null}
+        </div>
+      </div>
+      <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+        <MetadataItem label="Lifecycle" value={humanizeCode(record.evidence.lifecycle_state)} />
+        <MetadataItem label="Created" value={formatDateTime(record.evidence.created_at)} />
+        <MetadataItem label="Submitted" value={formatDateTime(record.evidence.submitted_at)} />
+        <MetadataItem label="Link Status" value={attendanceLinkStatus(record)} />
+      </dl>
+      <details className="mt-3 rounded-component border border-border bg-surface p-3">
+        <summary className="cursor-pointer text-sm font-semibold text-text-primary">
+          Persisted roster
+        </summary>
+        <ul className="mt-3 space-y-2">
+          {record.roster.map((enrollment) => (
+            <li className="text-sm text-text-muted" key={enrollment.id}>
+              <span className="font-semibold text-text-primary">
+                {enrollment.trainee.full_name}
+              </span>{" "}
+              - {studentNumberValue(enrollment.trainee.student_number)} - {programLabel(enrollment.program)} - {record.linked_enrollment_ids.includes(enrollment.id) ? "Linked" : "Not yet linked"}
+            </li>
+          ))}
+        </ul>
+      </details>
+    </li>
+  );
+}
 function TrainingEvidenceWorkspacePanel({
   enrollment
 }: {
@@ -1632,6 +2074,98 @@ function personnelOptionLabel(staffMember: RegistrationPersonnel) {
   ].join(" - ");
 }
 
+function uniqueEnrollmentSessionSummaries(
+  enrollments: readonly TrainingEnrollment[]
+): TrainingEnrollmentSessionSummary[] {
+  const sessions = new Map<string, TrainingEnrollmentSessionSummary>();
+
+  enrollments.forEach((enrollment) => {
+    if (enrollment.training_session) {
+      sessions.set(enrollment.training_session.id, enrollment.training_session);
+    }
+  });
+
+  return [...sessions.values()];
+}
+
+function sessionSummaryOptionLabel(session: TrainingEnrollmentSessionSummary) {
+  const startDate = new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium"
+  }).format(new Date(session.training_start_date));
+
+  return [startDate, session.training_title].join(" - ");
+}
+
+function sessionRecordDateRange(session: TrainingSession) {
+  const startDate = formatDateTime(session.training_start_date);
+
+  if (!session.training_end_date) {
+    return startDate;
+  }
+
+  return `${startDate} to ${formatDateTime(session.training_end_date)}`;
+}
+
+function attendanceClientContextLabel(
+  workspace: TrainingAttendanceEvidenceWorkspace
+) {
+  const clientNames = new Set(
+    workspace.eligible_enrollments
+      .map((item) => item.enrollment.client?.organization_name)
+      .filter((name): name is string => Boolean(name))
+  );
+
+  if (clientNames.size === 1) {
+    return [...clientNames][0];
+  }
+
+  return "OGI Direct / Independent";
+}
+
+function attendanceLinkStatus(record: TrainingAttendanceEvidenceRecord) {
+  if (record.linked_count === 0) {
+    return "Not yet linked";
+  }
+
+  return `Linked ${record.linked_count} / ${record.roster_count}`;
+}
+
+function attendanceEvidenceConflictMessage(error: unknown) {
+  const message = isApiError(error) ? error.message : "";
+
+  if (/mixed|scope|compatible/i.test(message)) {
+    return "The selected roster cannot be represented by one attendance evidence record because the enrollments do not share a compatible evidence scope.";
+  }
+
+  return "Attendance evidence is no longer available for this Session. Workspace refreshed.";
+}
+
+function attendanceEvidenceErrorMessage(
+  error: unknown,
+  operation: "workspace" | "create" | "link"
+) {
+  if (isApiError(error)) {
+    if (error.status === 403) {
+      return operation === "link"
+        ? "Not authorized to link attendance evidence."
+        : "Not authorized to manage attendance evidence.";
+    }
+
+    if (error.status === 404) {
+      return "Attendance evidence or Session unavailable.";
+    }
+
+    if (error.status === 409) {
+      return operation === "link"
+        ? "Evidence is not currently eligible for linking."
+        : attendanceEvidenceConflictMessage(error);
+    }
+  }
+
+  return operation === "link"
+    ? "Unable to link attendance evidence."
+    : "Attendance Evidence workspace request failed.";
+}
 function sessionOptionLabel(session: TrainingSession) {
   const startDate = new Intl.DateTimeFormat(undefined, {
     dateStyle: "medium"

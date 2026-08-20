@@ -12,6 +12,7 @@ import { AuthenticatedSession } from "../auth/types";
 import { RegistrationClient } from "../registration/registrationClientApi";
 import { RegistrationPersonnel } from "../registration/registrationPersonnelApi";
 import {
+  TrainingAttendanceEvidenceWorkspace,
   TrainingEnrollment,
   TrainingEvidenceWorkspace,
   TrainingEvidenceWorkspaceRecord,
@@ -266,6 +267,104 @@ const independentEnrollmentB: TrainingEnrollment = {
 const skillsDraftId = "00000000-0000-4000-8000-000000880001";
 const knowledgeRecordId = "00000000-0000-4000-8000-000000880002";
 const readinessRecordId = "00000000-0000-4000-8000-000000880003";
+const attendanceDraftId = "00000000-0000-4000-8000-000000880004";
+const attendanceSubmittedId = "00000000-0000-4000-8000-000000880005";
+
+const assignedIndependentEnrollmentB: TrainingEnrollment = {
+  ...independentEnrollmentB,
+  training_session_id: trainingSessionAId,
+  training_session: {
+    id: trainingSessionAId,
+    training_title: trainingSessionA.training_title,
+    training_start_date: trainingSessionA.training_start_date,
+    training_end_date: trainingSessionA.training_end_date,
+    facility_id: trainingSessionA.facility_id
+  }
+};
+
+function attendanceEvidenceMetadata(
+  evidenceRecordId: string,
+  lifecycleState = "DRAFT"
+) {
+  return {
+    evidence_record_id: evidenceRecordId,
+    template_code: "OGI_F022_COURSE_ATTENDANCE_VERIFICATION_RECORD" as const,
+    template_name: "Course Attendance Verification Record",
+    document_number: "OGI F-022",
+    lifecycle_state: lifecycleState,
+    client_id: clientAId,
+    facility_id: trainingSessionA.facility_id,
+    submitted_at:
+      lifecycleState === "DRAFT" ? null : "2026-08-22T16:30:00.000Z",
+    created_at: "2026-08-22T16:00:00.000Z"
+  };
+}
+
+function attendanceEvidenceRecord(
+  evidenceRecordId: string,
+  roster: readonly TrainingEnrollment[],
+  overrides: Partial<TrainingAttendanceEvidenceWorkspace["history"][number]> = {}
+): TrainingAttendanceEvidenceWorkspace["history"][number] {
+  return {
+    evidence: attendanceEvidenceMetadata(
+      evidenceRecordId,
+      overrides.evidence?.lifecycle_state ?? "DRAFT"
+    ),
+    roster,
+    linked_enrollment_ids: overrides.linked_enrollment_ids ?? [],
+    roster_count: roster.length,
+    linked_count: overrides.linked_count ?? 0,
+    can_link: overrides.can_link ?? false
+  };
+}
+
+function attendanceEvidenceWorkspace(
+  overrides: Partial<TrainingAttendanceEvidenceWorkspace> = {}
+): TrainingAttendanceEvidenceWorkspace {
+  const eligibleEnrollments = overrides.eligible_enrollments ?? [
+    {
+      enrollment: assignedEnrollmentA,
+      attendance_linked_record_ids: []
+    }
+  ];
+
+  return {
+    session: trainingSessionA,
+    eligible_enrollments: eligibleEnrollments,
+    active_draft: overrides.active_draft ?? null,
+    history: overrides.history ?? [],
+    can_create_draft: overrides.can_create_draft ?? true
+  };
+}
+
+function attendanceWorkspaceRoute(
+  workspaces: readonly TrainingAttendanceEvidenceWorkspace[] = [
+    attendanceEvidenceWorkspace()
+  ]
+): MockRoute {
+  return {
+    url: `/api/v1/training/sessions/${trainingSessionAId}/attendance-evidence-workspace`,
+    responses: workspaces.map((workspace) => ({ status: 200, body: workspace }))
+  };
+}
+
+function attendanceDraftResponse() {
+  return {
+    evidence_record_id: attendanceDraftId,
+    template_code: "OGI_F022_COURSE_ATTENDANCE_VERIFICATION_RECORD",
+    template_version_id: "00000000-0000-4000-8000-000000880104",
+    template_version: "1.0",
+    schema_version: "1.0",
+    client_id: clientAId,
+    facility_id: trainingSessionA.facility_id,
+    lifecycle_state: "DRAFT",
+    payload_checksum: "sha256:test-attendance-draft",
+    scope_kind: "TRAINING_SCOPED",
+    created_at: "2026-08-22T16:00:00.000Z",
+    submitted_at: null,
+    updated_at: "2026-08-22T16:00:00.000Z"
+  };
+}
 
 function trainingEvidenceRecord(
   enrollment: TrainingEnrollment,
@@ -725,7 +824,7 @@ describe("Registration Training frontend", () => {
     renderWithRoute(routes.registrationTraining);
 
     expect(await screen.findByText("L3 - Open Water Guardian")).toBeInTheDocument();
-    expect(screen.getByText("Ocean Guard International")).toBeInTheDocument();
+    expect(screen.getAllByText("Ocean Guard International").length).toBeGreaterThan(0);
     expect(screen.queryByText(/pass/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/fail/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/certification eligibility/i)).not.toBeInTheDocument();
@@ -858,7 +957,7 @@ describe("Registration Training frontend", () => {
     expect(screen.getByText("Template: OGI F-023")).toBeInTheDocument();
     expect(screen.getByText("Template: OGI F-024")).toBeInTheDocument();
     expect(screen.getByText("Template: OGI F-025")).toBeInTheDocument();
-    expect(screen.queryByText(/F-022/i)).not.toBeInTheDocument();
+    expect(screen.getByText("F-022 Session Roster")).toBeInTheDocument();
     expect(screen.queryByLabelText(/^Client$/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/^Facility$/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/StaffMember/i)).not.toBeInTheDocument();
@@ -1220,6 +1319,292 @@ describe("Registration Training frontend", () => {
     ).toHaveLength(2);
   });
 
+  it("loads the F-022 Session roster workspace after an operator selects a Training Session", async () => {
+    const user = userEvent.setup();
+    mockFetchRoutes([
+      ...authRoutes(),
+      {
+        url: "/api/v1/training/trainees",
+        responses: [{ status: 200, body: { trainees: [traineeA] } }]
+      },
+      {
+        url: `/api/v1/training/trainees/${traineeAId}`,
+        responses: [{ status: 200, body: traineeA }]
+      },
+      {
+        url: `/api/v1/training/trainees/${traineeAId}/enrollments`,
+        responses: [{ status: 200, body: { enrollments: [assignedEnrollmentA] } }]
+      },
+      workspaceRoute(assignedEnrollmentA),
+      attendanceWorkspaceRoute()
+    ]);
+
+    renderWithRoute(routes.registrationTraining);
+
+    await screen.findByText("F-022 Session Roster");
+    await user.selectOptions(
+      screen.getByLabelText("Attendance Training Session"),
+      trainingSessionAId
+    );
+
+    expect(await screen.findByText("Client context")).toBeInTheDocument();
+    expect(screen.getAllByText("Ocean Guard International").length).toBeGreaterThan(0);
+    expect(screen.getByText("Makati Training Pool")).toBeInTheDocument();
+    expect(screen.getByLabelText("Eligible attendance roster")).toBeInTheDocument();
+    expect(screen.getByLabelText(/Jane Smith/)).toBeInTheDocument();
+    expect(screen.queryByText(trainingSessionAId)).not.toBeInTheDocument();
+    expect(screen.queryByText(assignedEnrollmentA.id)).not.toBeInTheDocument();
+  });
+
+  it("creates F-022 attendance evidence with only selected enrollment_ids", async () => {
+    const user = userEvent.setup();
+    const activeDraft = attendanceEvidenceRecord(attendanceDraftId, [
+      assignedEnrollmentA,
+      assignedIndependentEnrollmentB
+    ]);
+    const { calls } = mockFetchRoutes([
+      ...authRoutes(),
+      {
+        url: "/api/v1/training/trainees",
+        responses: [{ status: 200, body: { trainees: [traineeA] } }]
+      },
+      {
+        url: `/api/v1/training/trainees/${traineeAId}`,
+        responses: [{ status: 200, body: traineeA }]
+      },
+      {
+        url: `/api/v1/training/trainees/${traineeAId}/enrollments`,
+        responses: [
+          {
+            status: 200,
+            body: {
+              enrollments: [assignedEnrollmentA, assignedIndependentEnrollmentB]
+            }
+          }
+        ]
+      },
+      workspaceRoute(assignedEnrollmentA),
+      attendanceWorkspaceRoute([
+        attendanceEvidenceWorkspace({
+          eligible_enrollments: [
+            { enrollment: assignedEnrollmentA, attendance_linked_record_ids: [] },
+            {
+              enrollment: assignedIndependentEnrollmentB,
+              attendance_linked_record_ids: []
+            }
+          ]
+        }),
+        attendanceEvidenceWorkspace({
+          active_draft: activeDraft,
+          eligible_enrollments: [
+            { enrollment: assignedEnrollmentA, attendance_linked_record_ids: [] },
+            {
+              enrollment: assignedIndependentEnrollmentB,
+              attendance_linked_record_ids: []
+            }
+          ],
+          history: [activeDraft],
+          can_create_draft: false
+        })
+      ]),
+      {
+        method: "POST",
+        url: `/api/v1/training/sessions/${trainingSessionAId}/attendance-evidence-drafts`,
+        responses: [{ status: 201, body: attendanceDraftResponse() }]
+      }
+    ]);
+
+    renderWithRoute(routes.registrationTraining);
+
+    await user.selectOptions(
+      await screen.findByLabelText("Attendance Training Session"),
+      trainingSessionAId
+    );
+    await screen.findByLabelText(/Jane Smith/);
+    await user.click(screen.getByRole("button", { name: "Select All" }));
+    await user.click(
+      screen.getByRole("button", { name: "Create Attendance Evidence" })
+    );
+
+    expect(await screen.findByText("Attendance evidence draft created.")).toBeInTheDocument();
+    expect(screen.getByText("Active Attendance Draft")).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "Open Attendance Draft" })[0]).toHaveAttribute("href", routes.evidenceRecordPath(attendanceDraftId));
+
+    const createCall = calls.find((call) =>
+      call.url.endsWith("/attendance-evidence-drafts")
+    );
+    const createBody = JSON.parse(String(createCall?.init?.body));
+    expect(createBody).toEqual({
+      enrollment_ids: [assignedEnrollmentA.id, assignedIndependentEnrollmentB.id]
+    });
+    expect(createBody).not.toHaveProperty("client_id");
+    expect(createBody).not.toHaveProperty("facility_id");
+    expect(createBody).not.toHaveProperty("template_code");
+  });
+
+  it("links submitted F-022 attendance evidence from the persisted roster only", async () => {
+    const user = userEvent.setup();
+    const submittedRecord = attendanceEvidenceRecord(
+      attendanceSubmittedId,
+      [assignedEnrollmentA],
+      {
+        evidence: attendanceEvidenceMetadata(attendanceSubmittedId, "SUBMITTED"),
+        can_link: true
+      }
+    );
+    const linkedRecord = {
+      ...submittedRecord,
+      linked_enrollment_ids: [assignedEnrollmentA.id],
+      linked_count: 1,
+      can_link: false
+    };
+    const { calls } = mockFetchRoutes([
+      ...authRoutes(),
+      {
+        url: "/api/v1/training/trainees",
+        responses: [{ status: 200, body: { trainees: [traineeA] } }]
+      },
+      {
+        url: `/api/v1/training/trainees/${traineeAId}`,
+        responses: [{ status: 200, body: traineeA }]
+      },
+      {
+        url: `/api/v1/training/trainees/${traineeAId}/enrollments`,
+        responses: [{ status: 200, body: { enrollments: [assignedEnrollmentA] } }]
+      },
+      workspaceRoute(assignedEnrollmentA),
+      attendanceWorkspaceRoute([
+        attendanceEvidenceWorkspace({ history: [submittedRecord] }),
+        attendanceEvidenceWorkspace({ history: [linkedRecord] })
+      ]),
+      {
+        method: "POST",
+        url: `/api/v1/training/sessions/${trainingSessionAId}/attendance-evidence/${attendanceSubmittedId}/link`,
+        responses: [
+          {
+            status: 200,
+            body: {
+              evidence_links: [
+                {
+                  id: "00000000-0000-4000-8000-000000890022",
+                  training_enrollment_id: assignedEnrollmentA.id,
+                  operational_evidence_record_id: attendanceSubmittedId,
+                  evidence_purpose: "ATTENDANCE",
+                  created_by_user_id: baseSession.id,
+                  linked_at: "2026-08-22T17:00:00.000Z",
+                  evidence: attendanceEvidenceMetadata(attendanceSubmittedId, "SUBMITTED")
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ]);
+
+    renderWithRoute(routes.registrationTraining);
+
+    await user.selectOptions(
+      await screen.findByLabelText("Attendance Training Session"),
+      trainingSessionAId
+    );
+    expect(await screen.findByText("F-022 History")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View Attendance Evidence" })).toHaveAttribute(
+      "href",
+      routes.evidenceRecordPath(attendanceSubmittedId)
+    );
+    await user.click(screen.getByText("Persisted roster"));
+    expect(screen.getAllByText(/Jane Smith/).length).toBeGreaterThan(0);
+
+    await user.click(
+      screen.getByRole("button", { name: "Link Attendance Evidence" })
+    );
+
+    expect(
+      await screen.findByText("Attendance evidence linked to persisted roster.")
+    ).toBeInTheDocument();
+    expect(await screen.findByText("Linked 1 / 1")).toBeInTheDocument();
+    const linkCall = calls.find((call) => call.url.endsWith("/link"));
+    expect(linkCall?.init?.body).toBeUndefined();
+    expect(calls.some((call) => call.url.includes("training_session_participants"))).toBe(false);
+  });
+
+  it("surfaces mixed-scope F-022 roster rejection without mutating generic evidence flows", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetchRoutes([
+      ...authRoutes(),
+      {
+        url: "/api/v1/training/trainees",
+        responses: [{ status: 200, body: { trainees: [traineeA] } }]
+      },
+      {
+        url: `/api/v1/training/trainees/${traineeAId}`,
+        responses: [{ status: 200, body: traineeA }]
+      },
+      {
+        url: `/api/v1/training/trainees/${traineeAId}/enrollments`,
+        responses: [
+          {
+            status: 200,
+            body: {
+              enrollments: [assignedEnrollmentA, assignedIndependentEnrollmentB]
+            }
+          }
+        ]
+      },
+      workspaceRoute(assignedEnrollmentA),
+      attendanceWorkspaceRoute([
+        attendanceEvidenceWorkspace({
+          eligible_enrollments: [
+            { enrollment: assignedEnrollmentA, attendance_linked_record_ids: [] },
+            {
+              enrollment: assignedIndependentEnrollmentB,
+              attendance_linked_record_ids: []
+            }
+          ]
+        }),
+        attendanceEvidenceWorkspace({
+          eligible_enrollments: [
+            { enrollment: assignedEnrollmentA, attendance_linked_record_ids: [] },
+            {
+              enrollment: assignedIndependentEnrollmentB,
+              attendance_linked_record_ids: []
+            }
+          ]
+        })
+      ]),
+      {
+        method: "POST",
+        url: `/api/v1/training/sessions/${trainingSessionAId}/attendance-evidence-drafts`,
+        responses: [
+          {
+            status: 409,
+            statusText: "Conflict",
+            body: { message: "mixed client scope is not compatible" }
+          }
+        ]
+      }
+    ]);
+
+    renderWithRoute(routes.registrationTraining);
+
+    await user.selectOptions(
+      await screen.findByLabelText("Attendance Training Session"),
+      trainingSessionAId
+    );
+    await screen.findByLabelText(/Jane Smith/);
+    await user.click(screen.getByRole("button", { name: "Select All" }));
+    await user.click(
+      screen.getByRole("button", { name: "Create Attendance Evidence" })
+    );
+
+    expect(
+      await screen.findByText(
+        "The selected roster cannot be represented by one attendance evidence record because the enrollments do not share a compatible evidence scope."
+      )
+    ).toBeInTheDocument();
+    expect(calls.filter((call) => call.url.endsWith("/attendance-evidence-drafts"))).toHaveLength(1);
+    expect(calls.some((call) => call.url.includes("/api/v1/evidence"))).toBe(false);
+  });
   it("hides mutation actions without independent Training permissions", async () => {
     mockFetchRoutes(
       standardRoutes([

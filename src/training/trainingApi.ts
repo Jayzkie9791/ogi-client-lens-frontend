@@ -283,6 +283,74 @@ export interface TrainingEvidenceDraft {
   readonly updated_at: string;
 }
 
+export interface TrainingAttendanceEvidenceMetadata {
+  readonly evidence_record_id: string;
+  readonly template_code: "OGI_F022_COURSE_ATTENDANCE_VERIFICATION_RECORD";
+  readonly template_name: string | null;
+  readonly document_number: string | null;
+  readonly lifecycle_state: string;
+  readonly client_id: string | null;
+  readonly facility_id: string | null;
+  readonly submitted_at: string | null;
+  readonly created_at: string;
+}
+
+export interface TrainingAttendanceEvidenceLinkSummary {
+  readonly id: string;
+  readonly training_enrollment_id: string;
+  readonly operational_evidence_record_id: string;
+  readonly evidence_purpose: "ATTENDANCE";
+  readonly created_by_user_id: string | null;
+  readonly linked_at: string;
+  readonly evidence: TrainingAttendanceEvidenceMetadata;
+}
+
+export interface TrainingAttendanceEligibleEnrollment {
+  readonly enrollment: TrainingEnrollment;
+  readonly attendance_linked_record_ids: readonly string[];
+}
+
+export interface TrainingAttendanceEvidenceRecord {
+  readonly evidence: TrainingAttendanceEvidenceMetadata;
+  readonly roster: readonly TrainingEnrollment[];
+  readonly linked_enrollment_ids: readonly string[];
+  readonly roster_count: number;
+  readonly linked_count: number;
+  readonly can_link: boolean;
+}
+
+export interface TrainingAttendanceEvidenceWorkspace {
+  readonly session: TrainingSession;
+  readonly eligible_enrollments: readonly TrainingAttendanceEligibleEnrollment[];
+  readonly active_draft: TrainingAttendanceEvidenceRecord | null;
+  readonly history: readonly TrainingAttendanceEvidenceRecord[];
+  readonly can_create_draft: boolean;
+}
+
+export interface CreateTrainingAttendanceEvidenceDraftRequest {
+  readonly enrollment_ids: readonly string[];
+}
+
+export interface TrainingAttendanceEvidenceDraft {
+  readonly evidence_record_id: string;
+  readonly template_code: "OGI_F022_COURSE_ATTENDANCE_VERIFICATION_RECORD";
+  readonly template_version_id: string;
+  readonly template_version: string;
+  readonly schema_version: string;
+  readonly client_id: string | null;
+  readonly facility_id: string | null;
+  readonly lifecycle_state: string;
+  readonly payload_checksum: string;
+  readonly scope_kind: "TRAINING_SCOPED";
+  readonly created_at: string;
+  readonly submitted_at: string | null;
+  readonly updated_at: string;
+}
+
+export interface TrainingAttendanceEvidenceLinkResponse {
+  readonly evidence_links: readonly TrainingAttendanceEvidenceLinkSummary[];
+}
+
 export interface TrainingEnrollmentListResponse {
   readonly enrollments: readonly TrainingEnrollment[];
 }
@@ -397,6 +465,44 @@ export function createTrainingEvidenceDraft(
       method: "POST",
       body: request,
       validate: isTrainingEvidenceDraft
+    }
+  );
+}
+
+export function getTrainingAttendanceEvidenceWorkspace(
+  trainingSessionId: string
+) {
+  return apiRequest<TrainingAttendanceEvidenceWorkspace>(
+    `/api/v1/training/sessions/${encodeURIComponent(trainingSessionId)}/attendance-evidence-workspace`,
+    {
+      validate: isTrainingAttendanceEvidenceWorkspace
+    }
+  );
+}
+
+export function createTrainingAttendanceEvidenceDraft(
+  trainingSessionId: string,
+  request: CreateTrainingAttendanceEvidenceDraftRequest
+) {
+  return apiRequest<TrainingAttendanceEvidenceDraft>(
+    `/api/v1/training/sessions/${encodeURIComponent(trainingSessionId)}/attendance-evidence-drafts`,
+    {
+      method: "POST",
+      body: request,
+      validate: isTrainingAttendanceEvidenceDraft
+    }
+  );
+}
+
+export function linkTrainingAttendanceEvidence(
+  trainingSessionId: string,
+  evidenceRecordId: string
+) {
+  return apiRequest<TrainingAttendanceEvidenceLinkResponse>(
+    `/api/v1/training/sessions/${encodeURIComponent(trainingSessionId)}/attendance-evidence/${encodeURIComponent(evidenceRecordId)}/link`,
+    {
+      method: "POST",
+      validate: isTrainingAttendanceEvidenceLinkResponse
     }
   );
 }
@@ -616,6 +722,116 @@ function isTrainingEvidenceDraft(value: unknown): value is TrainingEvidenceDraft
     typeof value.created_at === "string" &&
     isNullableString(value.submitted_at) &&
     typeof value.updated_at === "string"
+  );
+}
+
+function isTrainingAttendanceEvidenceWorkspace(
+  value: unknown
+): value is TrainingAttendanceEvidenceWorkspace {
+  return (
+    isRecord(value) &&
+    isTrainingSession(value.session) &&
+    Array.isArray(value.eligible_enrollments) &&
+    value.eligible_enrollments.every(isTrainingAttendanceEligibleEnrollment) &&
+    (value.active_draft === null ||
+      isTrainingAttendanceEvidenceRecord(value.active_draft)) &&
+    Array.isArray(value.history) &&
+    value.history.every(isTrainingAttendanceEvidenceRecord) &&
+    typeof value.can_create_draft === "boolean"
+  );
+}
+
+function isTrainingAttendanceEligibleEnrollment(
+  value: unknown
+): value is TrainingAttendanceEligibleEnrollment {
+  return (
+    isRecord(value) &&
+    isTrainingEnrollment(value.enrollment) &&
+    Array.isArray(value.attendance_linked_record_ids) &&
+    value.attendance_linked_record_ids.every(
+      (recordId) => typeof recordId === "string"
+    )
+  );
+}
+
+function isTrainingAttendanceEvidenceRecord(
+  value: unknown
+): value is TrainingAttendanceEvidenceRecord {
+  return (
+    isRecord(value) &&
+    isTrainingAttendanceEvidenceMetadata(value.evidence) &&
+    Array.isArray(value.roster) &&
+    value.roster.every(isTrainingEnrollment) &&
+    Array.isArray(value.linked_enrollment_ids) &&
+    value.linked_enrollment_ids.every(
+      (enrollmentId) => typeof enrollmentId === "string"
+    ) &&
+    typeof value.roster_count === "number" &&
+    typeof value.linked_count === "number" &&
+    typeof value.can_link === "boolean"
+  );
+}
+
+function isTrainingAttendanceEvidenceMetadata(
+  value: unknown
+): value is TrainingAttendanceEvidenceMetadata {
+  return (
+    isRecord(value) &&
+    typeof value.evidence_record_id === "string" &&
+    value.template_code === "OGI_F022_COURSE_ATTENDANCE_VERIFICATION_RECORD" &&
+    isNullableString(value.template_name) &&
+    isNullableString(value.document_number) &&
+    typeof value.lifecycle_state === "string" &&
+    isNullableString(value.client_id) &&
+    isNullableString(value.facility_id) &&
+    isNullableString(value.submitted_at) &&
+    typeof value.created_at === "string"
+  );
+}
+
+function isTrainingAttendanceEvidenceDraft(
+  value: unknown
+): value is TrainingAttendanceEvidenceDraft {
+  return (
+    isRecord(value) &&
+    typeof value.evidence_record_id === "string" &&
+    value.template_code === "OGI_F022_COURSE_ATTENDANCE_VERIFICATION_RECORD" &&
+    typeof value.template_version_id === "string" &&
+    typeof value.template_version === "string" &&
+    typeof value.schema_version === "string" &&
+    isNullableString(value.client_id) &&
+    isNullableString(value.facility_id) &&
+    typeof value.lifecycle_state === "string" &&
+    typeof value.payload_checksum === "string" &&
+    value.scope_kind === "TRAINING_SCOPED" &&
+    typeof value.created_at === "string" &&
+    isNullableString(value.submitted_at) &&
+    typeof value.updated_at === "string"
+  );
+}
+
+function isTrainingAttendanceEvidenceLinkResponse(
+  value: unknown
+): value is TrainingAttendanceEvidenceLinkResponse {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.evidence_links) &&
+    value.evidence_links.every(isTrainingAttendanceEvidenceLinkSummary)
+  );
+}
+
+function isTrainingAttendanceEvidenceLinkSummary(
+  value: unknown
+): value is TrainingAttendanceEvidenceLinkSummary {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.training_enrollment_id === "string" &&
+    typeof value.operational_evidence_record_id === "string" &&
+    value.evidence_purpose === "ATTENDANCE" &&
+    isNullableString(value.created_by_user_id) &&
+    typeof value.linked_at === "string" &&
+    isTrainingAttendanceEvidenceMetadata(value.evidence)
   );
 }
 
