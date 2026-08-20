@@ -1,4 +1,4 @@
-import { FormEvent, ReactNode, useMemo, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
 import { QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
@@ -27,6 +27,8 @@ import {
 } from "./certificationsApi";
 import { CertificationWorkspaceTabs } from "./CertificationWorkspaceTabs";
 import {
+  CredentialIssuancePreparationResponse,
+  getCredentialIssuancePreparation,
   issueCredential,
   listCredentialIssuancesByCertification
 } from "./credentialIssuanceApi";
@@ -94,7 +96,8 @@ interface AuthorizationGovernanceFormState {
 }
 
 interface CredentialIssuanceFormState {
-  sourceEvidenceRecordId: string;
+  selectedEvidenceRecordId: string;
+  selectedAuthorizationId: string;
   completionDate: string;
   trainingLocation: string;
   instructor: string;
@@ -131,7 +134,8 @@ const emptyAuthorizationGovernanceForm: AuthorizationGovernanceFormState = {
 };
 
 const emptyCredentialIssuanceForm: CredentialIssuanceFormState = {
-  sourceEvidenceRecordId: "",
+  selectedEvidenceRecordId: "",
+  selectedAuthorizationId: "",
   completionDate: "",
   trainingLocation: "",
   instructor: "",
@@ -222,6 +226,19 @@ export function CertificationsPage() {
     queryKey: selectedIssuanceHistoryQueryKey,
     queryFn: () => listCredentialIssuancesByCertification(selectedCertificationId ?? ""),
     enabled: canViewCertifications && Boolean(selectedCertificationId),
+    retry: false
+  });
+  const selectedPreparationQueryKey = [
+    "credential-issuance-preparation",
+    selectedCertificationId
+  ] as const;
+  const credentialIssuancePreparationQuery = useQuery({
+    queryKey: selectedPreparationQueryKey,
+    queryFn: () => getCredentialIssuancePreparation(selectedCertificationId ?? ""),
+    enabled:
+      canIssueCertification &&
+      credentialIssuanceMode &&
+      Boolean(selectedCertificationId),
     retry: false
   });
 
@@ -339,18 +356,34 @@ export function CertificationsPage() {
     }
   });
   const credentialIssuanceMutation = useMutation({
-    mutationFn: (payload: { sourceAuthorizationId?: string }) =>
+    mutationFn: () =>
       issueCredential({
         certification_id: selectedCertificationId ?? "",
         source_evidence_record_id:
-          credentialIssuanceForm.sourceEvidenceRecordId.trim(),
-        ...(payload.sourceAuthorizationId
-          ? { source_authorization_id: payload.sourceAuthorizationId }
+          credentialIssuanceForm.selectedEvidenceRecordId,
+        ...(credentialIssuanceForm.selectedAuthorizationId
+          ? {
+              source_authorization_id:
+                credentialIssuanceForm.selectedAuthorizationId
+            }
           : {}),
-        completion_date: credentialIssuanceForm.completionDate,
-        training_location: credentialIssuanceForm.trainingLocation.trim(),
-        instructor: credentialIssuanceForm.instructor.trim(),
-        training_center: credentialIssuanceForm.trainingCenter.trim()
+        completion_date: resolveIssueFieldValue(
+          credentialIssuancePreparationQuery.data?.training.completion_date,
+          credentialIssuanceForm.completionDate,
+          { dateOnly: true }
+        ),
+        training_location: resolveIssueFieldValue(
+          credentialIssuancePreparationQuery.data?.training.training_location,
+          credentialIssuanceForm.trainingLocation
+        ).trim(),
+        instructor: resolveIssueFieldValue(
+          credentialIssuancePreparationQuery.data?.training.instructor,
+          credentialIssuanceForm.instructor
+        ).trim(),
+        training_center: resolveIssueFieldValue(
+          credentialIssuancePreparationQuery.data?.training.training_center,
+          credentialIssuanceForm.trainingCenter
+        ).trim()
       }),
     onSuccess: async (issuance) => {
       setCredentialIssuanceMode(false);
@@ -359,14 +392,16 @@ export function CertificationsPage() {
       setCredentialIssuanceSuccess("Credential issued successfully.");
       await Promise.all([
         invalidateAuthorizationQueries(queryClient, selectedDetailQueryKey),
-        queryClient.invalidateQueries({ queryKey: selectedIssuanceHistoryQueryKey })
+        queryClient.invalidateQueries({ queryKey: selectedIssuanceHistoryQueryKey }),
+        queryClient.invalidateQueries({ queryKey: selectedPreparationQueryKey })
       ]);
     },
     onError: async () => {
       if (selectedEntry) {
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: selectedDetailQueryKey }),
-          queryClient.invalidateQueries({ queryKey: selectedIssuanceHistoryQueryKey })
+          queryClient.invalidateQueries({ queryKey: selectedIssuanceHistoryQueryKey }),
+          queryClient.invalidateQueries({ queryKey: selectedPreparationQueryKey })
         ]);
       }
     }
@@ -374,6 +409,28 @@ export function CertificationsPage() {
   const selectedCertification = detailQuery.data
     ? findCertification(detailQuery.data, selectedCertificationId)
     : null;
+
+  useEffect(() => {
+    const preparation = credentialIssuancePreparationQuery.data;
+
+    if (!preparation || !credentialIssuanceMode) {
+      return;
+    }
+
+    setCredentialIssuanceForm((current) => ({
+      ...current,
+      selectedEvidenceRecordId:
+        current.selectedEvidenceRecordId ||
+        (preparation.eligible_f048_evidence.length === 1
+          ? preparation.eligible_f048_evidence[0].operational_evidence_record_id
+          : ""),
+      selectedAuthorizationId:
+        current.selectedAuthorizationId ||
+        (preparation.operational_authorization_options.length === 1
+          ? preparation.operational_authorization_options[0].id
+          : "")
+    }));
+  }, [credentialIssuanceMode, credentialIssuancePreparationQuery.data]);
 
   if (!canViewCertifications) {
     return (
@@ -483,6 +540,16 @@ export function CertificationsPage() {
                 credentialIssuanceForm={credentialIssuanceForm}
                 credentialIssuanceMode={credentialIssuanceMode}
                 credentialIssuancePending={credentialIssuanceMutation.isPending}
+                credentialIssuancePreparation={
+                  credentialIssuancePreparationQuery.data ?? null
+                }
+                credentialIssuancePreparationError={
+                  credentialIssuancePreparationQuery.error
+                }
+                credentialIssuancePreparationLoading={
+                  credentialIssuancePreparationQuery.isLoading ||
+                  credentialIssuancePreparationQuery.isFetching
+                }
                 credentialIssuanceSuccess={credentialIssuanceSuccess}
                 createAuthorizationError={createAuthorizationMutation.error}
                 createAuthorizationForm={createAuthorizationForm}
@@ -493,7 +560,6 @@ export function CertificationsPage() {
                 endorsementMutationError={endorsementMutation.error}
                 endorsementSuccess={endorsementSuccess}
                 endorsing={endorsementMutation.isPending}
-                entry={selectedEntry}
                 error={detailQuery.error}
                 loading={detailQuery.isLoading}
                 onCancelAuthorization={() => {
@@ -530,6 +596,7 @@ export function CertificationsPage() {
                 }}
                 onStartCredentialIssuance={() => {
                   setCredentialIssuanceMode(true);
+                  setCredentialIssuanceForm(emptyCredentialIssuanceForm);
                   setCredentialIssuanceSuccess(null);
                   credentialIssuanceMutation.reset();
                 }}
@@ -559,11 +626,9 @@ export function CertificationsPage() {
                     endorsement: endorsementForm.endorsement
                   });
                 }}
-                onSubmitCredentialIssuance={(event, authorization) => {
+                onSubmitCredentialIssuance={(event) => {
                   event.preventDefault();
-                  credentialIssuanceMutation.mutate({
-                    ...(authorization ? { sourceAuthorizationId: authorization.id } : {})
-                  });
+                  credentialIssuanceMutation.mutate();
                 }}
                 issuanceHistory={issuanceHistoryQuery.data?.issuances ?? []}
                 issuanceHistoryError={issuanceHistoryQuery.error}
@@ -698,6 +763,9 @@ function CertificationDetailPanel({
   credentialIssuanceForm,
   credentialIssuanceMode,
   credentialIssuancePending,
+  credentialIssuancePreparation,
+  credentialIssuancePreparationError,
+  credentialIssuancePreparationLoading,
   credentialIssuanceSuccess,
   createAuthorizationError,
   createAuthorizationForm,
@@ -708,7 +776,6 @@ function CertificationDetailPanel({
   endorsementMutationError,
   endorsementSuccess,
   endorsing,
-  entry,
   error,
   loading,
   onCancelAuthorization,
@@ -747,6 +814,9 @@ function CertificationDetailPanel({
   credentialIssuanceForm: CredentialIssuanceFormState;
   credentialIssuanceMode: boolean;
   credentialIssuancePending: boolean;
+  credentialIssuancePreparation: CredentialIssuancePreparationResponse | null;
+  credentialIssuancePreparationError: Error | null;
+  credentialIssuancePreparationLoading: boolean;
   credentialIssuanceSuccess: string | null;
   createAuthorizationError: Error | null;
   createAuthorizationForm: CreateAuthorizationFormState;
@@ -757,7 +827,6 @@ function CertificationDetailPanel({
   endorsementMutationError: Error | null;
   endorsementSuccess: string | null;
   endorsing: boolean;
-  entry: CertificationRegistryEntry;
   error: Error | null;
   loading: boolean;
   onCancelAuthorization: () => void;
@@ -774,10 +843,7 @@ function CertificationDetailPanel({
     event: FormEvent<HTMLFormElement>,
     authorization: CredentialsOperationalAuthorizationProjection | null
   ) => void;
-  onSubmitCredentialIssuance: (
-    event: FormEvent<HTMLFormElement>,
-    authorization: CredentialsOperationalAuthorizationProjection | null
-  ) => void;
+  onSubmitCredentialIssuance: (event: FormEvent<HTMLFormElement>) => void;
   issuanceHistory: readonly CredentialIssuanceResponse[];
   issuanceHistoryError: Error | null;
   issuanceHistoryLoading: boolean;
@@ -808,7 +874,6 @@ function CertificationDetailPanel({
     detail.operational_authorizations,
     certification.id
   );
-  const currentAuthorization = currentOperationalAuthorization(linkedAuthorizations);
 
   return (
     <Surface>
@@ -840,7 +905,6 @@ function CertificationDetailPanel({
           label="Written exam score"
           value={certification.written_exam_score?.toString() ?? "Not specified"}
         />
-        <MetadataItem label="Certification ID" value={entry.certificationId} />
       </dl>
       <EndorsementsSection
         canEndorseCertification={canEndorseCertification}
@@ -881,7 +945,6 @@ function CertificationDetailPanel({
         />
       ) : null}
       <CredentialIssuanceSection
-        authorization={canViewOperationalAuthorization ? currentAuthorization : null}
         canIssueCredential={canIssueCertification}
         certification={certification}
         error={credentialIssuanceError}
@@ -894,6 +957,9 @@ function CertificationDetailPanel({
         onChange={onChangeCredentialIssuance}
         onStart={onStartCredentialIssuance}
         onSubmit={onSubmitCredentialIssuance}
+        preparation={credentialIssuancePreparation}
+        preparationError={credentialIssuancePreparationError}
+        preparationLoading={credentialIssuancePreparationLoading}
         recentIssuedCredentialId={recentIssuedCredentialId}
         successMessage={credentialIssuanceSuccess}
         submitting={credentialIssuancePending}
@@ -1023,7 +1089,6 @@ function EndorsementsSection({
 }
 
 function CredentialIssuanceSection({
-  authorization,
   canIssueCredential,
   certification,
   error,
@@ -1037,10 +1102,12 @@ function CredentialIssuanceSection({
   onChange,
   onStart,
   onSubmit,
+  preparation,
+  preparationError,
+  preparationLoading,
   successMessage,
   submitting
 }: {
-  authorization: CredentialsOperationalAuthorizationProjection | null;
   canIssueCredential: boolean;
   certification: CredentialsCertificationProjection;
   error: Error | null;
@@ -1053,13 +1120,27 @@ function CredentialIssuanceSection({
   onCancel: () => void;
   onChange: (form: CredentialIssuanceFormState) => void;
   onStart: () => void;
-  onSubmit: (
-    event: FormEvent<HTMLFormElement>,
-    authorization: CredentialsOperationalAuthorizationProjection | null
-  ) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  preparation: CredentialIssuancePreparationResponse | null;
+  preparationError: Error | null;
+  preparationLoading: boolean;
   successMessage: string | null;
   submitting: boolean;
 }) {
+  const selectedEvidence = preparation?.eligible_f048_evidence.find(
+    (candidate) =>
+      candidate.operational_evidence_record_id === form.selectedEvidenceRecordId
+  );
+  const canSubmitPreparation =
+    Boolean(preparation) &&
+    preparation?.preparation_status !== "BLOCKED" &&
+    preparation?.preparation_status !== "ALREADY_ISSUED" &&
+    Boolean(form.selectedEvidenceRecordId) &&
+    allRequiredIssueFieldsPresent(preparation, form);
+  const showIssuanceControls =
+    preparation?.preparation_status === "READY_FOR_REVIEW" ||
+    preparation?.preparation_status === "REQUIRES_INPUT";
+
   return (
     <section
       aria-labelledby="credential-issuance-heading"
@@ -1160,98 +1241,156 @@ function CredentialIssuanceSection({
       {issueMode ? (
         <form
           className="mt-4 space-y-4 rounded-component border border-border bg-surface p-4"
-          onSubmit={(event) => onSubmit(event, authorization)}
+          onSubmit={onSubmit}
         >
           <div>
             <h4 className="text-sm font-semibold text-text-primary">
               Issue Credential
             </h4>
             <p className="mt-1 text-sm text-text-muted">
-              Issuing from selected certificate {certification.certification_number}
-              {authorization
-                ? ` with authorization ${authorization.authorization_number}.`
-                : "."}
+              Issuing from selected certificate {certification.certification_number}.
             </p>
           </div>
-          {error ? (
+          {preparationLoading ? (
+            <p className="text-sm text-text-muted" role="status">
+              Loading credential issuance preparation.
+            </p>
+          ) : preparationError ? (
+            <CertificationErrorState compact error={preparationError} operation="issuance" />
+          ) : error ? (
             <CertificationErrorState compact error={error} operation="issuance" />
           ) : null}
-          <label className="block text-sm font-semibold text-text-primary">
-            F-048 evidence record ID
-            <input
-              className={inputClassName}
-              onChange={(event) =>
-                onChange({
-                  ...form,
-                  sourceEvidenceRecordId: event.currentTarget.value
-                })
-              }
-              required
-              value={form.sourceEvidenceRecordId}
-            />
-          </label>
-          <label className="block text-sm font-semibold text-text-primary">
-            Completion date
-            <input
-              className={inputClassName}
-              onChange={(event) =>
-                onChange({
-                  ...form,
-                  completionDate: event.currentTarget.value
-                })
-              }
-              required
-              type="date"
-              value={form.completionDate}
-            />
-          </label>
-          <label className="block text-sm font-semibold text-text-primary">
-            Training location
-            <input
-              className={inputClassName}
-              maxLength={255}
-              onChange={(event) =>
-                onChange({
-                  ...form,
-                  trainingLocation: event.currentTarget.value
-                })
-              }
-              required
-              value={form.trainingLocation}
-            />
-          </label>
-          <label className="block text-sm font-semibold text-text-primary">
-            Instructor
-            <input
-              className={inputClassName}
-              maxLength={255}
-              onChange={(event) =>
-                onChange({
-                  ...form,
-                  instructor: event.currentTarget.value
-                })
-              }
-              required
-              value={form.instructor}
-            />
-          </label>
-          <label className="block text-sm font-semibold text-text-primary">
-            Training center
-            <input
-              className={inputClassName}
-              maxLength={255}
-              onChange={(event) =>
-                onChange({
-                  ...form,
-                  trainingCenter: event.currentTarget.value
-                })
-              }
-              required
-              value={form.trainingCenter}
-            />
-          </label>
+          {preparation ? (
+            <>
+              <CredentialPreparationSummary preparation={preparation} />
+              {preparation.preparation_status === "ALREADY_ISSUED" &&
+              preparation.existing_issuance ? (
+                <div className="rounded-component border border-border bg-elevated px-3 py-3">
+                  <p className="text-sm font-semibold text-text-primary">
+                    Credential already issued.
+                  </p>
+                  <p className="mt-1 text-sm text-text-muted">
+                    Issued {formatDate(preparation.existing_issuance.issued_at)}.
+                  </p>
+                  <Link
+                    className="mt-3 inline-flex items-center justify-center rounded-component bg-primary-blue px-3 py-2 text-sm font-semibold text-text-inverse outline-none transition-colors hover:bg-primary-navy focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-canvas active:bg-primary-navy"
+                    to={routes.credentialCertificatePath(
+                      preparation.existing_issuance.id
+                    )}
+                  >
+                    View Certificate
+                  </Link>
+                </div>
+              ) : null}
+              {preparation.preparation_status === "BLOCKED" ? (
+                <div className="rounded-component border border-border bg-elevated px-3 py-3 text-sm text-text-primary" role="alert">
+                  Credential issuance is blocked by the current preparation state.
+                </div>
+              ) : null}
+              {showIssuanceControls ? (
+                <>
+                  {preparation.eligible_f048_evidence.length > 0 ? (
+                    <label className="block text-sm font-semibold text-text-primary">
+                      F-048 evidence
+                      <select
+                        className={inputClassName}
+                        onChange={(event) =>
+                          onChange({
+                            ...form,
+                            selectedEvidenceRecordId: event.currentTarget.value
+                          })
+                        }
+                        required
+                        value={form.selectedEvidenceRecordId}
+                      >
+                        <option value="">Select approved F-048 evidence</option>
+                        {preparation.eligible_f048_evidence.map((candidate) => (
+                          <option
+                            key={candidate.operational_evidence_record_id}
+                            value={candidate.operational_evidence_record_id}
+                          >
+                            {f048CandidateLabel(candidate)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : (
+                    <p className="rounded-component border border-border bg-elevated px-3 py-2 text-sm text-text-primary">
+                      Approved F-048 evidence is required before issuance.
+                    </p>
+                  )}
+                  {selectedEvidence ? (
+                    <p className="text-sm text-text-muted">
+                      Selected {selectedEvidence.document_number} / {selectedEvidence.template_name}.
+                    </p>
+                  ) : null}
+                  {preparation.operational_authorization_options.length > 0 ? (
+                    <label className="block text-sm font-semibold text-text-primary">
+                      Operational Authorization
+                      <select
+                        className={inputClassName}
+                        onChange={(event) =>
+                          onChange({
+                            ...form,
+                            selectedAuthorizationId: event.currentTarget.value
+                          })
+                        }
+                        value={form.selectedAuthorizationId}
+                      >
+                        <option value="">No Operational Authorization</option>
+                        {preparation.operational_authorization_options.map(
+                          (option) => (
+                            <option key={option.id} value={option.id}>
+                              {authorizationOptionLabel(option)}
+                            </option>
+                          )
+                        )}
+                      </select>
+                    </label>
+                  ) : (
+                    <p className="text-sm text-text-muted">
+                      No Operational Authorization selected.
+                    </p>
+                  )}
+                  <PreparationIssueField
+                    field={preparation.training.completion_date}
+                    formValue={form.completionDate}
+                    inputType="date"
+                    label="Completion date"
+                    onChange={(value) =>
+                      onChange({ ...form, completionDate: value })
+                    }
+                  />
+                  <PreparationIssueField
+                    field={preparation.training.training_location}
+                    formValue={form.trainingLocation}
+                    label="Training location"
+                    onChange={(value) =>
+                      onChange({ ...form, trainingLocation: value })
+                    }
+                  />
+                  <PreparationIssueField
+                    field={preparation.training.instructor}
+                    formValue={form.instructor}
+                    label="Instructor"
+                    onChange={(value) =>
+                      onChange({ ...form, instructor: value })
+                    }
+                  />
+                  <PreparationIssueField
+                    field={preparation.training.training_center}
+                    formValue={form.trainingCenter}
+                    label="Training center"
+                    onChange={(value) =>
+                      onChange({ ...form, trainingCenter: value })
+                    }
+                  />
+                </>
+              ) : null}
+            </>
+          ) : null}
           <div className="flex flex-wrap gap-2">
-            <Button disabled={submitting} type="submit">
+            <Button disabled={submitting || !canSubmitPreparation} type="submit">
               {submitting ? "Issuing Credential" : "Confirm Issue Credential"}
             </Button>
             <Button disabled={submitting} onClick={onCancel} type="button" variant="secondary">
@@ -1262,6 +1401,175 @@ function CredentialIssuanceSection({
       ) : null}
     </section>
   );
+}
+
+function CredentialPreparationSummary({
+  preparation
+}: {
+  preparation: CredentialIssuancePreparationResponse;
+}) {
+  return (
+    <div className="rounded-component border border-border bg-elevated px-3 py-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-sm font-semibold text-text-primary">
+          Issuance preparation
+        </p>
+        <StatusBadge value={preparation.preparation_status} />
+      </div>
+      <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+        <MetadataItem
+          label="Holder"
+          value={fieldDisplayValue(preparation.subject.holder_name)}
+        />
+        <MetadataItem
+          label="Student Number"
+          value={fieldDisplayValue(preparation.subject.student_number)}
+        />
+        <MetadataItem
+          label="Certification number"
+          value={fieldDisplayValue(preparation.certification.certification_number)}
+        />
+        <MetadataItem
+          label="Program"
+          value={preparation.certification.program?.display_name ?? "Not supplied"}
+        />
+        <MetadataItem
+          label="Certification status"
+          value={fieldDisplayValue(preparation.certification.certification_status)}
+        />
+        <MetadataItem
+          label="Issue date"
+          value={formatDate(preparation.certification.issue_date.value)}
+        />
+        <MetadataItem
+          label="Expiry date"
+          value={formatDate(preparation.certification.expiry_date.value)}
+        />
+        <MetadataItem
+          label="Training Session"
+          value={preparation.training.session?.training_title ?? "Not supplied"}
+        />
+      </dl>
+      {preparation.training.session?.facility ? (
+        <p className="mt-3 text-sm text-text-muted">
+          Facility context: {preparation.training.session.facility.facility_name}
+        </p>
+      ) : null}
+      {preparation.limitations.length > 0 ? (
+        <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-text-muted">
+          {preparation.limitations.map((limitation) => (
+            <li key={limitation}>{limitation}</li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+function PreparationIssueField({
+  field,
+  formValue,
+  inputType = "text",
+  label,
+  onChange
+}: {
+  field: CredentialIssuancePreparationResponse["training"]["completion_date"];
+  formValue: string;
+  inputType?: "date" | "text";
+  label: string;
+  onChange: (value: string) => void;
+}) {
+  if (field.provenance_status === "DERIVED") {
+    return (
+      <div className="text-sm">
+        <dt className="font-semibold text-text-primary">{label}</dt>
+        <dd className="mt-1 text-text-primary">{field.value ?? "Not supplied"}</dd>
+      </div>
+    );
+  }
+
+  if (field.provenance_status !== "REQUIRES_INPUT") {
+    return (
+      <p className="text-sm text-text-muted">
+        {label}: {field.message ?? "Not available."}
+      </p>
+    );
+  }
+
+  return (
+    <label className="block text-sm font-semibold text-text-primary">
+      {label}
+      <input
+        className={inputClassName}
+        maxLength={inputType === "text" ? 255 : undefined}
+        onChange={(event) => onChange(event.currentTarget.value)}
+        required
+        type={inputType}
+        value={formValue}
+      />
+    </label>
+  );
+}
+
+function allRequiredIssueFieldsPresent(
+  preparation: CredentialIssuancePreparationResponse | null | undefined,
+  form: CredentialIssuanceFormState
+) {
+  if (!preparation) {
+    return false;
+  }
+
+  return (
+    requiredFieldPresent(preparation.training.completion_date, form.completionDate) &&
+    requiredFieldPresent(preparation.training.training_location, form.trainingLocation) &&
+    requiredFieldPresent(preparation.training.instructor, form.instructor) &&
+    requiredFieldPresent(preparation.training.training_center, form.trainingCenter)
+  );
+}
+
+function requiredFieldPresent(
+  field: CredentialIssuancePreparationResponse["training"]["completion_date"],
+  value: string
+) {
+  if (field.provenance_status === "DERIVED") {
+    return Boolean(field.value);
+  }
+
+  if (field.provenance_status === "REQUIRES_INPUT") {
+    return value.trim().length > 0;
+  }
+
+  return true;
+}
+
+function resolveIssueFieldValue(
+  field: CredentialIssuancePreparationResponse["training"]["completion_date"] | undefined,
+  formValue: string,
+  options: { dateOnly?: boolean } = {}
+) {
+  if (field?.provenance_status === "DERIVED" && field.value) {
+    return options.dateOnly ? field.value.slice(0, 10) : field.value;
+  }
+
+  return formValue;
+}
+
+function fieldDisplayValue(
+  field: CredentialIssuancePreparationResponse["subject"]["holder_name"]
+) {
+  return field.value ?? field.message ?? "Not supplied";
+}
+
+function f048CandidateLabel(
+  candidate: CredentialIssuancePreparationResponse["eligible_f048_evidence"][number]
+) {
+  return `${candidate.document_number} / ${candidate.template_name} / approved ${formatDate(candidate.submitted_at ?? candidate.created_at)}`;
+}
+
+function authorizationOptionLabel(
+  option: CredentialIssuancePreparationResponse["operational_authorization_options"][number]
+) {
+  return `${option.authorization_number} / ${displayCode(option.authorization_status)} / ${formatDate(option.issue_date)} to ${formatDate(option.expiry_date)}`;
 }
 
 function OperationalAuthorizationSection({

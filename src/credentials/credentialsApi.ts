@@ -129,8 +129,8 @@ export interface CredentialsListFilters {
 export interface CredentialIssuanceResponse {
   id: string;
   source_certification_id: string;
-  staff_member_id: string;
-  client_id: string;
+  staff_member_id: string | null;
+  client_id: string | null;
   source_authorization_id: string | null;
   source_evidence_record_id: string | null;
   issued_by_user_id: string;
@@ -148,6 +148,7 @@ export interface CredentialIssuanceResponse {
   certificate_template_version_snapshot: string;
   certificate_template_variant_code_snapshot: string | null;
   holder_name_snapshot: string;
+  student_number_snapshot: string | null;
   certification_number_snapshot: string;
   issue_date_snapshot: string;
   expiry_date_snapshot: string;
@@ -290,8 +291,8 @@ export function isCredentialIssuanceResponse(
     isRecord(value) &&
     typeof value.id === "string" &&
     typeof value.source_certification_id === "string" &&
-    typeof value.staff_member_id === "string" &&
-    typeof value.client_id === "string" &&
+    isNullableString(value.staff_member_id) &&
+    isNullableString(value.client_id) &&
     isNullableString(value.source_authorization_id) &&
     isNullableString(value.source_evidence_record_id) &&
     typeof value.issued_by_user_id === "string" &&
@@ -308,6 +309,7 @@ export function isCredentialIssuanceResponse(
     typeof value.certificate_template_version_snapshot === "string" &&
     isNullableString(value.certificate_template_variant_code_snapshot) &&
     typeof value.holder_name_snapshot === "string" &&
+    isNullableString(value.student_number_snapshot) &&
     typeof value.certification_number_snapshot === "string" &&
     typeof value.issue_date_snapshot === "string" &&
     typeof value.expiry_date_snapshot === "string" &&

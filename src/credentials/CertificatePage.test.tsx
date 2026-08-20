@@ -78,6 +78,7 @@ const issuance: CredentialIssuanceResponse = {
   certificate_template_version_snapshot: "1.0",
   certificate_template_variant_code_snapshot: null,
   holder_name_snapshot: "Ana Santos",
+  student_number_snapshot: null,
   certification_number_snapshot: "OGI-OWG-000001",
   issue_date_snapshot: "2026-01-01T00:00:00.000Z",
   expiry_date_snapshot: "2027-01-01T00:00:00.000Z",
