@@ -502,6 +502,12 @@ function operationalEvidenceRecordResponse({
 }) {
   const submittedAt =
     lifecycleState === "DRAFT" ? "2026-08-18T05:00:00.000Z" : "2026-08-18T06:00:00.000Z";
+  const assessmentNumber =
+    templateCode === "OGI_F023_OPERATIONAL_SKILLS_ASSESSMENT"
+      ? "OGI-OSA-2026-0001"
+      : templateCode === "OGI_F024_OPERATIONAL_KNOWLEDGE_ASSESSMENT_RECORD"
+        ? "OGI-OKA-2026-0001"
+        : null;
 
   return {
     id: evidenceRecordId,
@@ -519,6 +525,13 @@ function operationalEvidenceRecordResponse({
     lifecycle_state: lifecycleState,
     payload: {
       sections: {
+        ...(assessmentNumber
+          ? {
+              ASSESSMENT_INFORMATION: {
+                ASSESSMENT_NUMBER: assessmentNumber
+              }
+            }
+          : {}),
         GENERAL_EVIDENCE: {
           TEXT_FIELD: "Contextual training evidence"
         }
@@ -557,6 +570,23 @@ function operationalEvidenceRecordResponse({
 }
 
 function oetsDefinition(templateCode: string) {
+  const assessmentNumberField =
+    templateCode === "OGI_F023_OPERATIONAL_SKILLS_ASSESSMENT" ||
+    templateCode === "OGI_F024_OPERATIONAL_KNOWLEDGE_ASSESSMENT_RECORD"
+      ? [
+          {
+            field_id: `field-assessment-number-${templateCode}`,
+            field_code: "ASSESSMENT_NUMBER",
+            label: "Assessment Number",
+            field_type: "TEXT",
+            required: false,
+            readonly: false,
+            visible: true,
+            sequence: 1
+          }
+        ]
+      : [];
+
   return {
     schema_version: "1.0",
     template_metadata: {
@@ -567,11 +597,24 @@ function oetsDefinition(templateCode: string) {
       version: "1.0"
     },
     sections: [
+      ...(assessmentNumberField.length > 0
+        ? [
+            {
+              section_id: "section-assessment-information",
+              section_code: "ASSESSMENT_INFORMATION",
+              title: "Assessment Information",
+              sequence: 1,
+              repeatable: false,
+              visible: true,
+              fields: assessmentNumberField
+            }
+          ]
+        : []),
       {
         section_id: "section-general-evidence",
         section_code: "GENERAL_EVIDENCE",
         title: "General Evidence",
-        sequence: 1,
+        sequence: assessmentNumberField.length > 0 ? 2 : 1,
         repeatable: false,
         visible: true,
         fields: [
@@ -1313,6 +1356,21 @@ describe("Registration Training frontend", () => {
       expect(screen.getByText("Training Context")).toBeInTheDocument();
       expect(screen.getAllByText("John Santos").length).toBeGreaterThan(0);
       expect(screen.getAllByText("OGI-STU-2026-0002").length).toBeGreaterThan(0);
+      if (templateCode === "OGI_F023_OPERATIONAL_SKILLS_ASSESSMENT") {
+        expect(screen.getByLabelText("Assessment Number")).toHaveValue(
+          "OGI-OSA-2026-0001"
+        );
+        expect(screen.getByLabelText("Assessment Number")).toBeDisabled();
+      } else if (
+        templateCode === "OGI_F024_OPERATIONAL_KNOWLEDGE_ASSESSMENT_RECORD"
+      ) {
+        expect(screen.getByLabelText("Assessment Number")).toHaveValue(
+          "OGI-OKA-2026-0001"
+        );
+        expect(screen.getByLabelText("Assessment Number")).toBeDisabled();
+      } else {
+        expect(screen.queryByLabelText("Assessment Number")).not.toBeInTheDocument();
+      }
       expect(screen.getByLabelText("Text Field")).not.toBeDisabled();
     }
   );

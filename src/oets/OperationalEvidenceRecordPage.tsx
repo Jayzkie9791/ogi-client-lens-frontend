@@ -42,6 +42,13 @@ import { OetsRenderer } from "./OetsRenderer";
 import { getRuntimeTemplateVersion } from "./runtimeTemplateApi";
 import { OetsDefinition, OetsEvidencePayload } from "./types";
 
+const trainingAssessmentInformationSectionCode = "ASSESSMENT_INFORMATION";
+const trainingAssessmentNumberFieldCode = "ASSESSMENT_NUMBER";
+const trainingAssessmentNumberTemplateCodes = new Set([
+  "OGI_F023_OPERATIONAL_SKILLS_ASSESSMENT",
+  "OGI_F024_OPERATIONAL_KNOWLEDGE_ASSESSMENT_RECORD"
+]);
+
 interface WorkflowTransition {
   from: string;
   to: string;
@@ -386,6 +393,10 @@ export function OperationalEvidenceRecordPage() {
   }
 
   const isDraftRecord = record.lifecycle_state === "DRAFT";
+  const renderedDefinition = markTrainingAssessmentNumberReadonly(
+    narrowing.definition,
+    record
+  );
   const canEditDraft =
     isDraftRecord &&
     (auth.canUsePermission("submit_operational_evidence") ||
@@ -421,7 +432,7 @@ export function OperationalEvidenceRecordPage() {
         ) : null}
 
         <OetsRenderer
-          definition={narrowing.definition}
+          definition={renderedDefinition}
           formMessage={
             draftPayloadMutation.error
               ? draftPayloadErrorMessage(draftPayloadMutation.error)
@@ -1466,6 +1477,38 @@ function MetadataGrid({ entries }: { entries: Array<[string, string | null | und
       ))}
     </dl>
   );
+}
+
+function markTrainingAssessmentNumberReadonly(
+  definition: OetsDefinition,
+  record: OperationalEvidenceRecord
+) {
+  if (
+    record.scope_kind !== "TRAINING_SCOPED" ||
+    !trainingAssessmentNumberTemplateCodes.has(
+      record.template_provenance.template_code
+    )
+  ) {
+    return definition;
+  }
+
+  return {
+    ...definition,
+    sections: definition.sections.map((section) => {
+      if (section.section_code !== trainingAssessmentInformationSectionCode) {
+        return section;
+      }
+
+      return {
+        ...section,
+        fields: section.fields.map((field) =>
+          field.field_code === trainingAssessmentNumberFieldCode
+            ? { ...field, readonly: true }
+            : field
+        )
+      };
+    })
+  };
 }
 
 function templateMatchesRecord(
