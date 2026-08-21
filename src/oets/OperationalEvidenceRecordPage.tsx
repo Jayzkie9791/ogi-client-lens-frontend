@@ -38,15 +38,49 @@ import {
   transitionClaimedGovernanceReviewWithConclusion
 } from "./reviewConclusionApi";
 
-import { OetsRenderer } from "./OetsRenderer";
+import { OetsFieldVisibilityPolicy, OetsRenderer } from "./OetsRenderer";
 import { getRuntimeTemplateVersion } from "./runtimeTemplateApi";
-import { OetsDefinition, OetsEvidencePayload } from "./types";
+import { OetsDefinition, OetsEvidencePayload, OetsFieldValue } from "./types";
 
 const trainingAssessmentInformationSectionCode = "ASSESSMENT_INFORMATION";
 const trainingAssessmentNumberFieldCode = "ASSESSMENT_NUMBER";
 const trainingAssessmentNumberTemplateCodes = new Set([
   "OGI_F023_OPERATIONAL_SKILLS_ASSESSMENT",
   "OGI_F024_OPERATIONAL_KNOWLEDGE_ASSESSMENT_RECORD"
+]);
+
+const emptyTrainingContextualFieldPolicyByTemplate = new Map<string, Set<string>>([
+  [
+    "OGI_F023_OPERATIONAL_SKILLS_ASSESSMENT",
+    new Set([
+      "COURSE_NUMBER",
+      "PERSONNEL_NUMBER",
+      "CLIENT_NUMBER",
+      "FACILITY_NUMBER",
+      "ASSESSOR_NUMBER",
+      "ASSESSMENT_LOCATION"
+    ])
+  ],
+  [
+    "OGI_F024_OPERATIONAL_KNOWLEDGE_ASSESSMENT_RECORD",
+    new Set([
+      "COURSE_NUMBER",
+      "PERSONNEL_NUMBER",
+      "CLIENT_NUMBER",
+      "FACILITY_NUMBER",
+      "ASSESSMENT_LOCATION"
+    ])
+  ],
+  [
+    "OGI_F025_OPERATIONAL_READINESS_EVALUATION",
+    new Set([
+      "TRAINING_REQUEST_NUMBER",
+      "COURSE_NUMBER",
+      "PERSONNEL_NUMBER",
+      "CLIENT_NUMBER",
+      "FACILITY_NUMBER"
+    ])
+  ]
 ]);
 
 interface WorkflowTransition {
@@ -397,6 +431,7 @@ export function OperationalEvidenceRecordPage() {
     narrowing.definition,
     record
   );
+  const fieldVisibilityPolicy = trainingContextualFieldVisibilityPolicy(record);
   const canEditDraft =
     isDraftRecord &&
     (auth.canUsePermission("submit_operational_evidence") ||
@@ -439,6 +474,7 @@ export function OperationalEvidenceRecordPage() {
               : undefined
           }
           initialPayload={record.payload}
+          fieldVisibilityPolicy={fieldVisibilityPolicy}
           isSubmitting={draftPayloadMutation.isPending}
           onSubmit={canEditDraft ? (payload) => draftPayloadMutation.mutate(payload) : undefined}
           readOnly={!canEditDraft}
@@ -1477,6 +1513,46 @@ function MetadataGrid({ entries }: { entries: Array<[string, string | null | und
       ))}
     </dl>
   );
+}
+
+function trainingContextualFieldVisibilityPolicy(
+  record: OperationalEvidenceRecord
+): OetsFieldVisibilityPolicy | undefined {
+  if (record.scope_kind !== "TRAINING_SCOPED") {
+    return undefined;
+  }
+
+  const fieldsToHideWhenEmpty = emptyTrainingContextualFieldPolicyByTemplate.get(
+    record.template_provenance.template_code
+  );
+
+  if (!fieldsToHideWhenEmpty) {
+    return undefined;
+  }
+
+  return ({ field, value }) => {
+    if (!fieldsToHideWhenEmpty.has(field.field_code)) {
+      return true;
+    }
+
+    return !isEmptyOetsFieldValue(value);
+  };
+}
+
+function isEmptyOetsFieldValue(value: OetsFieldValue | undefined) {
+  if (value === undefined || value === null) {
+    return true;
+  }
+
+  if (typeof value === "string") {
+    return value.trim().length === 0;
+  }
+
+  if (Array.isArray(value)) {
+    return value.length === 0;
+  }
+
+  return false;
 }
 
 function markTrainingAssessmentNumberReadonly(

@@ -27,6 +27,16 @@ import {
 
 type RepeatableSectionCounters = Record<string, number>;
 
+export interface OetsFieldVisibilityContext {
+  field: OetsField;
+  sectionCode: string;
+  value: OetsFieldValue | undefined;
+}
+
+export type OetsFieldVisibilityPolicy = (
+  context: OetsFieldVisibilityContext
+) => boolean;
+
 interface OetsRendererProps {
   runtimeTemplate: OetsTemplateRuntimeDefinition;
   definition: OetsDefinition;
@@ -34,6 +44,7 @@ interface OetsRendererProps {
   backendValidation?: OetsValidationSummary | null;
   formMessage?: string | null;
   initialPayload?: Pick<OetsEvidencePayload, "sections">;
+  fieldVisibilityPolicy?: OetsFieldVisibilityPolicy;
   isSubmitting?: boolean;
   onSubmit?: (payload: OetsEvidencePayload) => void;
   submitDisabledReason?: string | null;
@@ -56,6 +67,7 @@ export function OetsRenderer({
   backendValidation,
   formMessage,
   initialPayload,
+  fieldVisibilityPolicy,
   isSubmitting = false,
   onSubmit,
   submitDisabledReason,
@@ -152,6 +164,12 @@ export function OetsRenderer({
 
       {orderedSections(definition).map((section) => {
         const sectionState = state[section.section_code];
+        const sectionValues = !Array.isArray(sectionState) && sectionState ? sectionState : {};
+        const visibleFields = visibleSectionFields(
+          section,
+          sectionValues,
+          fieldVisibilityPolicy
+        );
 
         if (section.repeatable) {
           return (
@@ -224,10 +242,14 @@ export function OetsRenderer({
                 });
               }}
               readOnly={readOnly}
-              section={section}
+              section={{ ...section, fields: visibleFields }}
               validation={backendValidation ?? null}
             />
           );
+        }
+
+        if (visibleFields.length === 0) {
+          return null;
         }
 
         return (
@@ -251,9 +273,9 @@ export function OetsRenderer({
               });
             }}
             readOnly={readOnly}
-            section={section}
+            section={{ ...section, fields: visibleFields }}
             validation={backendValidation ?? null}
-            values={!Array.isArray(sectionState) && sectionState ? sectionState : {}}
+            values={sectionValues}
           />
         );
       })}
@@ -384,6 +406,26 @@ function RepeatableSection({
         ))}
       </div>
     </Surface>
+  );
+}
+
+function visibleSectionFields(
+  section: Section,
+  values: Record<string, OetsFieldValue>,
+  fieldVisibilityPolicy: OetsFieldVisibilityPolicy | undefined
+) {
+  const fields = orderedFields(section.fields);
+
+  if (!fieldVisibilityPolicy) {
+    return fields;
+  }
+
+  return fields.filter((field) =>
+    fieldVisibilityPolicy({
+      field,
+      sectionCode: section.section_code,
+      value: values[field.field_code]
+    })
   );
 }
 

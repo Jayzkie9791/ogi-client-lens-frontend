@@ -558,7 +558,7 @@ describe("Generic OETS renderer", () => {
     expect(screen.getByText("Open Water Guardian L1")).toBeInTheDocument();
     expect(screen.getByText("Open Water Guardian Cohort")).toBeInTheDocument();
     expect(screen.getAllByText("OGI Direct / Independent").length).toBeGreaterThan(0);
-    expect(screen.getByText("None")).toBeInTheDocument();
+    expect(screen.getAllByText("None").length).toBeGreaterThan(0);
     expect(screen.queryByText("enrollment-1")).not.toBeInTheDocument();
     expect(screen.queryByText("session-1")).not.toBeInTheDocument();
 
@@ -583,6 +583,430 @@ describe("Generic OETS renderer", () => {
     );
     expect(updateBody.payload).not.toHaveProperty("client_id");
     expect(updateBody.payload).not.toHaveProperty("facility_id");
+  });
+
+
+  it("hides empty unresolved Training-scoped F-023 context fields while preserving governed assessment fields", async () => {
+    const queryClient = createTestQueryClient();
+    const runtime = trainingRuntimeTemplate("OGI_F023_OPERATIONAL_SKILLS_ASSESSMENT");
+    const trainingDefinition = trainingContextualDefinition(runtime, {
+      name: "Operational Skills Assessment",
+      fields: [
+        textField("ASSESSMENT_NUMBER", "Assessment Number", "TEXT", 1),
+        textField("COURSE_NUMBER", "Course Number", "TEXT", 2),
+        textField("PERSONNEL_NUMBER", "Personnel Number", "TEXT", 3),
+        textField("PERSONNEL_NAME", "Personnel Name", "TEXT", 4),
+        textField("CLIENT_NUMBER", "Client Number", "TEXT", 5),
+        textField("FACILITY_NUMBER", "Facility Number", "TEXT", 6),
+        textField("ASSESSMENT_LOCATION", "Assessment Location", "TEXT", 7),
+        textField("ASSESSMENT_DATE", "Assessment Date", "DATE", 8),
+        textField("ASSESSOR_NUMBER", "Assessor Number", "TEXT", 9),
+        textField("ASSESSOR_NAME", "Assessor Name", "TEXT", 10),
+        textField("ASSESSMENT_TYPE", "Assessment Type", "TEXT", 11)
+      ],
+      substantiveField: textField("SKILL_OBSERVATION", "Skill Observation", "TEXT", 12)
+    });
+    const draftRecord = trainingEvidenceRecord(runtime, {
+      lifecycle_state: "DRAFT",
+      payload: {
+        sections: {
+          ASSESSMENT_INFORMATION: {
+            ASSESSMENT_NUMBER: "OGI-OSA-2026-0001",
+            COURSE_NUMBER: null,
+            PERSONNEL_NUMBER: null,
+            PERSONNEL_NAME: "Certificate Three",
+            CLIENT_NUMBER: null,
+            FACILITY_NUMBER: null,
+            ASSESSMENT_LOCATION: null,
+            ASSESSMENT_DATE: "2026-08-21",
+            ASSESSOR_NUMBER: null,
+            ASSESSOR_NAME: "Assessor One",
+            ASSESSMENT_TYPE: "Initial"
+          },
+          ASSESSMENT_CONTENT: {
+            SKILL_OBSERVATION: "Ready for water entry assessment."
+          }
+        }
+      }
+    });
+    mockFetchQueue([
+      { status: 200, body: draftRecord },
+      { status: 200, body: { ...runtime, definition_jsonb: trainingDefinition } }
+    ]);
+
+    renderOperationalEvidenceRecordPageWithSession({
+      initialPath: "/workbench/evidence/evidence-record-1",
+      queryClient,
+      currentSession: {
+        ...session,
+        permissions: [...session.permissions, "submit_operational_evidence"]
+      }
+    });
+
+    expect(await screen.findByRole("heading", { name: "Draft Evidence" })).toBeInTheDocument();
+    expect(screen.getByText("Training Context")).toBeInTheDocument();
+    expect(screen.getByText("John Santos")).toBeInTheDocument();
+    expect(screen.getByText("OGI-STU-2026-0007")).toBeInTheDocument();
+    expect(screen.getAllByText("OGI Direct / Independent").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("None").length).toBeGreaterThan(0);
+    expect(screen.getByLabelText("Assessment Number")).toHaveValue("OGI-OSA-2026-0001");
+    expect(screen.getByLabelText("Assessment Number")).toBeDisabled();
+    expect(screen.getByLabelText("Personnel Name")).toHaveValue("Certificate Three");
+    expect(screen.getByLabelText("Assessment Date")).toHaveValue("2026-08-21");
+    expect(screen.getByLabelText("Assessor Name")).toHaveValue("Assessor One");
+    expect(screen.getByLabelText("Assessment Type")).toHaveValue("Initial");
+    expect(screen.queryByLabelText("Course Number")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Personnel Number")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Client Number")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Facility Number")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Assessor Number")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Assessment Location")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Skill Observation")).not.toBeDisabled();
+  });
+
+  it("hides only empty unresolved Training-scoped F-024 context fields", async () => {
+    const queryClient = createTestQueryClient();
+    const runtime = trainingRuntimeTemplate(
+      "OGI_F024_OPERATIONAL_KNOWLEDGE_ASSESSMENT_RECORD"
+    );
+    const trainingDefinition = trainingContextualDefinition(runtime, {
+      name: "Operational Knowledge Assessment Record",
+      fields: [
+        textField("ASSESSMENT_NUMBER", "Assessment Number", "TEXT", 1),
+        textField("COURSE_NUMBER", "Course Number", "TEXT", 2),
+        textField("PERSONNEL_NUMBER", "Personnel Number", "TEXT", 3),
+        textField("CLIENT_NUMBER", "Client Number", "TEXT", 4),
+        textField("FACILITY_NUMBER", "Facility Number", "TEXT", 5),
+        textField("ASSESSMENT_LOCATION", "Assessment Location", "TEXT", 6)
+      ],
+      substantiveField: textField("KNOWLEDGE_SCORE", "Knowledge Score", "NUMBER", 7)
+    });
+    const draftRecord = trainingEvidenceRecord(runtime, {
+      lifecycle_state: "DRAFT",
+      payload: {
+        sections: {
+          ASSESSMENT_INFORMATION: {
+            ASSESSMENT_NUMBER: "OGI-OKA-2026-0001",
+            COURSE_NUMBER: null,
+            PERSONNEL_NUMBER: null,
+            CLIENT_NUMBER: null,
+            FACILITY_NUMBER: null,
+            ASSESSMENT_LOCATION: null
+          },
+          ASSESSMENT_CONTENT: {
+            KNOWLEDGE_SCORE: 88
+          }
+        }
+      }
+    });
+    mockFetchQueue([
+      { status: 200, body: draftRecord },
+      { status: 200, body: { ...runtime, definition_jsonb: trainingDefinition } }
+    ]);
+
+    renderOperationalEvidenceRecordPageWithSession({
+      initialPath: "/workbench/evidence/evidence-record-1",
+      queryClient,
+      currentSession: {
+        ...session,
+        permissions: [...session.permissions, "submit_operational_evidence"]
+      }
+    });
+
+    expect(await screen.findByLabelText("Assessment Number")).toHaveValue(
+      "OGI-OKA-2026-0001"
+    );
+    expect(screen.getByLabelText("Assessment Number")).toBeDisabled();
+    expect(screen.queryByLabelText("Course Number")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Personnel Number")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Client Number")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Facility Number")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Assessment Location")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Knowledge Score")).not.toBeDisabled();
+  });
+
+  it("hides only empty unresolved Training-scoped F-025 context fields", async () => {
+    const queryClient = createTestQueryClient();
+    const runtime = trainingRuntimeTemplate("OGI_F025_OPERATIONAL_READINESS_EVALUATION");
+    const trainingDefinition = trainingContextualDefinition(runtime, {
+      name: "Operational Readiness Evaluation",
+      fields: [
+        textField("TRAINING_REQUEST_NUMBER", "Training Request Number", "TEXT", 1),
+        textField("COURSE_NUMBER", "Course Number", "TEXT", 2),
+        textField("PERSONNEL_NUMBER", "Personnel Number", "TEXT", 3),
+        textField("CLIENT_NUMBER", "Client Number", "TEXT", 4),
+        textField("FACILITY_NUMBER", "Facility Number", "TEXT", 5)
+      ],
+      substantiveField: textField("READINESS_RECOMMENDATION", "Readiness Recommendation", "TEXT", 6)
+    });
+    const draftRecord = trainingEvidenceRecord(runtime, {
+      lifecycle_state: "DRAFT",
+      payload: {
+        sections: {
+          ASSESSMENT_INFORMATION: {
+            TRAINING_REQUEST_NUMBER: null,
+            COURSE_NUMBER: null,
+            PERSONNEL_NUMBER: null,
+            CLIENT_NUMBER: null,
+            FACILITY_NUMBER: null
+          },
+          ASSESSMENT_CONTENT: {
+            READINESS_RECOMMENDATION: "Ready"
+          }
+        }
+      }
+    });
+    mockFetchQueue([
+      { status: 200, body: draftRecord },
+      { status: 200, body: { ...runtime, definition_jsonb: trainingDefinition } }
+    ]);
+
+    renderOperationalEvidenceRecordPageWithSession({
+      initialPath: "/workbench/evidence/evidence-record-1",
+      queryClient,
+      currentSession: {
+        ...session,
+        permissions: [...session.permissions, "submit_operational_evidence"]
+      }
+    });
+
+    expect(await screen.findByLabelText("Readiness Recommendation")).not.toBeDisabled();
+    expect(screen.queryByLabelText("Training Request Number")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Course Number")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Personnel Number")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Client Number")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Facility Number")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["SUBMITTED"],
+    ["GOVERNANCE_APPROVED"]
+  ])(
+    "keeps empty unresolved Training-scoped fields hidden for %s records",
+    async (lifecycleState) => {
+      const queryClient = createTestQueryClient();
+      const runtime = trainingRuntimeTemplate("OGI_F023_OPERATIONAL_SKILLS_ASSESSMENT");
+      const trainingDefinition = trainingContextualDefinition(runtime, {
+        name: "Operational Skills Assessment",
+        fields: [
+          textField("ASSESSMENT_NUMBER", "Assessment Number", "TEXT", 1),
+          textField("COURSE_NUMBER", "Course Number", "TEXT", 2)
+        ],
+        substantiveField: textField("SKILL_OBSERVATION", "Skill Observation", "TEXT", 3)
+      });
+      const record = trainingEvidenceRecord(runtime, {
+        lifecycle_state: lifecycleState,
+        payload: {
+          sections: {
+            ASSESSMENT_INFORMATION: {
+              ASSESSMENT_NUMBER: "OGI-OSA-2026-0001",
+              COURSE_NUMBER: null
+            },
+            ASSESSMENT_CONTENT: {
+              SKILL_OBSERVATION: "Submitted observation"
+            }
+          }
+        }
+      });
+      mockFetchQueue([
+        { status: 200, body: record },
+        { status: 200, body: { ...runtime, definition_jsonb: trainingDefinition } }
+      ]);
+
+      renderOperationalEvidenceRecordPageWithSession({
+        initialPath: "/workbench/evidence/evidence-record-1",
+        queryClient,
+        currentSession: session
+      });
+
+      expect(await screen.findByLabelText("Assessment Number")).toHaveValue(
+        "OGI-OSA-2026-0001"
+      );
+      expect(screen.queryByLabelText("Course Number")).not.toBeInTheDocument();
+      expect(screen.getByLabelText("Skill Observation")).toBeDisabled();
+    }
+  );
+
+  it("keeps populated historical Training-scoped unresolved fields visible without broadening editability", async () => {
+    const queryClient = createTestQueryClient();
+    const runtime = trainingRuntimeTemplate("OGI_F023_OPERATIONAL_SKILLS_ASSESSMENT");
+    const trainingDefinition = trainingContextualDefinition(runtime, {
+      name: "Operational Skills Assessment",
+      fields: [
+        textField("COURSE_NUMBER", "Course Number", "TEXT", 1),
+        textField("CLIENT_NUMBER", "Client Number", "TEXT", 2),
+        textField("FACILITY_NUMBER", "Facility Number", "TEXT", 3)
+      ],
+      substantiveField: textField("SKILL_OBSERVATION", "Skill Observation", "TEXT", 4)
+    });
+    const record = trainingEvidenceRecord(runtime, {
+      lifecycle_state: "SUBMITTED",
+      payload: {
+        sections: {
+          ASSESSMENT_INFORMATION: {
+            COURSE_NUMBER: "OGI-TRN-2026-ABCD",
+            CLIENT_NUMBER: "OGI-CLI-2026-CD34",
+            FACILITY_NUMBER: "OGI-FAC-2026-EF56"
+          },
+          ASSESSMENT_CONTENT: {
+            SKILL_OBSERVATION: "Historical observation"
+          }
+        }
+      }
+    });
+    mockFetchQueue([
+      { status: 200, body: record },
+      { status: 200, body: { ...runtime, definition_jsonb: trainingDefinition } }
+    ]);
+
+    renderOperationalEvidenceRecordPageWithSession({
+      initialPath: "/workbench/evidence/evidence-record-1",
+      queryClient,
+      currentSession: session
+    });
+
+    expect(await screen.findByLabelText("Course Number")).toHaveValue(
+      "OGI-TRN-2026-ABCD"
+    );
+    expect(screen.getByLabelText("Client Number")).toHaveValue("OGI-CLI-2026-CD34");
+    expect(screen.getByLabelText("Facility Number")).toHaveValue("OGI-FAC-2026-EF56");
+    expect(screen.getByLabelText("Course Number")).toBeDisabled();
+    expect(screen.getByLabelText("Skill Observation")).toBeDisabled();
+  });
+
+  it("does not hide unresolved fields for CLIENT_SCOPED F-023 records", async () => {
+    const queryClient = createTestQueryClient();
+    const runtime = trainingRuntimeTemplate("OGI_F023_OPERATIONAL_SKILLS_ASSESSMENT");
+    const trainingDefinition = trainingContextualDefinition(runtime, {
+      name: "Operational Skills Assessment",
+      fields: [
+        textField("COURSE_NUMBER", "Course Number", "TEXT", 1),
+        textField("PERSONNEL_NUMBER", "Personnel Number", "TEXT", 2),
+        textField("CLIENT_NUMBER", "Client Number", "TEXT", 3),
+        textField("FACILITY_NUMBER", "Facility Number", "TEXT", 4),
+        textField("ASSESSOR_NUMBER", "Assessor Number", "TEXT", 5),
+        textField("ASSESSMENT_LOCATION", "Assessment Location", "TEXT", 6)
+      ],
+      substantiveField: textField("SKILL_OBSERVATION", "Skill Observation", "TEXT", 7)
+    });
+    const record = clientScopedEvidenceRecord(runtime, {
+      lifecycle_state: "DRAFT",
+      payload: {
+        sections: {
+          ASSESSMENT_INFORMATION: {
+            COURSE_NUMBER: null,
+            PERSONNEL_NUMBER: null,
+            CLIENT_NUMBER: null,
+            FACILITY_NUMBER: null,
+            ASSESSOR_NUMBER: null,
+            ASSESSMENT_LOCATION: null
+          },
+          ASSESSMENT_CONTENT: {
+            SKILL_OBSERVATION: "Client scoped observation"
+          }
+        }
+      }
+    });
+    mockFetchQueue([
+      { status: 200, body: record },
+      { status: 200, body: { ...runtime, definition_jsonb: trainingDefinition } }
+    ]);
+
+    renderOperationalEvidenceRecordPageWithSession({
+      initialPath: "/workbench/evidence/evidence-record-1",
+      queryClient,
+      currentSession: {
+        ...session,
+        permissions: [...session.permissions, "submit_operational_evidence"]
+      }
+    });
+
+    expect(await screen.findByLabelText("Course Number")).toBeInTheDocument();
+    expect(screen.getByLabelText("Personnel Number")).toBeInTheDocument();
+    expect(screen.getByLabelText("Client Number")).toBeInTheDocument();
+    expect(screen.getByLabelText("Facility Number")).toBeInTheDocument();
+    expect(screen.getByLabelText("Assessor Number")).toBeInTheDocument();
+    expect(screen.getByLabelText("Assessment Location")).toBeInTheDocument();
+    expect(screen.queryByText("Training Context")).not.toBeInTheDocument();
+  });
+
+  it("preserves hidden Training-scoped payload fields when saving a Draft", async () => {
+    const user = userEvent.setup();
+    const queryClient = createTestQueryClient();
+    const runtime = trainingRuntimeTemplate("OGI_F023_OPERATIONAL_SKILLS_ASSESSMENT");
+    const trainingDefinition = trainingContextualDefinition(runtime, {
+      name: "Operational Skills Assessment",
+      fields: [
+        textField("COURSE_NUMBER", "Course Number", "TEXT", 1),
+        textField("CLIENT_NUMBER", "Client Number", "TEXT", 2),
+        textField("FACILITY_NUMBER", "Facility Number", "TEXT", 3)
+      ],
+      substantiveField: textField("SKILL_OBSERVATION", "Skill Observation", "TEXT", 4)
+    });
+    const draftRecord = trainingEvidenceRecord(runtime, {
+      lifecycle_state: "DRAFT",
+      payload: {
+        sections: {
+          ASSESSMENT_INFORMATION: {
+            COURSE_NUMBER: null,
+            CLIENT_NUMBER: null,
+            FACILITY_NUMBER: null
+          },
+          ASSESSMENT_CONTENT: {
+            SKILL_OBSERVATION: "Initial observation"
+          }
+        }
+      }
+    });
+    const updatedRecord = {
+      ...draftRecord,
+      payload: {
+        sections: {
+          ASSESSMENT_INFORMATION: {
+            COURSE_NUMBER: null,
+            CLIENT_NUMBER: null,
+            FACILITY_NUMBER: null
+          },
+          ASSESSMENT_CONTENT: {
+            SKILL_OBSERVATION: "Updated observation"
+          }
+        }
+      }
+    };
+    const { calls } = mockFetchQueue([
+      { status: 200, body: draftRecord },
+      { status: 200, body: { ...runtime, definition_jsonb: trainingDefinition } },
+      { status: 200, body: updatedRecord }
+    ]);
+
+    renderOperationalEvidenceRecordPageWithSession({
+      initialPath: "/workbench/evidence/evidence-record-1",
+      queryClient,
+      currentSession: {
+        ...session,
+        permissions: [...session.permissions, "submit_operational_evidence"]
+      }
+    });
+
+    expect(await screen.findByLabelText("Skill Observation")).toHaveValue(
+      "Initial observation"
+    );
+    expect(screen.queryByLabelText("Course Number")).not.toBeInTheDocument();
+    await user.clear(screen.getByLabelText("Skill Observation"));
+    await user.type(screen.getByLabelText("Skill Observation"), "Updated observation");
+    await user.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    await screen.findByText("Draft evidence saved.");
+    const patchCall = calls.find((call) => call.init?.method === "PATCH");
+    const updateBody = JSON.parse(String(patchCall?.init?.body));
+    expect(updateBody.payload.sections.ASSESSMENT_INFORMATION).toMatchObject({
+      COURSE_NUMBER: null,
+      CLIENT_NUMBER: null,
+      FACILITY_NUMBER: null
+    });
+    expect(updateBody.payload.sections.ASSESSMENT_CONTENT.SKILL_OBSERVATION).toBe(
+      "Updated observation"
+    );
   });
 
   it("derives available workflow actions from the governing template and transitions successfully", async () => {
@@ -2017,6 +2441,134 @@ describe("Generic OETS renderer", () => {
     ).not.toBeInTheDocument();
   });
 });
+
+
+function trainingRuntimeTemplate(templateCode: string): OetsTemplateRuntimeDefinition {
+  return {
+    ...runtimeTemplate,
+    template_code: templateCode
+  };
+}
+
+function trainingContextualDefinition(
+  runtime: OetsTemplateRuntimeDefinition,
+  {
+    name,
+    fields,
+    substantiveField
+  }: {
+    name: string;
+    fields: ReturnType<typeof textField>[];
+    substantiveField: ReturnType<typeof textField>;
+  }
+): OetsDefinition {
+  return {
+    ...definition,
+    template_metadata: {
+      ...definition.template_metadata,
+      template_code: runtime.template_code,
+      template_name: name
+    },
+    sections: [
+      {
+        section_id: "training-assessment-information",
+        section_code: "ASSESSMENT_INFORMATION",
+        title: "Assessment Information",
+        sequence: 1,
+        repeatable: false,
+        visible: true,
+        fields
+      },
+      {
+        section_id: "training-assessment-content",
+        section_code: "ASSESSMENT_CONTENT",
+        title: "Assessment Content",
+        sequence: 2,
+        repeatable: false,
+        visible: true,
+        fields: [substantiveField]
+      }
+    ]
+  };
+}
+
+function trainingEvidenceRecord(
+  runtime: OetsTemplateRuntimeDefinition,
+  overrides: Parameters<typeof evidenceRecord>[0] = {}
+) {
+  return {
+    ...evidenceRecord({
+      client_id: null,
+      facility_id: null,
+      scope_kind: "TRAINING_SCOPED",
+      training_context: trainingContext(),
+      ...overrides
+    }),
+    template_provenance: {
+      template_id: "template-1",
+      template_code: runtime.template_code,
+      template_version: runtime.template_version,
+      template_registry_id: runtime.template_registry_id,
+      template_version_id: runtime.template_version_id,
+      schema_version: runtime.schema_version,
+      checksum: runtime.checksum
+    }
+  };
+}
+
+function clientScopedEvidenceRecord(
+  runtime: OetsTemplateRuntimeDefinition,
+  overrides: Parameters<typeof evidenceRecord>[0] = {}
+) {
+  return {
+    ...evidenceRecord({
+      scope_kind: "CLIENT_SCOPED",
+      training_context: null,
+      ...overrides
+    }),
+    template_provenance: {
+      template_id: "template-1",
+      template_code: runtime.template_code,
+      template_version: runtime.template_version,
+      template_registry_id: runtime.template_registry_id,
+      template_version_id: runtime.template_version_id,
+      schema_version: runtime.schema_version,
+      checksum: runtime.checksum
+    }
+  };
+}
+
+function trainingContext() {
+  return {
+    id: "context-1",
+    operational_evidence_record_id: "evidence-record-1",
+    training_enrollment_id: "enrollment-1",
+    training_session_id: "session-1",
+    created_by_user_id: "user-1",
+    created_at: "2026-08-20T00:00:00.000Z",
+    enrollment: {
+      id: "enrollment-1",
+      program_code: "OPEN_WATER_GUARDIAN_L1",
+      client_id: null,
+      training_session_id: "session-1",
+      trainee: {
+        id: "trainee-1",
+        student_number: "OGI-STU-2026-0007",
+        full_name: "John Santos",
+        email: null
+      },
+      client: null,
+      training_session: {
+        id: "session-1",
+        training_title: "Open Water Guardian Cohort",
+        training_start_date: "2026-08-20T00:00:00.000Z",
+        training_end_date: "2026-08-21T00:00:00.000Z",
+        facility_id: null,
+        facility: null
+      }
+    }
+  };
+}
 
 const runtimeTemplate: OetsTemplateRuntimeDefinition = {
   template_registry_id: "registry-1",
