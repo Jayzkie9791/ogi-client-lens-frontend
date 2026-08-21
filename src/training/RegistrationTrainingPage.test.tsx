@@ -454,6 +454,156 @@ function workspaceRoute(
   };
 }
 
+function runtimeTemplateRoute(templateCode: string, templateVersionId: string): MockRoute {
+  return {
+    url: `/api/v1/operational-evidence/template-versions/${templateVersionId}`,
+    responses: [
+      {
+        status: 200,
+        body: {
+          template_registry_id: `registry-${templateCode}`,
+          template_version_id: templateVersionId,
+          template_code: templateCode,
+          template_archetype: "CHECKLIST_INSPECTION",
+          template_version: "1.0",
+          schema_version: "1.0",
+          checksum: `checksum-${templateVersionId}`,
+          status: "ACTIVE",
+          definition_jsonb: oetsDefinition(templateCode)
+        }
+      }
+    ]
+  };
+}
+
+function operationalEvidenceRecordRoute(
+  record: ReturnType<typeof operationalEvidenceRecordResponse>
+): MockRoute {
+  return {
+    url: `/api/v1/operational-evidence/records/${record.id}`,
+    responses: [{ status: 200, body: record }]
+  };
+}
+
+function operationalEvidenceRecordResponse({
+  enrollment,
+  evidenceRecordId,
+  templateCode,
+  templateVersionId,
+  lifecycleState = "DRAFT",
+  createdByUserId = baseSession.id
+}: {
+  enrollment: TrainingEnrollment;
+  evidenceRecordId: string;
+  templateCode: string;
+  templateVersionId: string;
+  lifecycleState?: string;
+  createdByUserId?: string;
+}) {
+  const submittedAt =
+    lifecycleState === "DRAFT" ? "2026-08-18T05:00:00.000Z" : "2026-08-18T06:00:00.000Z";
+
+  return {
+    id: evidenceRecordId,
+    template_provenance: {
+      template_id: `template-${templateCode}`,
+      template_code: templateCode,
+      template_version: "1.0",
+      template_registry_id: `registry-${templateCode}`,
+      template_version_id: templateVersionId,
+      schema_version: "1.0",
+      checksum: `checksum-${templateVersionId}`
+    },
+    client_id: enrollment.client_id,
+    facility_id: enrollment.training_session?.facility_id ?? null,
+    lifecycle_state: lifecycleState,
+    payload: {
+      sections: {
+        GENERAL_EVIDENCE: {
+          TEXT_FIELD: "Contextual training evidence"
+        }
+      }
+    },
+    payload_checksum: "sha256:contextual-training-evidence",
+    scope_kind: "TRAINING_SCOPED",
+    training_context: {
+      id: `context-${evidenceRecordId}`,
+      operational_evidence_record_id: evidenceRecordId,
+      training_enrollment_id: enrollment.id,
+      training_session_id: enrollment.training_session_id,
+      created_by_user_id: createdByUserId,
+      created_at: "2026-08-18T05:00:00.000Z",
+      enrollment: {
+        id: enrollment.id,
+        program_code: enrollment.program_code,
+        client_id: enrollment.client_id,
+        training_session_id: enrollment.training_session_id,
+        trainee: enrollment.trainee,
+        client: enrollment.client,
+        training_session: enrollment.training_session
+          ? {
+              ...enrollment.training_session,
+              facility: null
+            }
+          : null
+      }
+    },
+    created_by_user_id: createdByUserId,
+    submitted_by_user_id: createdByUserId,
+    created_at: "2026-08-18T05:00:00.000Z",
+    submitted_at: submittedAt,
+    updated_at: "2026-08-18T05:00:00.000Z"
+  };
+}
+
+function oetsDefinition(templateCode: string) {
+  return {
+    schema_version: "1.0",
+    template_metadata: {
+      template_id: `template-${templateCode}`,
+      template_code: templateCode,
+      template_name: trainingTemplateName(templateCode),
+      module: "TRAINING",
+      version: "1.0"
+    },
+    sections: [
+      {
+        section_id: "section-general-evidence",
+        section_code: "GENERAL_EVIDENCE",
+        title: "General Evidence",
+        sequence: 1,
+        repeatable: false,
+        visible: true,
+        fields: [
+          {
+            field_id: "field-text",
+            field_code: "TEXT_FIELD",
+            label: "Text Field",
+            field_type: "TEXT",
+            required: false,
+            readonly: false,
+            visible: true,
+            sequence: 1
+          }
+        ]
+      }
+    ]
+  };
+}
+
+function trainingTemplateName(templateCode: string) {
+  switch (templateCode) {
+    case "OGI_F023_OPERATIONAL_SKILLS_ASSESSMENT":
+      return "Operational Skills Assessment";
+    case "OGI_F024_OPERATIONAL_KNOWLEDGE_ASSESSMENT_RECORD":
+      return "Operational Knowledge Assessment Record";
+    case "OGI_F025_OPERATIONAL_READINESS_EVALUATION":
+      return "Operational Readiness Evaluation";
+    default:
+      return "Training Evidence";
+  }
+}
+
 interface MockResponse {
   status: number;
   body?: unknown;
@@ -1061,6 +1211,225 @@ describe("Registration Training frontend", () => {
     expect(draftCalls.map((call) => String(call.init?.body)).join("\n")).not.toContain(
       "assessment"
     );
+  });
+
+  const contextualDraftCases = [
+    {
+      title: "Skills Assessment",
+      evidenceRecordId: skillsDraftId,
+      templateCode: "OGI_F023_OPERATIONAL_SKILLS_ASSESSMENT",
+      templateVersionId: "template-version-skills"
+    },
+    {
+      title: "Knowledge Assessment",
+      evidenceRecordId: knowledgeRecordId,
+      templateCode: "OGI_F024_OPERATIONAL_KNOWLEDGE_ASSESSMENT_RECORD",
+      templateVersionId: "template-version-knowledge"
+    },
+    {
+      title: "Readiness Evaluation",
+      evidenceRecordId: readinessRecordId,
+      templateCode: "OGI_F025_OPERATIONAL_READINESS_EVALUATION",
+      templateVersionId: "template-version-readiness"
+    }
+  ] as const;
+
+  it.each(contextualDraftCases)(
+    "opens newly-created Training-scoped $title DRAFT as editable for the current Training actor",
+    async ({ evidenceRecordId, templateCode, templateVersionId, title }) => {
+      const user = userEvent.setup();
+      const trainingDraftSession: AuthenticatedSession = {
+        ...baseSession,
+        permissions: baseSession.permissions.filter(
+          (permission) => permission !== "submit_operational_evidence"
+        )
+      };
+      const draftRecord = operationalEvidenceRecordResponse({
+        enrollment: independentEnrollmentB,
+        evidenceRecordId,
+        templateCode,
+        templateVersionId
+      });
+
+      mockFetchRoutes([
+        ...authRoutes(trainingDraftSession),
+        {
+          url: "/api/v1/training/trainees",
+          responses: [{ status: 200, body: { trainees: [traineeB] } }]
+        },
+        {
+          url: `/api/v1/training/trainees/${traineeBId}`,
+          responses: [{ status: 200, body: traineeB }]
+        },
+        {
+          url: `/api/v1/training/trainees/${traineeBId}/enrollments`,
+          responses: [{ status: 200, body: { enrollments: [independentEnrollmentB] } }]
+        },
+        workspaceRoute(independentEnrollmentB),
+        {
+          method: "POST",
+          url: `/api/v1/training/enrollments/${independentEnrollmentB.id}/evidence-drafts`,
+          responses: [
+            {
+              status: 201,
+              body: {
+                evidence_record_id: evidenceRecordId,
+                template_code: templateCode,
+                template_version_id: templateVersionId,
+                template_version: "1.0",
+                schema_version: "1.0",
+                client_id: null,
+                facility_id: null,
+                lifecycle_state: "DRAFT",
+                payload_checksum: "sha256:test",
+                scope_kind: "TRAINING_SCOPED",
+                created_at: "2026-08-18T05:00:00.000Z",
+                submitted_at: null,
+                updated_at: "2026-08-18T05:00:00.000Z"
+              }
+            }
+          ]
+        },
+        operationalEvidenceRecordRoute(draftRecord),
+        runtimeTemplateRoute(templateCode, templateVersionId)
+      ]);
+
+      const { router } = renderWithRoute(routes.registrationTraining);
+
+      const slotHeading = await screen.findByRole("heading", { name: title });
+      await user.click(
+        within(slotHeading.closest("article") as HTMLElement).getByRole("button", {
+          name: "Create Draft"
+        })
+      );
+
+      await waitFor(() =>
+        expect(router.state.location.pathname).toBe(
+          routes.evidenceRecordPath(evidenceRecordId)
+        )
+      );
+      expect(await screen.findByRole("heading", { name: "Draft Evidence" })).toBeInTheDocument();
+      expect(screen.queryByText("Read only")).not.toBeInTheDocument();
+      expect(screen.getByText("Training Context")).toBeInTheDocument();
+      expect(screen.getAllByText("John Santos").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("OGI-STU-2026-0002").length).toBeGreaterThan(0);
+      expect(screen.getByLabelText("Text Field")).not.toBeDisabled();
+    }
+  );
+
+  it("opens an active Training-scoped DRAFT from Open Draft as editable for the current Training actor", async () => {
+    const user = userEvent.setup();
+    const trainingDraftSession: AuthenticatedSession = {
+      ...baseSession,
+      permissions: baseSession.permissions.filter(
+        (permission) => permission !== "submit_operational_evidence"
+      )
+    };
+    const activeDraft = trainingEvidenceRecord(independentEnrollmentB);
+    const draftRecord = operationalEvidenceRecordResponse({
+      enrollment: independentEnrollmentB,
+      evidenceRecordId: skillsDraftId,
+      templateCode: "OGI_F023_OPERATIONAL_SKILLS_ASSESSMENT",
+      templateVersionId: "template-version-skills"
+    });
+
+    mockFetchRoutes([
+      ...authRoutes(trainingDraftSession),
+      {
+        url: "/api/v1/training/trainees",
+        responses: [{ status: 200, body: { trainees: [traineeB] } }]
+      },
+      {
+        url: `/api/v1/training/trainees/${traineeBId}`,
+        responses: [{ status: 200, body: traineeB }]
+      },
+      {
+        url: `/api/v1/training/trainees/${traineeBId}/enrollments`,
+        responses: [{ status: 200, body: { enrollments: [independentEnrollmentB] } }]
+      },
+      workspaceRoute(independentEnrollmentB, [
+        trainingEvidenceWorkspace(independentEnrollmentB, [
+          trainingEvidenceSlot("SKILLS", independentEnrollmentB, {
+            active_draft: activeDraft,
+            history: [activeDraft],
+            can_create_draft: false
+          }),
+          trainingEvidenceSlot("KNOWLEDGE", independentEnrollmentB),
+          trainingEvidenceSlot("READINESS", independentEnrollmentB)
+        ])
+      ]),
+      operationalEvidenceRecordRoute(draftRecord),
+      runtimeTemplateRoute("OGI_F023_OPERATIONAL_SKILLS_ASSESSMENT", "template-version-skills")
+    ]);
+
+    const { router } = renderWithRoute(routes.registrationTraining);
+
+    await user.click((await screen.findAllByRole("link", { name: "Open Draft" }))[0]);
+
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe(routes.evidenceRecordPath(skillsDraftId))
+    );
+    expect(await screen.findByRole("heading", { name: "Draft Evidence" })).toBeInTheDocument();
+    expect(screen.queryByText("Read only")).not.toBeInTheDocument();
+    expect(screen.getByText("Training Context")).toBeInTheDocument();
+    expect(screen.getByLabelText("Text Field")).not.toBeDisabled();
+  });
+
+  it.each([
+    ["SUBMITTED", "Submitted Evidence"],
+    ["GOVERNANCE_APPROVED", "Submitted Evidence"]
+  ] as const)(
+    "keeps Training-scoped %s evidence immutable",
+    async (lifecycleState, heading) => {
+      const record = operationalEvidenceRecordResponse({
+        enrollment: independentEnrollmentB,
+        evidenceRecordId: skillsDraftId,
+        templateCode: "OGI_F023_OPERATIONAL_SKILLS_ASSESSMENT",
+        templateVersionId: "template-version-skills",
+        lifecycleState
+      });
+
+      mockFetchRoutes([
+        ...authRoutes(baseSession),
+        operationalEvidenceRecordRoute(record),
+        runtimeTemplateRoute("OGI_F023_OPERATIONAL_SKILLS_ASSESSMENT", "template-version-skills")
+      ]);
+
+      renderWithRoute(routes.evidenceRecordPath(skillsDraftId));
+
+      expect(await screen.findByRole("heading", { name: heading })).toBeInTheDocument();
+      expect(screen.getByText("Read only")).toBeInTheDocument();
+      expect(screen.getByText("Training Context")).toBeInTheDocument();
+      expect(screen.getByLabelText("Text Field")).toBeDisabled();
+      expect(screen.queryByRole("button", { name: "Save Draft" })).not.toBeInTheDocument();
+    }
+  );
+
+  it("does not make another actor's Training-scoped DRAFT editable without draft authority", async () => {
+    const unauthorizedSession: AuthenticatedSession = {
+      ...baseSession,
+      permissions: ["view_training"]
+    };
+    const record = operationalEvidenceRecordResponse({
+      enrollment: independentEnrollmentB,
+      evidenceRecordId: skillsDraftId,
+      templateCode: "OGI_F023_OPERATIONAL_SKILLS_ASSESSMENT",
+      templateVersionId: "template-version-skills",
+      createdByUserId: "00000000-0000-4000-8000-000000000099"
+    });
+
+    mockFetchRoutes([
+      ...authRoutes(unauthorizedSession),
+      operationalEvidenceRecordRoute(record),
+      runtimeTemplateRoute("OGI_F023_OPERATIONAL_SKILLS_ASSESSMENT", "template-version-skills")
+    ]);
+
+    renderWithRoute(routes.evidenceRecordPath(skillsDraftId));
+
+    expect(await screen.findByRole("heading", { name: "Draft Evidence" })).toBeInTheDocument();
+    expect(screen.getByText("Read only")).toBeInTheDocument();
+    expect(screen.getByText("Training Context")).toBeInTheDocument();
+    expect(screen.getByLabelText("Text Field")).toBeDisabled();
   });
 
   it("renders active drafts, linked history, and assessment/readiness summaries", async () => {

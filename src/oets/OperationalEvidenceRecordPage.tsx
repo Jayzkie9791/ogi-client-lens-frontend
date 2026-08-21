@@ -14,6 +14,7 @@ import {
 } from "./displayLabels";
 import {
   getOperationalEvidenceRecord,
+  OperationalEvidenceRecord,
   transitionOperationalEvidenceRecord,
   updateDraftOperationalEvidencePayload
 } from "./evidenceSubmissionApi";
@@ -386,7 +387,9 @@ export function OperationalEvidenceRecordPage() {
 
   const isDraftRecord = record.lifecycle_state === "DRAFT";
   const canEditDraft =
-    isDraftRecord && auth.canUsePermission("submit_operational_evidence");
+    isDraftRecord &&
+    (auth.canUsePermission("submit_operational_evidence") ||
+      canEditOwnTrainingScopedDraft(record, auth));
   const evidenceHeadingId = isDraftRecord
     ? "draft-evidence-heading"
     : "submitted-evidence-heading";
@@ -549,6 +552,18 @@ function TrainingEvidenceContextBanner({
         ]}
       />
     </Surface>
+  );
+}
+
+function canEditOwnTrainingScopedDraft(
+  record: OperationalEvidenceRecord,
+  auth: ReturnType<typeof useAuth>
+) {
+  return (
+    record.scope_kind === "TRAINING_SCOPED" &&
+    Boolean(record.training_context) &&
+    record.created_by_user_id === auth.session?.id &&
+    auth.canUsePermission("view_training")
   );
 }
 function RecordIdentityPanel({
