@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 import { isApiError } from "../api/errors";
 import { routes } from "../app/routePaths";
@@ -1530,6 +1530,7 @@ function TrainingEvidenceWorkspacePanel({
   enrollment: TrainingEnrollment;
 }) {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [message, setMessage] = useState<string | null>(null);
   const workspaceQueryKey = [
     "training",
@@ -1556,9 +1557,12 @@ function TrainingEvidenceWorkspacePanel({
 
       setMessage(trainingEvidenceErrorMessage(error));
     },
-    onSuccess() {
+    onSuccess(draft) {
       setMessage("Training evidence draft created.");
       void queryClient.invalidateQueries({ queryKey: workspaceQueryKey });
+      void navigate(routes.evidenceRecordPath(draft.evidence_record_id), {
+        state: { returnTo: routes.registrationTraining }
+      });
     }
   });
 

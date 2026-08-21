@@ -245,7 +245,10 @@ function QueueItems({
                   label="Claim state"
                   value={claimStateLabel(item, currentUserId)}
                 />
-                <MetadataItem label="Client ID" value={item.evidence_record.client_id} />
+                <MetadataItem
+                  label="Client ID"
+                  value={item.evidence_record.client_id ?? "OGI Direct / Independent"}
+                />
                 <MetadataItem
                   label="Facility ID"
                   value={item.evidence_record.facility_id ?? "No facility context"}

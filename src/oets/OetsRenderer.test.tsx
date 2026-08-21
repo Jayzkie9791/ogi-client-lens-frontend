@@ -177,9 +177,12 @@ function jsonResponse(status: number, body: unknown, statusText = "OK") {
 
 function evidenceRecord(
   overrides: Partial<{
+    client_id: string | null;
     facility_id: string | null;
     lifecycle_state: string;
     payload: Pick<OetsEvidencePayload, "sections">;
+    scope_kind: "CLIENT_SCOPED" | "TRAINING_SCOPED";
+    training_context: unknown;
   }> = {}
 ) {
   return {
@@ -200,6 +203,8 @@ function evidenceRecord(
       sections: {}
     },
     payload_checksum: "payload-checksum-1",
+    scope_kind: "CLIENT_SCOPED",
+    training_context: null,
     created_by_user_id: session.id,
     submitted_by_user_id: session.id,
     created_at: "2026-07-27T00:00:00.000Z",
@@ -448,7 +453,7 @@ describe("Generic OETS renderer", () => {
     expect(screen.getByText("Current State")).toBeInTheDocument();
     expect(screen.getByText("Draft")).toBeInTheDocument();
     expect(
-      screen.getByRole("heading", { name: "Submitted Evidence" })
+      screen.getByRole("heading", { name: "Draft Evidence" })
     ).toBeInTheDocument();
     expect(
       screen.getAllByText(runtimeTemplate.template_code).length
@@ -459,7 +464,7 @@ describe("Generic OETS renderer", () => {
     expect(screen.getByText("payload-checksum-1")).toBeInTheDocument();
     expect(
       screen
-        .getByRole("heading", { name: "Submitted Evidence" })
+        .getByRole("heading", { name: "Draft Evidence" })
         .compareDocumentPosition(screen.getByText("Provenance")) &
         Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
@@ -474,6 +479,110 @@ describe("Generic OETS renderer", () => {
       "/api/v1/operational-evidence/records/evidence-record-1",
       "/api/v1/operational-evidence/template-versions/version-1"
     ]);
+  });
+
+  it("edits a Training-scoped Draft payload through the generic OETS renderer with contextual handoff details", async () => {
+    const user = userEvent.setup();
+    const queryClient = createTestQueryClient();
+    const draftRecord = evidenceRecord({
+      client_id: null,
+      facility_id: null,
+      lifecycle_state: "DRAFT",
+      scope_kind: "TRAINING_SCOPED",
+      training_context: {
+        id: "context-1",
+        operational_evidence_record_id: "evidence-record-1",
+        training_enrollment_id: "enrollment-1",
+        training_session_id: "session-1",
+        created_by_user_id: "user-1",
+        created_at: "2026-08-20T00:00:00.000Z",
+        enrollment: {
+          id: "enrollment-1",
+          program_code: "OPEN_WATER_GUARDIAN_L1",
+          client_id: null,
+          training_session_id: "session-1",
+          trainee: {
+            id: "trainee-1",
+            student_number: "OGI-STU-2026-0007",
+            full_name: "John Santos",
+            email: null
+          },
+          client: null,
+          training_session: {
+            id: "session-1",
+            training_title: "Open Water Guardian Cohort",
+            training_start_date: "2026-08-20T00:00:00.000Z",
+            training_end_date: "2026-08-21T00:00:00.000Z",
+            facility_id: null,
+            facility: null
+          }
+        }
+      },
+      payload: {
+        sections: {
+          GENERAL_EVIDENCE: {
+            TEXT_FIELD: "Initial training evidence"
+          }
+        }
+      }
+    });
+    const updatedRecord = {
+      ...draftRecord,
+      payload: {
+        sections: {
+          GENERAL_EVIDENCE: {
+            TEXT_FIELD: "Updated training evidence"
+          }
+        }
+      }
+    };
+    const { calls } = mockFetchQueue([
+      { status: 200, body: draftRecord },
+      { status: 200, body: { ...runtimeTemplate, definition_jsonb: definition } },
+      { status: 200, body: updatedRecord }
+    ]);
+
+    renderOperationalEvidenceRecordPageWithSession({
+      initialPath: "/workbench/evidence/evidence-record-1",
+      queryClient,
+      currentSession: {
+        ...session,
+        permissions: [...session.permissions, "submit_operational_evidence"]
+      }
+    });
+
+    expect(await screen.findByRole("heading", { name: "Draft Evidence" })).toBeInTheDocument();
+    expect(screen.getByText("Training Context")).toBeInTheDocument();
+    expect(screen.getByText("John Santos")).toBeInTheDocument();
+    expect(screen.getByText("OGI-STU-2026-0007")).toBeInTheDocument();
+    expect(screen.getByText("Open Water Guardian L1")).toBeInTheDocument();
+    expect(screen.getByText("Open Water Guardian Cohort")).toBeInTheDocument();
+    expect(screen.getAllByText("OGI Direct / Independent").length).toBeGreaterThan(0);
+    expect(screen.getByText("None")).toBeInTheDocument();
+    expect(screen.queryByText("enrollment-1")).not.toBeInTheDocument();
+    expect(screen.queryByText("session-1")).not.toBeInTheDocument();
+
+    const textField = screen.getByLabelText("Text Field");
+    expect(textField).not.toBeDisabled();
+    await user.clear(textField);
+    await user.type(textField, "Updated training evidence");
+    await user.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    await screen.findByText("Draft evidence saved.");
+    const patchCall = calls.find((call) => call.init?.method === "PATCH");
+    expect(patchCall?.url).toBe(
+      "/api/v1/operational-evidence/records/evidence-record-1/payload"
+    );
+    const updateBody = JSON.parse(String(patchCall?.init?.body));
+    expect(updateBody.payload.template_code).toBe(runtimeTemplate.template_code);
+    expect(updateBody.payload.template_version_id).toBe(
+      runtimeTemplate.template_version_id
+    );
+    expect(updateBody.payload.sections.GENERAL_EVIDENCE.TEXT_FIELD).toBe(
+      "Updated training evidence"
+    );
+    expect(updateBody.payload).not.toHaveProperty("client_id");
+    expect(updateBody.payload).not.toHaveProperty("facility_id");
   });
 
   it("derives available workflow actions from the governing template and transitions successfully", async () => {

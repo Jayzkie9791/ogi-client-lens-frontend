@@ -14,7 +14,8 @@ import {
 } from "./displayLabels";
 import {
   getOperationalEvidenceRecord,
-  transitionOperationalEvidenceRecord
+  transitionOperationalEvidenceRecord,
+  updateDraftOperationalEvidencePayload
 } from "./evidenceSubmissionApi";
 
 import { resolveGovernanceAuthorityCode } from "./governanceAuthorityResolver";
@@ -38,7 +39,7 @@ import {
 
 import { OetsRenderer } from "./OetsRenderer";
 import { getRuntimeTemplateVersion } from "./runtimeTemplateApi";
-import { OetsDefinition } from "./types";
+import { OetsDefinition, OetsEvidencePayload } from "./types";
 
 interface WorkflowTransition {
   from: string;
@@ -127,7 +128,7 @@ export function OperationalEvidenceRecordPage() {
 
       return listGovernanceQueue({
         claim_status: "ANY",
-        client_id: record.client_id,
+        client_id: record.client_id ?? undefined,
         facility_id: record.facility_id ?? undefined,
         governance_authority_code:
           governanceTransitions.length === 1
@@ -218,6 +219,16 @@ export function OperationalEvidenceRecordPage() {
       void queryClient.invalidateQueries({
         queryKey: ["operational-evidence-record", recordId]
       });
+    }
+  });
+  const draftPayloadMutation = useMutation({
+    mutationFn: (payload: OetsEvidencePayload) =>
+      updateDraftOperationalEvidencePayload(recordId ?? "", { payload }),
+    onSuccess(updatedRecord) {
+      queryClient.setQueryData(
+        ["operational-evidence-record", recordId],
+        updatedRecord
+      );
     }
   });
 
@@ -373,35 +384,65 @@ export function OperationalEvidenceRecordPage() {
     );
   }
 
+  const isDraftRecord = record.lifecycle_state === "DRAFT";
+  const canEditDraft =
+    isDraftRecord && auth.canUsePermission("submit_operational_evidence");
+  const evidenceHeadingId = isDraftRecord
+    ? "draft-evidence-heading"
+    : "submitted-evidence-heading";
+
   return (
     <div className="space-y-4">
       <RecordIdentityPanel record={record} />
 
-      <section aria-labelledby="submitted-evidence-heading" className="space-y-4">
+      <section aria-labelledby={evidenceHeadingId} className="space-y-4">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-primary-blue">
             Record Truth
           </p>
           <h2
             className="mt-1 text-xl font-semibold text-text-primary"
-            id="submitted-evidence-heading"
+            id={evidenceHeadingId}
           >
-            Submitted Evidence
+            {isDraftRecord ? "Draft Evidence" : "Submitted Evidence"}
           </h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-text-muted">
-            This read-only view presents the evidence payload submitted for this
-            Operational Evidence record.
+            {isDraftRecord
+              ? "This Draft Operational Evidence record can be edited until it is submitted."
+              : "This read-only view presents the evidence payload submitted for this Operational Evidence record."}
           </p>
         </div>
 
+        {record.scope_kind === "TRAINING_SCOPED" && record.training_context ? (
+          <TrainingEvidenceContextBanner record={record} />
+        ) : null}
+
         <OetsRenderer
           definition={narrowing.definition}
+          formMessage={
+            draftPayloadMutation.error
+              ? draftPayloadErrorMessage(draftPayloadMutation.error)
+              : undefined
+          }
           initialPayload={record.payload}
-          readOnly
+          isSubmitting={draftPayloadMutation.isPending}
+          onSubmit={canEditDraft ? (payload) => draftPayloadMutation.mutate(payload) : undefined}
+          readOnly={!canEditDraft}
           runtimeTemplate={templateQuery.data}
+          submitHelpText="Save Draft changes before submitting this Operational Evidence record."
+          submitLabel="Save Draft"
+          submittingLabel="Saving..."
+          submitSuccess={
+            draftPayloadMutation.isSuccess
+              ? {
+                  evidenceRecordId: record.id,
+                  lifecycleState: record.lifecycle_state
+                }
+              : null
+          }
+          submitSuccessMessage="Draft evidence saved."
         />
       </section>
-
       <WorkflowActions
         error={transitionMutation.error}
         isPending={transitionMutation.isPending}
@@ -469,6 +510,47 @@ export function OperationalEvidenceRecordPage() {
   );
 }
 
+function TrainingEvidenceContextBanner({
+  record
+}: {
+  record: Awaited<ReturnType<typeof getOperationalEvidenceRecord>>;
+}) {
+  const context = record.training_context;
+
+  if (!context) {
+    return null;
+  }
+
+  const enrollment = context.enrollment;
+  const session = enrollment.training_session;
+  const facility = session?.facility;
+
+  return (
+    <Surface className="space-y-4 border-primary-blue">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-primary-blue">
+          Training Context
+        </p>
+        <h3 className="mt-1 text-lg font-semibold text-text-primary">
+          {enrollment.trainee.full_name}
+        </h3>
+        <p className="mt-1 text-sm text-text-muted">
+          {enrollment.trainee.student_number ?? "Student number pending"}
+        </p>
+      </div>
+      <MetadataGrid
+        entries={[
+          ["Program", humanizeCode(enrollment.program_code)],
+          ["Training Session", session?.training_title ?? "No assigned Training Session"],
+          ["Session Dates", trainingSessionDateRange(session)],
+          ["Client Sponsorship", enrollment.client?.organization_name ?? "OGI Direct / Independent"],
+          ["Facility", facility?.facility_name ?? "None"],
+          ["Instructor", "Not specified"]
+        ]}
+      />
+    </Surface>
+  );
+}
 function RecordIdentityPanel({
   record
 }: {
@@ -499,7 +581,7 @@ function RecordIdentityPanel({
       </div>
       <MetadataGrid
         entries={[
-          ["Client ID", record.client_id],
+          ["Client ID", record.client_id ?? "OGI Direct / Independent"],
           ["Facility ID", record.facility_id ?? "No facility context"],
           ["Submitted at", record.submitted_at],
           ["Template version", record.template_provenance.template_version]
@@ -1283,6 +1365,23 @@ function reviewConclusionErrorMessage(error: Error) {
   return "The Review Conclusion could not be loaded.";
 }
 
+function draftPayloadErrorMessage(error: Error) {
+  if (isApiError(error)) {
+    if ([401, 403].includes(error.status)) {
+      return "You are not authorized to edit this Draft Operational Evidence record.";
+    }
+
+    if (error.status === 409) {
+      return "This Operational Evidence record is no longer editable as a Draft.";
+    }
+
+    if (error.status === 422) {
+      return "The Draft payload was rejected by the backend. Review the highlighted fields and try again.";
+    }
+  }
+
+  return "The Draft evidence payload could not be saved.";
+}
 function transitionErrorMessage(error: Error) {
   if (isApiError(error)) {
     if ([401, 403].includes(error.status)) {
@@ -1301,6 +1400,28 @@ function transitionErrorMessage(error: Error) {
   return "The review action could not be completed.";
 }
 
+function trainingSessionDateRange(
+  session: NonNullable<
+    Awaited<ReturnType<typeof getOperationalEvidenceRecord>>["training_context"]
+  >["enrollment"]["training_session"]
+) {
+  if (!session?.training_start_date) {
+    return "Not assigned";
+  }
+
+  const start = formatDateValue(session.training_start_date);
+  const end = session.training_end_date
+    ? formatDateValue(session.training_end_date)
+    : null;
+
+  return end ? `${start} to ${end}` : start;
+}
+
+function formatDateValue(value: string) {
+  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(
+    new Date(value)
+  );
+}
 function humanizeCode(value: string) {
   return value
     .split(/[_\s-]+/)
@@ -1317,7 +1438,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function MetadataGrid({ entries }: { entries: Array<[string, string]> }) {
+function MetadataGrid({ entries }: { entries: Array<[string, string | null | undefined]> }) {
   return (
     <dl className="grid gap-3 md:grid-cols-2">
       {entries.map(([label, value]) => (
@@ -1325,7 +1446,7 @@ function MetadataGrid({ entries }: { entries: Array<[string, string]> }) {
           <dt className="text-xs font-semibold uppercase tracking-wide text-text-muted">
             {label}
           </dt>
-          <dd className="mt-1 break-all text-sm text-text-primary">{value}</dd>
+          <dd className="mt-1 break-words text-sm text-text-primary">{value ?? "None"}</dd>
         </div>
       ))}
     </dl>

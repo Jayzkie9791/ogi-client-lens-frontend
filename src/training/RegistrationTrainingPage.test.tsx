@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -1026,28 +1026,29 @@ describe("Registration Training frontend", () => {
       }
     ]);
 
-    renderWithRoute(routes.registrationTraining);
+    const { router } = renderWithRoute(routes.registrationTraining);
 
-    for (const request of draftRequests) {
-      const slotHeading = await screen.findByRole("heading", {
-        name: request.title
-      });
-      await user.click(
-        within(slotHeading.closest("article") as HTMLElement).getByRole(
-          "button",
-          {
-            name: "Create Draft"
-          }
-        )
-      );
-      await screen.findByText("Training evidence draft created.");
-    }
+    const request = draftRequests[0];
+    const slotHeading = await screen.findByRole("heading", {
+      name: request.title
+    });
+    await user.click(
+      within(slotHeading.closest("article") as HTMLElement).getByRole("button", {
+        name: "Create Draft"
+      })
+    );
+
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe(
+        routes.evidenceRecordPath(request.evidenceRecordId)
+      )
+    );
 
     const draftCalls = calls.filter((call) => call.url.endsWith("/evidence-drafts"));
 
-    expect(draftCalls.map((call) => JSON.parse(String(call.init?.body)))).toEqual(
-      draftRequests.map((request) => ({ template_code: request.templateCode }))
-    );
+    expect(draftCalls.map((call) => JSON.parse(String(call.init?.body)))).toEqual([
+      { template_code: request.templateCode }
+    ]);
     expect(draftCalls.map((call) => String(call.init?.body)).join("\n")).not.toContain(
       "client_id"
     );

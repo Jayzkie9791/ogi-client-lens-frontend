@@ -37,6 +37,11 @@ interface OetsRendererProps {
   isSubmitting?: boolean;
   onSubmit?: (payload: OetsEvidencePayload) => void;
   submitDisabledReason?: string | null;
+  submitHelpText?: string;
+  submitLabel?: string;
+  submittingLabel?: string;
+  submitSuccessMessage?: string;
+  submitSuccessLinkLabel?: string;
   submitSuccess?: {
     evidenceRecordId: string;
     lifecycleState: string;
@@ -54,6 +59,11 @@ export function OetsRenderer({
   isSubmitting = false,
   onSubmit,
   submitDisabledReason,
+  submitHelpText = "Create a draft audit record.",
+  submitLabel = "Create Audit Draft",
+  submittingLabel = "Creating...",
+  submitSuccessMessage = "Draft audit created successfully.",
+  submitSuccessLinkLabel = "Open Audit",
   submitSuccess
 }: OetsRendererProps) {
   const [state, setState] = useState(() =>
@@ -93,13 +103,13 @@ export function OetsRenderer({
         {!readOnly && onSubmit ? (
           <div className="mt-4 flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-sm text-text-muted">
-              {submitDisabledReason ?? "Create a draft audit record."}
+              {submitDisabledReason ?? submitHelpText}
             </div>
             <Button
               disabled={isSubmitting || Boolean(submitDisabledReason)}
               onClick={() => onSubmit(payload)}
             >
-              {isSubmitting ? "Creating..." : "Create Audit Draft"}
+              {isSubmitting ? submittingLabel : submitLabel}
             </Button>
           </div>
         ) : null}
@@ -109,14 +119,14 @@ export function OetsRenderer({
             role="status"
           >
             <p>
-              Draft audit created successfully.
+              {submitSuccessMessage}
             </p>
             {submitSuccess.recordHref ? (
               <Link
                 className="inline-flex font-semibold text-primary-blue underline-offset-2 hover:underline"
                 to={submitSuccess.recordHref}
               >
-                Open Audit
+                {submitSuccessLinkLabel}
               </Link>
             ) : null}
           </div>
