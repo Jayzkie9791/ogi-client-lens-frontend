@@ -41,6 +41,11 @@ import {
 import { OetsFieldVisibilityPolicy, OetsRenderer } from "./OetsRenderer";
 import { getRuntimeTemplateVersion } from "./runtimeTemplateApi";
 import { OetsDefinition, OetsEvidencePayload, OetsFieldValue } from "./types";
+import {
+  createEvidenceAttestation,
+  CreateEvidenceAttestationRequest,
+  listEvidenceAttestations
+} from "./attestationApi";
 
 const trainingAssessmentInformationSectionCode = "ASSESSMENT_INFORMATION";
 const trainingAssessmentNumberFieldCode = "ASSESSMENT_NUMBER";
@@ -263,6 +268,20 @@ export function OperationalEvidenceRecordPage() {
       });
     }
   });
+  const attestationQueryKey = [
+    "operational-evidence-attestations",
+    record?.id,
+    record?.payload_checksum
+  ] as const;
+  const attestationQuery = useQuery({
+    enabled: Boolean(
+      record?.id &&
+      narrowing?.definition &&
+      hasGovernedAttestationFields(narrowing.definition)
+    ),
+    queryKey: attestationQueryKey,
+    queryFn: () => listEvidenceAttestations(record?.id ?? "")
+  });
   const draftPayloadMutation = useMutation({
     mutationFn: (payload: OetsEvidencePayload) =>
       updateDraftOperationalEvidencePayload(recordId ?? "", { payload }),
@@ -271,6 +290,27 @@ export function OperationalEvidenceRecordPage() {
         ["operational-evidence-record", recordId],
         updatedRecord
       );
+      void queryClient.invalidateQueries({
+        queryKey: ["operational-evidence-attestations", updatedRecord.id]
+      });
+    }
+  });
+  const attestationMutation = useMutation({
+    mutationFn: (request: CreateEvidenceAttestationRequest) =>
+      createEvidenceAttestation(recordId ?? "", request),
+    onSuccess(attestation) {
+      queryClient.setQueryData<{ attestations: (typeof attestation)[] }>(
+        attestationQueryKey,
+        (current) => ({
+          attestations: [
+            ...(current?.attestations.filter((item) => item.id !== attestation.id) ?? []),
+            attestation
+          ]
+        })
+      );
+      void queryClient.invalidateQueries({
+        queryKey: ["operational-evidence-attestations", recordId]
+      });
     }
   });
 
@@ -467,6 +507,22 @@ export function OperationalEvidenceRecordPage() {
         ) : null}
 
         <OetsRenderer
+          attestationContext={auth.session ? {
+            evidenceRecordId: record.id,
+            payloadChecksum: record.payload_checksum,
+            templateVersionId: record.template_provenance.template_version_id,
+            templateChecksum: record.template_provenance.checksum,
+            actorDisplayName: auth.session.fullName
+          } : undefined}
+          attestationErrorMessage={
+            attestationMutation.error
+              ? attestationErrorMessage(attestationMutation.error)
+              : attestationQuery.error
+                ? "Governed attestation history could not be loaded."
+                : undefined
+          }
+          attestationPending={attestationMutation.isPending}
+          attestations={attestationQuery.data?.attestations ?? []}
           definition={renderedDefinition}
           formMessage={
             draftPayloadMutation.error
@@ -477,6 +533,7 @@ export function OperationalEvidenceRecordPage() {
           fieldVisibilityPolicy={fieldVisibilityPolicy}
           isSubmitting={draftPayloadMutation.isPending}
           onSubmit={canEditDraft ? (payload) => draftPayloadMutation.mutate(payload) : undefined}
+          onAttest={canEditDraft ? (request) => attestationMutation.mutateAsync(request) : undefined}
           readOnly={!canEditDraft}
           runtimeTemplate={templateQuery.data}
           submitHelpText="Save Draft changes before submitting this Operational Evidence record."
@@ -1444,8 +1501,19 @@ function draftPayloadErrorMessage(error: Error) {
 
   return "The Draft evidence payload could not be saved.";
 }
+
+function attestationErrorMessage(error: Error) {
+  if (isApiError(error)) {
+    return error.message;
+  }
+  return "The governed attestation could not be recorded. Review the evidence context and try again.";
+}
+
 function transitionErrorMessage(error: Error) {
   if (isApiError(error)) {
+    if (error.code === "OEE_REQUIRED_ATTESTATION_MISSING") {
+      return "Required governed attestations are missing or stale. Review the attestation controls before finalizing this evidence.";
+    }
     if ([401, 403].includes(error.status)) {
       return "You are not authorized to perform this review action.";
     }
@@ -1585,6 +1653,16 @@ function markTrainingAssessmentNumberReadonly(
       };
     })
   };
+}
+
+function hasGovernedAttestationFields(definition: OetsDefinition) {
+  return definition.sections.some((section) =>
+    section.fields.some(
+      (field) =>
+        field.field_type === "SIGNATURE" &&
+        isRecord(field.metadata?.governed_attestation)
+    )
+  );
 }
 
 function templateMatchesRecord(

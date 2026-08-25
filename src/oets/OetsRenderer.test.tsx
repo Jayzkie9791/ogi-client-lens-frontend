@@ -331,6 +331,62 @@ function clientContext() {
   };
 }
 
+const governedSignatureField = {
+  field_id: "00000000-0000-4000-8000-000000000099",
+  field_code: "GOVERNED_SIGNATURE",
+  label: "Governed Signature",
+  field_type: "SIGNATURE",
+  required: true,
+  readonly: false,
+  visible: true,
+  sequence: 999,
+  metadata: { governed_attestation: {
+    statement: "I attest to the exact evidence shown.",
+    purpose: "CERTIFICATION",
+    permitted_signer_modes: ["AUTHENTICATED_SELF_ATTESTATION"]
+  } }
+};
+
+function governedDefinition(): OetsDefinition {
+  return {
+    ...definition,
+    sections: [{
+      section_id: "governed-section",
+      section_code: "GOVERNED_ATTESTATION",
+      title: "Governed Attestation",
+      sequence: 1,
+      repeatable: false,
+      fields: [governedSignatureField]
+    }],
+    workflow: {
+      states: [{ state_code: "DRAFT", label: "Draft" }, { state_code: "SUBMITTED", label: "Submitted" }],
+      transitions: [{ from: "DRAFT", to: "SUBMITTED", trigger: "submit", label: "Finalize Evidence" }]
+    }
+  };
+}
+
+function governedAttestation(status: "CURRENT" | "STALE" = "CURRENT") {
+  return {
+    id: "attestation-server-1", evidence_record_id: "evidence-record-1",
+    template_version_id: runtimeTemplate.template_version_id,
+    template_code_snapshot: runtimeTemplate.template_code,
+    template_checksum: runtimeTemplate.checksum,
+    payload_checksum: status === "CURRENT" ? "payload-checksum-1" : "old-checksum",
+    signature_field_id: governedSignatureField.field_id,
+    signature_field_code_snapshot: governedSignatureField.field_code,
+    section_code_snapshot: "GOVERNED_ATTESTATION", section_instance_index: null,
+    attestation_statement_snapshot: "I attest to the exact evidence shown.",
+    purpose: "CERTIFICATION", signer_mode: "AUTHENTICATED_SELF_ATTESTATION",
+    subject_name_snapshot: "Server Confirmed Operator", external_subject_role_snapshot: null,
+    actor_user_id: session.id, actor_display_name_snapshot: "Server Confirmed Operator",
+    signer_user_id: session.id, signer_display_name_snapshot: "Server Confirmed Operator",
+    client_id_snapshot: session.clientId, facility_id_snapshot: session.facilityIds[0],
+    lifecycle_state_snapshot: "DRAFT", signed_at: "2026-08-24T00:00:00.000Z",
+    correlation_id: null, created_at: "2026-08-24T00:00:00.000Z", status,
+    assurance: "AUTHENTICATED_SELF_ATTESTATION"
+  };
+}
+
 beforeEach(() => {
   window.sessionStorage.clear();
 });
@@ -342,6 +398,57 @@ afterEach(() => {
 });
 
 describe("Generic OETS renderer", () => {
+  it("integrates server-confirmed attestation state and recovers safely from signing failure", async () => {
+    const user = userEvent.setup();
+    const queryClient = createTestQueryClient();
+    const draft = evidenceRecord({ lifecycle_state: "DRAFT" });
+    const signingSession = { ...session, permissions: [...session.permissions, "submit_operational_evidence"] };
+    mockFetchQueue([
+      { status: 200, body: draft },
+      { status: 200, body: { ...runtimeTemplate, definition_jsonb: governedDefinition() } },
+      { status: 200, body: { attestations: [] } },
+      { status: 500, statusText: "Failure", body: { error: { code: "OEE_ATTESTATION_PERSISTENCE_FAILED", message: "Signing failed atomically." } } },
+      { status: 201, body: governedAttestation() },
+      { status: 200, body: { attestations: [governedAttestation()] } }
+    ]);
+
+    renderOperationalEvidenceRecordPageWithSession({
+      initialPath: "/workbench/evidence/evidence-record-1", queryClient, currentSession: signingSession
+    });
+    await user.click(await screen.findByRole("checkbox"));
+    await user.click(screen.getByRole("button", { name: "Sign & Attest" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Signing failed atomically.");
+    expect(screen.getByText("No governed attestation has been recorded.")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Sign & Attest" }));
+    expect(await screen.findByText("Current attestation")).toBeVisible();
+    expect(screen.getByText(/Authenticated signer/)).toHaveTextContent("Server Confirmed Operator");
+  });
+
+  it("surfaces missing or stale required-attestation finalization errors from the backend", async () => {
+    const user = userEvent.setup();
+    const queryClient = createTestQueryClient();
+    const draft = evidenceRecord({ lifecycle_state: "DRAFT" });
+    mockFetchQueue([
+      { status: 200, body: draft },
+      { status: 200, body: { ...runtimeTemplate, definition_jsonb: governedDefinition() } },
+      { status: 200, body: { attestations: [governedAttestation("STALE")] } },
+      { status: 422, statusText: "Unprocessable Entity", body: { error: {
+        code: "OEE_REQUIRED_ATTESTATION_MISSING",
+        message: "Required governed attestations are absent or stale."
+      } } }
+    ]);
+
+    renderOperationalEvidenceRecordPageWithSession({
+      initialPath: "/workbench/evidence/evidence-record-1", queryClient, currentSession: session
+    });
+    await user.click(await screen.findByRole("button", { name: "Finalize Evidence" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Required governed attestations are missing or stale."
+    );
+    expect(screen.getByText("Stale historical attestation")).toBeVisible();
+  });
+
   it("retrieves a runtime template by template_code through the authenticated API boundary", async () => {
     window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
     const { calls } = mockFetchQueue([
@@ -1645,7 +1752,7 @@ describe("Generic OETS renderer", () => {
     expect(screen.getByLabelText("Time Field")).toHaveAttribute("type", "time");
     expect(screen.getByLabelText("Url Field")).toHaveAttribute("type", "url");
     expect(
-      screen.getByText(/Signature capture is not available in Phase 2/)
+      screen.getByText(/Governed attestation metadata is not configured/)
     ).toBeInTheDocument();
   });
 

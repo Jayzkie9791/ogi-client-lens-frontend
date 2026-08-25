@@ -13,6 +13,11 @@ import {
   RepeatableSectionInstance
 } from "./evidenceState";
 import { isSupportedOetsFieldType } from "./definitionGuards";
+import { CreateEvidenceAttestationRequest, EvidenceAttestation } from "./attestationApi";
+import {
+  GovernedAttestationContext,
+  GovernedAttestationControl
+} from "./GovernedAttestationControl";
 import {
   OetsDefinition,
   OetsEvidencePayload,
@@ -58,6 +63,11 @@ interface OetsRendererProps {
     lifecycleState: string;
     recordHref?: string;
   } | null;
+  attestations?: readonly EvidenceAttestation[];
+  attestationContext?: GovernedAttestationContext;
+  attestationPending?: boolean;
+  attestationErrorMessage?: string | null;
+  onAttest?: (request: CreateEvidenceAttestationRequest) => Promise<unknown>;
 }
 
 export function OetsRenderer({
@@ -76,7 +86,12 @@ export function OetsRenderer({
   submittingLabel = "Creating...",
   submitSuccessMessage = "Draft audit created successfully.",
   submitSuccessLinkLabel = "Open Audit",
-  submitSuccess
+  submitSuccess,
+  attestations = [],
+  attestationContext,
+  attestationPending = false,
+  attestationErrorMessage,
+  onAttest
 }: OetsRendererProps) {
   const [state, setState] = useState(() =>
     initialPayload
@@ -174,6 +189,10 @@ export function OetsRenderer({
         if (section.repeatable) {
           return (
             <RepeatableSection
+              attestationContext={attestationContext}
+              attestationErrorMessage={attestationErrorMessage}
+              attestationPending={attestationPending}
+              attestations={attestations}
               instances={Array.isArray(sectionState) ? sectionState : []}
               key={section.section_id}
               onAdd={() => {
@@ -242,6 +261,7 @@ export function OetsRenderer({
                 });
               }}
               readOnly={readOnly}
+              onAttest={onAttest}
               section={{ ...section, fields: visibleFields }}
               validation={backendValidation ?? null}
             />
@@ -254,6 +274,10 @@ export function OetsRenderer({
 
         return (
           <OetsSectionCard
+            attestationContext={attestationContext}
+            attestationErrorMessage={attestationErrorMessage}
+            attestationPending={attestationPending}
+            attestations={attestations}
             key={section.section_id}
             onValueChange={(fieldCode, value) => {
               setState((current) => {
@@ -273,6 +297,7 @@ export function OetsRenderer({
               });
             }}
             readOnly={readOnly}
+            onAttest={onAttest}
             section={{ ...section, fields: visibleFields }}
             validation={backendValidation ?? null}
             values={sectionValues}
@@ -300,6 +325,11 @@ interface OetsSectionCardProps {
   readOnly: boolean;
   validation: OetsValidationSummary | null;
   onValueChange: (fieldCode: string, value: OetsFieldValue) => void;
+  attestations: readonly EvidenceAttestation[];
+  attestationContext?: GovernedAttestationContext;
+  attestationPending: boolean;
+  attestationErrorMessage?: string | null;
+  onAttest?: (request: CreateEvidenceAttestationRequest) => Promise<unknown>;
 }
 
 function OetsSectionCard({
@@ -307,7 +337,12 @@ function OetsSectionCard({
   values,
   readOnly,
   validation,
-  onValueChange
+  onValueChange,
+  attestations,
+  attestationContext,
+  attestationPending,
+  attestationErrorMessage,
+  onAttest
 }: OetsSectionCardProps) {
   return (
     <Surface className="space-y-4">
@@ -316,6 +351,10 @@ function OetsSectionCard({
       <div className="grid gap-4 md:grid-cols-2">
         {orderedFields(section.fields).map((field) => (
           <OetsFieldControl
+            attestationContext={attestationContext}
+            attestationErrorMessage={attestationErrorMessage}
+            attestationPending={attestationPending}
+            attestations={attestations}
             errors={
               validation?.fieldMessages[
                 fieldErrorKey(section.section_code, field.field_code)
@@ -325,7 +364,9 @@ function OetsSectionCard({
             key={field.field_id}
             onChange={(value) => onValueChange(field.field_code, value)}
             readOnly={readOnly || field.readonly}
+            sectionInstanceIndex={null}
             value={values[field.field_code]}
+            onAttest={onAttest}
           />
         ))}
       </div>
@@ -345,6 +386,11 @@ interface RepeatableSectionProps {
     fieldCode: string,
     value: OetsFieldValue
   ) => void;
+  attestations: readonly EvidenceAttestation[];
+  attestationContext?: GovernedAttestationContext;
+  attestationPending: boolean;
+  attestationErrorMessage?: string | null;
+  onAttest?: (request: CreateEvidenceAttestationRequest) => Promise<unknown>;
 }
 
 function RepeatableSection({
@@ -354,7 +400,12 @@ function RepeatableSection({
   validation,
   onAdd,
   onRemove,
-  onValueChange
+  onValueChange,
+  attestations,
+  attestationContext,
+  attestationPending,
+  attestationErrorMessage,
+  onAttest
 }: RepeatableSectionProps) {
   return (
     <Surface className="space-y-4">
@@ -387,6 +438,10 @@ function RepeatableSection({
             <div className="grid gap-4 md:grid-cols-2">
               {orderedFields(section.fields).map((field) => (
                 <OetsFieldControl
+                  attestationContext={attestationContext}
+                  attestationErrorMessage={attestationErrorMessage}
+                  attestationPending={attestationPending}
+                  attestations={attestations}
                   field={field}
                   key={field.field_id}
                   onChange={(value) =>
@@ -398,7 +453,9 @@ function RepeatableSection({
                     ]
                   }
                   readOnly={readOnly || field.readonly}
+                  sectionInstanceIndex={index}
                   value={instance.values[field.field_code]}
+                  onAttest={onAttest}
                 />
               ))}
             </div>
@@ -449,6 +506,12 @@ interface OetsFieldControlProps {
   readOnly: boolean;
   errors?: string[];
   onChange: (value: OetsFieldValue) => void;
+  attestations: readonly EvidenceAttestation[];
+  attestationContext?: GovernedAttestationContext;
+  attestationPending: boolean;
+  attestationErrorMessage?: string | null;
+  sectionInstanceIndex: number | null;
+  onAttest?: (request: CreateEvidenceAttestationRequest) => Promise<unknown>;
 }
 
 function OetsFieldControl({
@@ -456,7 +519,13 @@ function OetsFieldControl({
   value,
   readOnly,
   errors,
-  onChange
+  onChange,
+  attestations,
+  attestationContext,
+  attestationPending,
+  attestationErrorMessage,
+  sectionInstanceIndex,
+  onAttest
 }: OetsFieldControlProps) {
   if (!isSupportedOetsFieldType(field.field_type)) {
     return <UnsupportedField field={field} reason="Unsupported field type" />;
@@ -464,9 +533,15 @@ function OetsFieldControl({
 
   if (field.field_type === "SIGNATURE") {
     return (
-      <UnsupportedField
+      <GovernedAttestationControl
+        context={attestationContext}
+        errorMessage={attestationErrorMessage}
+        pending={attestationPending}
+        attestations={attestations}
         field={field}
-        reason="Signature capture is not available in Phase 2."
+        onAttest={onAttest}
+        readOnly={readOnly}
+        sectionInstanceIndex={sectionInstanceIndex}
       />
     );
   }
