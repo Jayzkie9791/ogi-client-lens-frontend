@@ -1,4 +1,4 @@
-import { ChangeEvent, useMemo, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { Button } from "../ui/components/Button";
@@ -68,6 +68,7 @@ interface OetsRendererProps {
   attestationPending?: boolean;
   attestationErrorMessage?: string | null;
   onAttest?: (request: CreateEvidenceAttestationRequest) => Promise<unknown>;
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 export function OetsRenderer({
@@ -91,7 +92,8 @@ export function OetsRenderer({
   attestationContext,
   attestationPending = false,
   attestationErrorMessage,
-  onAttest
+  onAttest,
+  onDirtyChange
 }: OetsRendererProps) {
   const [state, setState] = useState(() =>
     initialPayload
@@ -104,6 +106,16 @@ export function OetsRenderer({
     () => assembleEvidencePayload(runtimeTemplate, definition, state),
     [definition, runtimeTemplate, state]
   );
+  const savedPayloadRef = useRef(JSON.stringify(payload.sections));
+  const dirty = Boolean(initialPayload) && JSON.stringify(payload.sections) !== savedPayloadRef.current;
+  useEffect(() => onDirtyChange?.(dirty), [dirty, onDirtyChange]);
+  // The server payload object changes only after a confirmed save; the current assembled
+  // payload is intentionally captured at that boundary as the new visual signing baseline.
+  useEffect(() => {
+    savedPayloadRef.current = JSON.stringify(payload.sections);
+    onDirtyChange?.(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialPayload]);
 
   return (
     <div className="space-y-5">

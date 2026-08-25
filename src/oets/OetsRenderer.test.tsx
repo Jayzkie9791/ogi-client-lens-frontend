@@ -87,10 +87,14 @@ function renderRuntimeTemplatePageWithSession({
         <AuthContext.Provider value={authContextValue(nextSession)}>
           <MemoryRouter initialEntries={[initialPath]}>
             <Routes>
-              <Route
-                element={<RuntimeTemplatePage />}
-                path="/workbench/oets/:templateCode"
-              />
+            <Route
+              element={<RuntimeTemplatePage />}
+              path="/workbench/oets/:templateCode"
+            />
+            <Route
+              element={<div>Persisted evidence record route</div>}
+              path="/workbench/evidence/evidence-record-1"
+            />
             </Routes>
           </MemoryRouter>
         </AuthContext.Provider>
@@ -365,6 +369,14 @@ function governedDefinition(): OetsDefinition {
   };
 }
 
+function governedEditableDefinition(): OetsDefinition {
+  const governed = governedDefinition();
+  return {
+    ...governed,
+    sections: [...definition.sections, ...governed.sections]
+  };
+}
+
 function governedAttestation(status: "CURRENT" | "STALE" = "CURRENT") {
   return {
     id: "attestation-server-1", evidence_record_id: "evidence-record-1",
@@ -447,6 +459,71 @@ describe("Generic OETS renderer", () => {
       "Required governed attestations are missing or stale."
     );
     expect(screen.getByText("Stale historical attestation")).toBeVisible();
+    expect(screen.getByText("Draft")).toBeVisible();
+  });
+
+  it("suppresses governed signing and finalization while a persisted draft is dirty", async () => {
+    const user = userEvent.setup();
+    const queryClient = createTestQueryClient();
+    const signingSession = { ...session, permissions: [...session.permissions, "submit_operational_evidence"] };
+    mockFetchQueue([
+      { status: 200, body: evidenceRecord({ lifecycle_state: "DRAFT" }) },
+      { status: 200, body: { ...runtimeTemplate, definition_jsonb: governedEditableDefinition() } },
+      { status: 200, body: { attestations: [] } }
+    ]);
+    renderOperationalEvidenceRecordPageWithSession({ initialPath: "/workbench/evidence/evidence-record-1", queryClient, currentSession: signingSession });
+
+    expect(await screen.findByRole("button", { name: "Sign & Attest" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Finalize Evidence" })).toBeVisible();
+    await user.type(screen.getByLabelText("Text Field"), "Unsaved evidence B");
+    expect(screen.queryByRole("button", { name: "Sign & Attest" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Finalize Evidence" })).not.toBeInTheDocument();
+  });
+
+  it("suppresses signing and finalization while save is pending and restores them after server-confirmed save", async () => {
+    const user = userEvent.setup();
+    const queryClient = createTestQueryClient();
+    const signingSession = { ...session, permissions: [...session.permissions, "submit_operational_evidence"] };
+    let resolveSave: (response: Response) => void = () => undefined;
+    let record = evidenceRecord({ lifecycle_state: "DRAFT" });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = readRequestPath(input);
+      if (url.endsWith("/payload") && init?.method === "PATCH") {
+        return new Promise<Response>((resolve) => { resolveSave = resolve; });
+      }
+      if (url.includes("/attestations")) return jsonResponse(200, { attestations: [] });
+      if (url.includes("/template-versions/")) return jsonResponse(200, { ...runtimeTemplate, definition_jsonb: governedEditableDefinition() });
+      return jsonResponse(200, record);
+    }));
+    renderOperationalEvidenceRecordPageWithSession({ initialPath: "/workbench/evidence/evidence-record-1", queryClient, currentSession: signingSession });
+    await screen.findByRole("button", { name: "Sign & Attest" });
+    await user.type(screen.getByLabelText("Text Field"), "Saved evidence B");
+    await user.click(screen.getByRole("button", { name: "Save Draft" }));
+    expect(screen.getByRole("button", { name: "Saving..." })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Sign & Attest" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Finalize Evidence" })).not.toBeInTheDocument();
+
+    record = evidenceRecord({ lifecycle_state: "DRAFT", payload: { sections: { GENERAL_EVIDENCE: { TEXT_FIELD: "Saved evidence B" } } } });
+    record.payload_checksum = "payload-checksum-2";
+    resolveSave(jsonResponse(200, record));
+    expect(await screen.findByRole("button", { name: "Sign & Attest" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Finalize Evidence" })).toBeVisible();
+  });
+
+  it("uses server-confirmed lifecycle state after successful persisted-draft finalization", async () => {
+    const user = userEvent.setup();
+    const queryClient = createTestQueryClient();
+    const submitted = evidenceRecord({ lifecycle_state: "SUBMITTED" });
+    mockFetchQueue([
+      { status: 200, body: evidenceRecord({ lifecycle_state: "DRAFT" }) },
+      { status: 200, body: { ...runtimeTemplate, definition_jsonb: governedDefinition() } },
+      { status: 200, body: { attestations: [governedAttestation()] } },
+      { status: 200, body: submitted },
+      { status: 200, body: submitted }
+    ]);
+    renderOperationalEvidenceRecordPageWithSession({ initialPath: "/workbench/evidence/evidence-record-1", queryClient, currentSession: session });
+    await user.click(await screen.findByRole("button", { name: "Finalize Evidence" }));
+    expect(await screen.findByText("Awaiting Review")).toBeVisible();
   });
 
   it("retrieves a runtime template by template_code through the authenticated API boundary", async () => {
@@ -681,15 +758,108 @@ describe("Generic OETS renderer", () => {
       "/api/v1/operational-evidence/records/evidence-record-1/payload"
     );
     const updateBody = JSON.parse(String(patchCall?.init?.body));
-    expect(updateBody.payload.template_code).toBe(runtimeTemplate.template_code);
-    expect(updateBody.payload.template_version_id).toBe(
-      runtimeTemplate.template_version_id
-    );
+    expect(updateBody.payload).not.toHaveProperty("template_code");
+    expect(updateBody.payload).not.toHaveProperty("template_version_id");
+    expect(updateBody.payload).not.toHaveProperty("template_version");
+    expect(updateBody.payload).not.toHaveProperty("schema_version");
+    expect(updateBody.payload).not.toHaveProperty("checksum");
     expect(updateBody.payload.sections.GENERAL_EVIDENCE.TEXT_FIELD).toBe(
       "Updated training evidence"
     );
     expect(updateBody.payload).not.toHaveProperty("client_id");
     expect(updateBody.payload).not.toHaveProperty("facility_id");
+  });
+
+  it("maps persisted-Draft field validation and presents unmapped validation at form level", async () => {
+    const user = userEvent.setup();
+    const queryClient = createTestQueryClient();
+    const signingSession = {
+      ...session,
+      permissions: [...session.permissions, "submit_operational_evidence"]
+    };
+    mockFetchQueue([
+      { status: 200, body: evidenceRecord({ lifecycle_state: "DRAFT" }) },
+      {
+        status: 200,
+        body: { ...runtimeTemplate, definition_jsonb: governedEditableDefinition() }
+      },
+      { status: 200, body: { attestations: [] } },
+      {
+        status: 422,
+        body: {
+          error: {
+            code: "OEE_EVIDENCE_VALIDATION_FAILED",
+            message: "Evidence validation failed.",
+            details: [
+              {
+                field: "TEXT_FIELD",
+                instance_path: "/payload/sections/GENERAL_EVIDENCE/TEXT_FIELD",
+                rule: "FIELD_REQUIRED",
+                message: "Text evidence is required."
+              },
+              {
+                field: null,
+                instance_path: "/payload/template_code",
+                rule: "ADDITIONAL_PROPERTY",
+                message: "Unsupported payload property."
+              }
+            ]
+          }
+        }
+      }
+    ]);
+
+    renderOperationalEvidenceRecordPageWithSession({
+      initialPath: "/workbench/evidence/evidence-record-1",
+      queryClient,
+      currentSession: signingSession
+    });
+    await user.type(await screen.findByLabelText("Text Field"), "Changed evidence");
+    await user.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    expect(await screen.findByText("Text evidence is required.")).toBeInTheDocument();
+    expect(screen.getByText("Unsupported payload property.")).toBeInTheDocument();
+    expect(screen.getAllByRole("alert").some((alert) =>
+      alert.textContent?.includes("Review the validation details and try again.")
+    )).toBe(true);
+    expect(screen.getAllByRole("alert").every((alert) =>
+      !alert.textContent?.includes("highlighted fields")
+    )).toBe(true);
+    expect(screen.queryByText("Draft evidence saved.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Sign & Attest" })).not.toBeInTheDocument();
+  });
+
+  it("keeps a failed persisted-Draft save dirty and unavailable for signing", async () => {
+    const user = userEvent.setup();
+    const queryClient = createTestQueryClient();
+    const signingSession = {
+      ...session,
+      permissions: [...session.permissions, "submit_operational_evidence"]
+    };
+    mockFetchQueue([
+      { status: 200, body: evidenceRecord({ lifecycle_state: "DRAFT" }) },
+      {
+        status: 200,
+        body: { ...runtimeTemplate, definition_jsonb: governedEditableDefinition() }
+      },
+      { status: 200, body: { attestations: [] } },
+      { status: 500, body: { error: { code: "INTERNAL_ERROR", message: "Failure" } } }
+    ]);
+
+    renderOperationalEvidenceRecordPageWithSession({
+      initialPath: "/workbench/evidence/evidence-record-1",
+      queryClient,
+      currentSession: signingSession
+    });
+    await user.type(await screen.findByLabelText("Text Field"), "Unsaved change");
+    await user.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The Draft evidence payload could not be saved."
+    );
+    expect(screen.queryByText("Draft evidence saved.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Sign & Attest" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Finalize Evidence" })).not.toBeInTheDocument();
   });
 
 
@@ -3300,4 +3470,46 @@ function optionField(
       screen.getByText("This review is already assigned. The latest assignment is shown.")
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Claim Review" })).not.toBeInTheDocument();
+  });
+
+  it("creates a governed-template draft only after deliberate Begin Evidence and uses the draft endpoint", async () => {
+    const queryClient = createTestQueryClient();
+    queryClient.setQueryData(
+      ["oets-runtime-template", runtimeTemplate.template_code],
+      { ...runtimeTemplate, definition_jsonb: governedDefinition() }
+    );
+    const { calls } = mockFetchQueue([{ status: 201, body: evidenceRecord({ lifecycle_state: "DRAFT" }) }]);
+    const user = userEvent.setup();
+    renderRuntimeTemplatePageWithSession({
+      initialPath: "/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE",
+      queryClient,
+      currentSession: session
+    });
+
+    expect(calls).toHaveLength(0);
+    const begin = await screen.findByRole("button", { name: "Begin Evidence" });
+    await user.dblClick(begin);
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].url).toBe("/api/v1/operational-evidence/records/drafts");
+    expect(JSON.parse(String(calls[0].init?.body)).idempotency_key).toEqual(expect.any(String));
+    expect(await screen.findByText("Persisted evidence record route")).toBeVisible();
+  });
+
+  it("recovers from governed draft creation failure without fake navigation and permits retry", async () => {
+    const queryClient = createTestQueryClient();
+    queryClient.setQueryData(["oets-runtime-template", runtimeTemplate.template_code], { ...runtimeTemplate, definition_jsonb: governedDefinition() });
+    const { calls } = mockFetchQueue([
+      { status: 500, statusText: "Failure", body: { error: { code: "OEE_PERSISTENCE_FAILURE", message: "Draft persistence failed." } } },
+      { status: 201, body: evidenceRecord({ lifecycle_state: "DRAFT" }) }
+    ]);
+    const user = userEvent.setup();
+    renderRuntimeTemplatePageWithSession({ initialPath: "/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE", queryClient, currentSession: session });
+
+    await user.click(await screen.findByRole("button", { name: "Begin Evidence" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Draft persistence failed.");
+    expect(screen.queryByText("Persisted evidence record route")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Begin Evidence" }));
+    expect(await screen.findByText("Persisted evidence record route")).toBeVisible();
+    expect(calls).toHaveLength(2);
+    expect(JSON.parse(String(calls[0].init?.body)).idempotency_key).toBe(JSON.parse(String(calls[1].init?.body)).idempotency_key);
   });

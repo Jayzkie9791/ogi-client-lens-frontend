@@ -13,6 +13,10 @@ export interface OperationalEvidenceCreateRequest {
   correlation_id?: string;
 }
 
+export interface OperationalEvidenceDraftCreateRequest extends OperationalEvidenceCreateRequest {
+  idempotency_key: string;
+}
+
 export interface OperationalEvidenceTemplateProvenance {
   template_id: string;
   template_code: string;
@@ -112,6 +116,13 @@ export function createOperationalEvidenceRecord(
   );
 }
 
+export function createOperationalEvidenceDraft(request: OperationalEvidenceDraftCreateRequest) {
+  return apiRequest<OperationalEvidenceRecord>(
+    "/api/v1/operational-evidence/records/drafts",
+    { method: "POST", body: request, validate: isOperationalEvidenceRecord }
+  );
+}
+
 export function updateDraftOperationalEvidencePayload(
   recordId: string,
   request: OperationalEvidenceDraftPayloadUpdateRequest
@@ -122,7 +133,12 @@ export function updateDraftOperationalEvidencePayload(
     )}/payload`,
     {
       method: "PATCH",
-      body: request,
+      body: {
+        ...request,
+        payload: {
+          sections: request.payload.sections
+        }
+      },
       validate: isOperationalEvidenceRecord
     }
   );

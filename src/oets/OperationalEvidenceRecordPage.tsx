@@ -39,6 +39,7 @@ import {
 } from "./reviewConclusionApi";
 
 import { OetsFieldVisibilityPolicy, OetsRenderer } from "./OetsRenderer";
+import { mapBackendValidationDetails } from "./evidenceValidation";
 import { getRuntimeTemplateVersion } from "./runtimeTemplateApi";
 import { OetsDefinition, OetsEvidencePayload, OetsFieldValue } from "./types";
 import {
@@ -116,6 +117,7 @@ interface ClaimedReviewConclusionInput {
 }
 
 export function OperationalEvidenceRecordPage() {
+  const [draftDirty, setDraftDirty] = useState(false);
   const { recordId } = useParams();
   const auth = useAuth();
   const queryClient = useQueryClient();
@@ -143,7 +145,9 @@ export function OperationalEvidenceRecordPage() {
       ? findAvailableTransitions(narrowing.definition, record.lifecycle_state)
       : [];
 
-  const directTransitions = availableTransitions.filter(
+  const directTransitions = (record?.lifecycle_state === "DRAFT" && availableTransitions.length === 0
+    ? [{ from: "DRAFT", to: String((narrowing?.definition?.workflow as { initial_state?: string } | undefined)?.initial_state ?? ""), trigger: "FINALIZE_DRAFT", label: "Submit Evidence" }]
+    : availableTransitions).filter(
     (transition) => !resolveGovernanceAuthorityCode(transition.to)
   );
   const governanceTransitions = availableTransitions.flatMap((transition) => {
@@ -524,6 +528,14 @@ export function OperationalEvidenceRecordPage() {
           attestationPending={attestationMutation.isPending}
           attestations={attestationQuery.data?.attestations ?? []}
           definition={renderedDefinition}
+          backendValidation={
+            draftPayloadMutation.error &&
+            isApiError(draftPayloadMutation.error) &&
+            draftPayloadMutation.error.status === 422 &&
+            draftPayloadMutation.error.code === "OEE_EVIDENCE_VALIDATION_FAILED"
+              ? mapBackendValidationDetails(draftPayloadMutation.error.details)
+              : null
+          }
           formMessage={
             draftPayloadMutation.error
               ? draftPayloadErrorMessage(draftPayloadMutation.error)
@@ -533,7 +545,8 @@ export function OperationalEvidenceRecordPage() {
           fieldVisibilityPolicy={fieldVisibilityPolicy}
           isSubmitting={draftPayloadMutation.isPending}
           onSubmit={canEditDraft ? (payload) => draftPayloadMutation.mutate(payload) : undefined}
-          onAttest={canEditDraft ? (request) => attestationMutation.mutateAsync(request) : undefined}
+          onAttest={canEditDraft && !draftDirty && !draftPayloadMutation.isPending ? (request) => attestationMutation.mutateAsync(request) : undefined}
+          onDirtyChange={setDraftDirty}
           readOnly={!canEditDraft}
           runtimeTemplate={templateQuery.data}
           submitHelpText="Save Draft changes before submitting this Operational Evidence record."
@@ -555,7 +568,7 @@ export function OperationalEvidenceRecordPage() {
         isPending={transitionMutation.isPending}
         onTransition={(transition) => transitionMutation.mutate(transition)}
 
-        transitions={directTransitions}
+        transitions={draftDirty || draftPayloadMutation.isPending ? [] : directTransitions}
       />
 
       <GovernanceReviewActions
@@ -1495,7 +1508,7 @@ function draftPayloadErrorMessage(error: Error) {
     }
 
     if (error.status === 422) {
-      return "The Draft payload was rejected by the backend. Review the highlighted fields and try again.";
+      return "The Draft payload was rejected by the backend. Review the validation details and try again.";
     }
   }
 

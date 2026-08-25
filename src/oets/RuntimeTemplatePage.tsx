@@ -1,10 +1,9 @@
 import {
   useMutation,
-  useQuery,
-  UseMutateFunction
+  useQuery
 } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { isApiError } from "../api/errors";
 import { routes } from "../app/routePaths";
@@ -19,6 +18,8 @@ import {
 import { narrowOetsDefinition } from "./definitionGuards";
 import {
   createOperationalEvidenceRecord,
+  createOperationalEvidenceDraft,
+  OperationalEvidenceCreateRequest,
   OperationalEvidenceRecord
 } from "./evidenceSubmissionApi";
 import {
@@ -41,6 +42,7 @@ interface EditingTemplateSession {
 }
 
 export function RuntimeTemplatePage() {
+  const navigate = useNavigate();
   const auth = useAuth();
   const session = auth.session;
   const { templateCode } = useParams();
@@ -58,6 +60,7 @@ export function RuntimeTemplatePage() {
   const [editingSession, setEditingSession] =
     useState<EditingTemplateSession | null>(null);
   const submitLockedRef = useRef(false);
+  const draftIdempotencyKeyRef = useRef(crypto.randomUUID());
 
   const query = useQuery({
     enabled: Boolean(templateCode),
@@ -178,6 +181,18 @@ export function RuntimeTemplatePage() {
       setFormMessage("Audit draft creation failed. Try again later.");
     }
   });
+  const draftMutation = useMutation({
+    mutationFn: createOperationalEvidenceDraft,
+    onSuccess(record) {
+      submitLockedRef.current = false;
+      navigate(routes.evidenceRecordPath(record.id));
+    },
+    onError(error) {
+      submitLockedRef.current = false;
+      if (isApiError(error)) handleSubmissionError(error, setFormMessage, setBackendValidation);
+      else setFormMessage("Audit draft creation failed. Try again later.");
+    }
+  });
 
   if (!templateCode) {
     return (
@@ -277,7 +292,7 @@ export function RuntimeTemplatePage() {
         backendValidation={backendValidation}
         definition={activeEditingSession.definition}
         formMessage={formMessage}
-        isSubmitting={mutation.isPending}
+        isSubmitting={mutation.isPending || draftMutation.isPending}
         onSubmit={
           readOnly || successRecord
             ? undefined
@@ -286,8 +301,11 @@ export function RuntimeTemplatePage() {
                   payload,
                   clientId: effectiveClientId,
                   facilityId,
-                  isPending: mutation.isPending,
-                  mutate: mutation.mutate,
+                  isPending: mutation.isPending || draftMutation.isPending,
+                  mutate: hasGovernedSignatureFields(activeEditingSession.definition)
+                    ? (request) => draftMutation.mutate({ ...request, idempotency_key: draftIdempotencyKeyRef.current })
+                    : (request) => mutation.mutate(request),
+                  idempotencyKey: hasGovernedSignatureFields(activeEditingSession.definition) ? draftIdempotencyKeyRef.current : undefined,
                   setBackendValidation,
                   setFormMessage,
                   setSuccessRecord,
@@ -296,6 +314,9 @@ export function RuntimeTemplatePage() {
         }
         readOnly={readOnly}
         runtimeTemplate={activeEditingSession.runtimeTemplate}
+        submitHelpText={hasGovernedSignatureFields(activeEditingSession.definition) ? "Begin a persisted draft before saving and signing this evidence." : undefined}
+        submitLabel={hasGovernedSignatureFields(activeEditingSession.definition) ? "Begin Evidence" : undefined}
+        submittingLabel={hasGovernedSignatureFields(activeEditingSession.definition) ? "Beginning..." : undefined}
         submitDisabledReason={readSubmissionDisabledReason(
           effectiveClientId,
           successRecord
@@ -319,16 +340,12 @@ interface SubmitInput {
   clientId: string | null;
   facilityId?: string;
   isPending: boolean;
-  mutate: UseMutateFunction<
-    OperationalEvidenceRecord,
-    Error,
-    Parameters<typeof createOperationalEvidenceRecord>[0],
-    unknown
-  >;
+  mutate: (request: OperationalEvidenceCreateRequest) => void;
   setBackendValidation: (validation: OetsValidationSummary | null) => void;
   setFormMessage: (message: string | null) => void;
   setSuccessRecord: (record: OperationalEvidenceRecord | null) => void;
   submitLockedRef: { current: boolean };
+  idempotencyKey?: string;
 }
 
 function handleEvidenceSubmit({
@@ -341,6 +358,7 @@ function handleEvidenceSubmit({
   setFormMessage,
   setSuccessRecord,
   submitLockedRef
+  ,idempotencyKey
 }: SubmitInput) {
   if (isPending || submitLockedRef.current) {
     return;
@@ -363,10 +381,17 @@ function handleEvidenceSubmit({
     checksum: payload.checksum,
     client_id: clientId,
     ...(facilityId ? { facility_id: facilityId } : {}),
+    ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
     payload: {
       sections: payload.sections
     }
   });
+}
+
+function hasGovernedSignatureFields(definition: OetsDefinition) {
+  return definition.sections.some((section) => section.fields.some((field) =>
+    field.field_type === "SIGNATURE" && Boolean(field.metadata?.governed_attestation)
+  ));
 }
 
 function handleSubmissionError(
