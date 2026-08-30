@@ -34,6 +34,12 @@ const administrationSession = {
   permissions: ["view_operational_evidence", "view_users"]
 };
 
+const auditViewerSession = {
+  ...session,
+  roles: ["Audit Viewer"],
+  permissions: ["view_audit"]
+};
+
 const administrationUsersResponse = [
   {
     id: "00000000-0000-4000-8000-000000000901",
@@ -356,6 +362,7 @@ describe("Client Lens authentication foundation", () => {
     ).toHaveAttribute("href", routes.operations);
     expect(screen.queryByRole("link", { name: "Assessments" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Operational Risk" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Audit & Risk" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Administration" })).not.toBeInTheDocument();
   });
 
@@ -1108,6 +1115,18 @@ describe("Client Lens authentication foundation", () => {
     ).toBeInTheDocument();
     expect(screen.queryByText("Weekly Safety Audit Checklist")).not.toBeInTheDocument();
     expect(screen.queryByText("Risk Register")).not.toBeInTheDocument();
+  });
+
+  it("shows Audit & Risk navigation only with view_audit", async () => {
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: auditViewerSession }
+    ]);
+    renderWithRoute(routes.workbench);
+
+    expect(await screen.findByRole("link", { name: "Audit & Risk" })).toHaveAttribute("href", routes.auditRisk);
+    expect(screen.queryByRole("link", { name: "Operations" })).not.toBeInTheDocument();
   });
 
   it("routes view-only actors to the existing read-only runtime form", async () => {

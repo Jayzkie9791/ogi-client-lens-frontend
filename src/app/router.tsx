@@ -1,6 +1,8 @@
 import { createBrowserRouter, Navigate, RouteObject } from "react-router-dom";
 
 import { PublicOnlyRoute, RequireAuth } from "../auth/AuthGuards";
+import { AuditDetailPage } from "../audit-risk/AuditDetailPage";
+import { AuditRiskWorkspacePage } from "../audit-risk/AuditRiskWorkspacePage";
 import { CertificationsPage } from "../certifications/CertificationsPage";
 import {
   CredentialsDetailPage,
@@ -51,6 +53,14 @@ export const appRoutes: RouteObject[] = [
           {
             path: "workbench",
             element: <WorkbenchPage />
+          },
+          {
+            path: "workbench/audit-risk",
+            element: <AuditRiskWorkspacePage />
+          },
+          {
+            path: "workbench/audit-risk/audits/:auditId",
+            element: <AuditDetailPage />
           },
           {
             path: "workbench/operations",

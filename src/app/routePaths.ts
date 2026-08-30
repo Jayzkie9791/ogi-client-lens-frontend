@@ -2,6 +2,10 @@ export const routes = {
   home: "/",
   login: "/login",
   workbench: "/workbench",
+  auditRisk: "/workbench/audit-risk",
+  auditDetail: "/workbench/audit-risk/audits/:auditId",
+  auditDetailPath: (auditId: string) =>
+    `/workbench/audit-risk/audits/${encodeURIComponent(auditId)}`,
   operations: "/workbench/operations",
   records: "/workbench/operations/records",
   administration: "/workbench/administration",

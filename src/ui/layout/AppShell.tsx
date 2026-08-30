@@ -23,6 +23,12 @@ const navigationItems = [
     implemented: true
   },
   {
+    label: "Audit & Risk",
+    permissions: ["view_audit"],
+    to: routes.auditRisk,
+    implemented: true
+  },
+  {
     label: "Registration",
     permissions: ["view_client", "view_facility", "view_staff_member", "view_training"],
     to: routes.registrationClients,

@@ -1,0 +1,63 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { configureApiAuth } from "../api/client";
+import { getAudit, listAudits } from "./auditRiskApi";
+
+const auditId = "00000000-0000-4000-8000-000000000101";
+const audit = {
+  id: auditId,
+  business_identifier: "AUDIT-2026-000001",
+  audit_status: "IN_PROGRESS",
+  started_at: "2026-08-30T01:00:00.000Z",
+  completed_at: null,
+  template: { id: "00000000-0000-4000-8000-000000000201", name: "Full Safety Audit", type: "FULL_SAFETY_AUDIT", version: 2 },
+  facility: { id: "00000000-0000-4000-8000-000000000301", business_identifier: "FACILITY-2026-000001", name: "North Pool" },
+  client: { id: "00000000-0000-4000-8000-000000000401", business_identifier: "CLIENT-2026-000001", name: "North Aquatics" },
+  auditor: { id: "00000000-0000-4000-8000-000000000501", name: "Ana Auditor" }
+};
+
+afterEach(() => {
+  configureApiAuth(null);
+  vi.unstubAllGlobals();
+});
+
+describe("Audit read API", () => {
+  it("serializes only the supported status filter using semantic URL assertions", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const requestUrl = new URL(String(input), window.location.origin);
+      expect(requestUrl.pathname).toBe("/api/v1/audits");
+      expect([...requestUrl.searchParams.entries()]).toEqual([["status", "IN_PROGRESS"]]);
+      expect(init?.method).toBe("GET");
+      return jsonResponse({ audits: [audit] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await listAudits({ status: "IN_PROGRESS" });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("uses the Audit UUID as detail route authority", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const requestUrl = new URL(String(input), window.location.origin);
+      expect(requestUrl.pathname).toBe(`/api/v1/audits/${auditId}`);
+      expect(requestUrl.search).toBe("");
+      expect(init?.method).toBe("GET");
+      return jsonResponse(audit);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getAudit(auditId);
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("rejects malformed nested Audit context", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ audits: [{ ...audit, facility: { id: audit.facility.id } }] })));
+    await expect(listAudits()).rejects.toMatchObject({ code: "MALFORMED_RESPONSE" });
+  });
+});
+
+function jsonResponse(body: unknown) {
+  return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+}
