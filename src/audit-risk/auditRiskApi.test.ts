@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { configureApiAuth } from "../api/client";
-import { getAudit, listAudits } from "./auditRiskApi";
+import { getAudit, listAuditTemplates, listAudits, listEligibleAuditFacilities, startAudit } from "./auditRiskApi";
 
 const auditId = "00000000-0000-4000-8000-000000000101";
 const audit = {
@@ -55,6 +55,51 @@ describe("Audit read API", () => {
   it("rejects malformed nested Audit context", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ audits: [{ ...audit, facility: { id: audit.facility.id } }] })));
     await expect(listAudits()).rejects.toMatchObject({ code: "MALFORMED_RESPONSE" });
+  });
+
+  it("uses exact selector discovery paths without mutation fields", async () => {
+    const responses = [
+      { facilities: [{ id: "00000000-0000-4000-8000-000000000301", business_identifier: "FACILITY-2026-000001", name: "North Pool", operational_status: "ACTIVE", client: { id: "00000000-0000-4000-8000-000000000401", business_identifier: "CLIENT-2026-000001", name: "North Aquatics" } }] },
+      [{ id: "00000000-0000-4000-8000-000000000201", name: "Full Safety Audit", type: "FULL_SAFETY_AUDIT", version: 2, description: null, is_active: true }]
+    ];
+    const paths: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const requestUrl = new URL(String(input), window.location.origin);
+      paths.push(requestUrl.pathname);
+      expect(requestUrl.search).toBe("");
+      expect(init?.method).toBe("GET");
+      return jsonResponse(responses.shift());
+    }));
+
+    await listEligibleAuditFacilities();
+    await listAuditTemplates();
+
+    expect(paths).toEqual(["/api/v1/audits/eligible-facilities", "/api/v1/audit-templates"]);
+  });
+
+  it("sends the exact governed command and Idempotency-Key", async () => {
+    const command = { templateId: audit.template.id, facilityId: audit.facility.id };
+    const key = "00000000-0000-4000-8000-000000000901";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const requestUrl = new URL(String(input), window.location.origin);
+      const headers = new Headers(init?.headers);
+      expect(requestUrl.pathname).toBe("/api/v1/audits/start");
+      expect(requestUrl.search).toBe("");
+      expect(init?.method).toBe("POST");
+      expect(headers.get("Idempotency-Key")).toBe(key);
+      expect(JSON.parse(String(init?.body))).toEqual(command);
+      expect(Object.keys(JSON.parse(String(init?.body))).sort()).toEqual(["facilityId", "templateId"]);
+      return jsonResponse(audit);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(startAudit(command, key)).resolves.toEqual(audit);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("fails closed on malformed selector context", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ facilities: [{ id: audit.facility.id, name: "North Pool", client: null }] })));
+    await expect(listEligibleAuditFacilities()).rejects.toMatchObject({ code: "MALFORMED_RESPONSE" });
   });
 });
 

@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
+import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { routes } from "../app/routePaths";
@@ -9,9 +10,12 @@ import { Button } from "../ui/components/Button";
 import { Surface } from "../ui/components/Surface";
 import { auditQueryKeys, listAudits } from "./auditRiskApi";
 import { AuditReadProjection, AuditStatus, auditStatuses, displayCode, formatDateTime } from "./auditRiskTypes";
+import { AuditStartPanel } from "./AuditStartPanel";
 
 export function AuditRiskWorkspacePage() {
   const canView = useCan("view_audit");
+  const canCreate = useCan("create_audit");
+  const [startOpen, setStartOpen] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedStatus = searchParams.get("status");
   const status = auditStatuses.includes(requestedStatus as AuditStatus)
@@ -31,11 +35,16 @@ export function AuditRiskWorkspacePage() {
 
   return (
     <section aria-labelledby="audit-workspace-heading" className="space-y-4">
-      <header>
-        <p className="text-xs font-semibold uppercase tracking-wide text-primary-blue">Audit &amp; Risk</p>
-        <h1 className="mt-2 text-2xl font-semibold text-text-primary" id="audit-workspace-heading">Audits</h1>
-        <p className="mt-2 max-w-3xl text-sm leading-6 text-text-muted">Review scoped Audit records and their governed operational context. Risk projections and Audit actions are not part of this workspace slice.</p>
+      <header className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-primary-blue">Audit &amp; Risk</p>
+          <h1 className="mt-2 text-2xl font-semibold text-text-primary" id="audit-workspace-heading">Audits</h1>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-text-muted">Review scoped Audit records and their governed operational context. Risk projections and Audit execution are not part of this workspace slice.</p>
+        </div>
+        {canCreate && !startOpen ? <Button onClick={() => setStartOpen(true)} type="button">Start Audit</Button> : null}
       </header>
+
+      {canCreate && startOpen ? <AuditStartPanel onClose={() => setStartOpen(false)} /> : null}
 
       <Surface>
         <label className="block max-w-sm text-sm font-semibold text-text-primary">

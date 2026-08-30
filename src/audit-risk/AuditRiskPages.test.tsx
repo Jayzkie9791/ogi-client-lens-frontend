@@ -64,6 +64,28 @@ describe("Audit workspace read paths", () => {
     expect(await screen.findByRole("heading", { name: "No Audits are available." })).toBeInTheDocument();
     expect(calls).toContain("/api/v1/audits?status=APPROVED");
     expect(calls.some((path) => path.includes("audit-templates") || path.includes("eligible-facilities"))).toBe(false);
+    expect(screen.queryByRole("button", { name: "Start Audit" })).not.toBeInTheDocument();
+  });
+
+  it("opens governed selectors only for an actor with view_audit and create_audit", async () => {
+    const user = userEvent.setup();
+    const mutationSession = { ...session, permissions: ["view_audit", "create_audit"] };
+    const { calls } = mockRoutes([
+      ...authRoutes(mutationSession),
+      route("/api/v1/audits", { audits: [] }),
+      route("/api/v1/audits/eligible-facilities", { facilities: [{ ...audit.facility, operational_status: "ACTIVE", client: audit.client }] }),
+      route("/api/v1/audit-templates", [{ ...audit.template, description: null, is_active: true }])
+    ]);
+    renderRoute(routes.auditRisk);
+
+    const startButton = await screen.findByRole("button", { name: "Start Audit" });
+    expect(calls).not.toContain("/api/v1/audits/eligible-facilities");
+    expect(calls).not.toContain("/api/v1/audit-templates");
+    await user.click(startButton);
+    const form = await screen.findByRole("form", { name: "Start Audit" });
+    expect(await within(form).findByRole("option", { name: /North Pool · FACILITY-2026-000001 · North Aquatics/ })).toBeInTheDocument();
+    expect(calls).toContain("/api/v1/audits/eligible-facilities");
+    expect(calls).toContain("/api/v1/audit-templates");
   });
 
   it("shows the loading and empty states safely", async () => {

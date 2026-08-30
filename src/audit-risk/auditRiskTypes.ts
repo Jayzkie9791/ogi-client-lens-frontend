@@ -9,6 +9,45 @@ export const auditStatuses = [
 
 export type AuditStatus = (typeof auditStatuses)[number];
 
+export const auditTemplateTypes = ["FULL_SAFETY_AUDIT", "OPENING_CHECKLIST", "CLOSING_CHECKLIST"] as const;
+export type AuditTemplateType = (typeof auditTemplateTypes)[number];
+
+export const auditFacilityStatuses = ["ACTIVE", "INACTIVE", "UNDER_MAINTENANCE", "PENDING_APPROVAL", "SUSPENDED"] as const;
+export type AuditFacilityStatus = (typeof auditFacilityStatuses)[number];
+
+export interface AuditTemplateSelector {
+  readonly id: string;
+  readonly name: string;
+  readonly type: AuditTemplateType;
+  readonly version: number;
+  readonly description: string | null;
+  readonly is_active: true;
+}
+
+export interface AuditEligibleFacility {
+  readonly id: string;
+  readonly business_identifier: string;
+  readonly name: string;
+  readonly operational_status: AuditFacilityStatus;
+  readonly client: {
+    readonly id: string;
+    readonly business_identifier: string;
+    readonly name: string;
+  };
+}
+
+export interface AuditEligibleFacilityList {
+  readonly facilities: readonly AuditEligibleFacility[];
+}
+
+export function isAuditTemplateList(value: unknown): value is readonly AuditTemplateSelector[] {
+  return Array.isArray(value) && value.every(isAuditTemplateSelector);
+}
+
+export function isAuditEligibleFacilityList(value: unknown): value is AuditEligibleFacilityList {
+  return isRecord(value) && Array.isArray(value.facilities) && value.facilities.every(isAuditEligibleFacility);
+}
+
 export function displayCode(value: string) {
   return value.toLowerCase().split("_").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
 }
@@ -88,6 +127,29 @@ function isNamedUuidReference(value: unknown) {
 
 function isAuditStatus(value: unknown): value is AuditStatus {
   return typeof value === "string" && auditStatuses.includes(value as AuditStatus);
+}
+
+function isAuditTemplateSelector(value: unknown): value is AuditTemplateSelector {
+  return (
+    isNamedUuidReference(value) &&
+    isRecord(value) &&
+    typeof value.type === "string" &&
+    auditTemplateTypes.includes(value.type as AuditTemplateType) &&
+    Number.isInteger(value.version) &&
+    (value.version as number) >= 1 &&
+    (value.description === null || typeof value.description === "string") &&
+    value.is_active === true
+  );
+}
+
+function isAuditEligibleFacility(value: unknown): value is AuditEligibleFacility {
+  return (
+    isGovernedReference(value) &&
+    isRecord(value) &&
+    typeof value.operational_status === "string" &&
+    auditFacilityStatuses.includes(value.operational_status as AuditFacilityStatus) &&
+    isGovernedReference(value.client)
+  );
 }
 
 function isUuid(value: unknown) {
