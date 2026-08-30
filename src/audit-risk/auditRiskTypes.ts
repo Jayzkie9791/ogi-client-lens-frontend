@@ -50,7 +50,8 @@ export interface AuditExecutionField {
 export interface AuditExecutionSection { readonly section_code: string; readonly title: string; readonly description?: string; readonly fields: readonly AuditExecutionField[]; }
 export interface AuditExecutionSchema { readonly sections: readonly AuditExecutionSection[]; }
 export interface AuditExecutionDefinition { readonly template_id: string; readonly version: number; readonly checksum: string; readonly schema: AuditExecutionSchema; }
-export interface AuditCanonicalResponse { readonly id: string; readonly audit_id: string; readonly template_id: string; readonly section_code: string; readonly response_payload: Readonly<Record<string, unknown>>; readonly version: number; readonly checksum: string; readonly submitted_at: string; }
+export interface AuditActorReference { readonly id: string; readonly name: string; }
+export interface AuditCanonicalResponse { readonly id: string; readonly audit_id: string; readonly template_id: string; readonly section_code: string; readonly response_payload: Readonly<Record<string, unknown>>; readonly version: number; readonly checksum: string; readonly submitted_by: AuditActorReference; readonly submitted_at: string; }
 export type AuditExecutionSourceCondition = "FAILING" | "PASSING" | "UNKNOWN";
 export interface AuditExecutionFinding { readonly id: string; readonly business_identifier: string; readonly is_resolved: boolean; readonly source_section_code: string; readonly source_field_id: string; readonly source_condition: AuditExecutionSourceCondition; }
 export interface AuditCompleteness { readonly is_complete: boolean; readonly incomplete: readonly { readonly section_code: string; readonly field_id: string }[]; }
@@ -103,7 +104,7 @@ function isAuditExecutionField(value: unknown): value is AuditExecutionField {
 }
 
 function isAuditCanonicalResponse(value: unknown): value is AuditCanonicalResponse {
-  return isRecord(value) && isUuid(value.id) && isUuid(value.audit_id) && isUuid(value.template_id) && isNonEmptyString(value.section_code) && isRecord(value.response_payload) && Number.isInteger(value.version) && Number(value.version) >= 1 && typeof value.checksum === "string" && /^[0-9a-f]{64}$/.test(value.checksum) && isDateTime(value.submitted_at);
+  return isRecord(value) && isUuid(value.id) && isUuid(value.audit_id) && isUuid(value.template_id) && isNonEmptyString(value.section_code) && isRecord(value.response_payload) && Number.isInteger(value.version) && Number(value.version) >= 1 && typeof value.checksum === "string" && /^[0-9a-f]{64}$/.test(value.checksum) && isAuditActorReference(value.submitted_by) && isDateTime(value.submitted_at);
 }
 
 function isAuditExecutionFinding(value: unknown): value is AuditExecutionFinding {
@@ -215,6 +216,7 @@ export interface AuditReadProjection {
   readonly audit_status: AuditStatus;
   readonly started_at: string;
   readonly completed_at: string | null;
+  readonly completed_by: AuditActorReference | null;
   readonly template: {
     readonly id: string;
     readonly name: string;
@@ -231,10 +233,7 @@ export interface AuditReadProjection {
     readonly business_identifier: string;
     readonly name: string;
   };
-  readonly auditor: {
-    readonly id: string;
-    readonly name: string;
-  } | null;
+  readonly auditor: AuditActorReference | null;
 }
 
 export interface AuditListResponse {
@@ -252,12 +251,17 @@ export function isAuditReadProjection(value: unknown): value is AuditReadProject
     isNonEmptyString(value.business_identifier) &&
     isAuditStatus(value.audit_status) &&
     isDateTime(value.started_at) &&
-    (value.completed_at === null || isDateTime(value.completed_at)) &&
+    ((value.completed_at === null && value.completed_by === null) ||
+      (isDateTime(value.completed_at) && (value.completed_by === null || isAuditActorReference(value.completed_by)))) &&
     isTemplateReference(value.template) &&
     isGovernedReference(value.facility) &&
     isGovernedReference(value.client) &&
-    (value.auditor === null || isNamedUuidReference(value.auditor))
+    (value.auditor === null || isAuditActorReference(value.auditor))
   );
+}
+
+export function isAuditActorReference(value: unknown): value is AuditActorReference {
+  return isRecord(value) && Object.keys(value).length === 2 && isUuid(value.id) && isNonEmptyString(value.name);
 }
 
 function isTemplateReference(value: unknown) {

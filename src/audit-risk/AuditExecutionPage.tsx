@@ -9,7 +9,7 @@ import { Button } from "../ui/components/Button";
 import { Surface } from "../ui/components/Surface";
 import { auditFindingQueryKeys, auditQueryKeys, completeAudit, getAuditExecution, saveAuditResponse, SaveAuditResponseCommand } from "./auditRiskApi";
 import { AuditReadError, AuditState, Context } from "./AuditRiskWorkspacePage";
-import { AuditExecutionField as ExecutionField, AuditExecutionProjection, AuditExecutionSection as ExecutionSection, displayCode } from "./auditRiskTypes";
+import { AuditExecutionField as ExecutionField, AuditExecutionProjection, AuditExecutionSection as ExecutionSection, displayCode, formatDateTime } from "./auditRiskTypes";
 import { AuditRiskNavigation } from "./AuditRiskNavigation";
 
 type Drafts = Readonly<Record<string, Readonly<Record<string, unknown>>>>;
@@ -157,6 +157,8 @@ export function AuditExecutionPage() {
           <Context label="Template" value={`${execution.audit.template.name} · v${execution.definition.version}`} />
           <Context label="Facility" value={`${execution.audit.facility.name} · ${execution.audit.facility.business_identifier}`} />
           <Context label="Client" value={`${execution.audit.client.name} · ${execution.audit.client.business_identifier}`} />
+          {execution.audit.completed_at ? <Context label="Completed by" value={execution.audit.completed_by?.name ?? "Historical actor unavailable"} /> : null}
+          {execution.audit.completed_at ? <Context label="Completed at" value={formatDateTime(execution.audit.completed_at)} /> : null}
         </dl>
       </Surface>
 
@@ -173,6 +175,7 @@ export function AuditExecutionPage() {
                 <h2 className="text-lg font-semibold text-text-primary" id={`section-${section.section_code}`}>{section.title}</h2>
                 {section.description ? <p className="mt-1 text-sm text-text-muted">{section.description}</p> : null}
               </header>
+              <ResponseAccountability execution={execution} section={section} />
               {section.fields.map((field) => (
                 <AuditField
                   disabled={!editable || anySavePending || saveAttempt !== null}
@@ -202,6 +205,12 @@ export function AuditExecutionPage() {
       />
     </main>
   );
+}
+
+function ResponseAccountability({ execution, section }: { execution: AuditExecutionProjection; section: ExecutionSection }) {
+  const response = execution.responses.find((item) => item.section_code === section.section_code);
+  if (!response) return null;
+  return <dl aria-label={`${section.title} authoritative submission`} className="grid gap-3 rounded-component border border-border bg-elevated p-3 sm:grid-cols-2"><Context label="Submitted by" value={response.submitted_by.name} /><Context label="Submitted at" value={formatDateTime(response.submitted_at)} /></dl>;
 }
 
 function AuditField({ disabled, execution, field, onChange, value }: { disabled: boolean; execution: AuditExecutionProjection; field: ExecutionField; onChange: (value: unknown) => void; value: unknown }) {

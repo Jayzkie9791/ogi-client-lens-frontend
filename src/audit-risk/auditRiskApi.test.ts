@@ -10,6 +10,7 @@ const audit = {
   audit_status: "IN_PROGRESS",
   started_at: "2026-08-30T01:00:00.000Z",
   completed_at: null,
+  completed_by: null,
   template: { id: "00000000-0000-4000-8000-000000000201", name: "Full Safety Audit", type: "FULL_SAFETY_AUDIT", version: 2 },
   facility: { id: "00000000-0000-4000-8000-000000000301", business_identifier: "FACILITY-2026-000001", name: "North Pool" },
   client: { id: "00000000-0000-4000-8000-000000000401", business_identifier: "CLIENT-2026-000001", name: "North Aquatics" },
@@ -110,6 +111,21 @@ describe("Audit read API", () => {
     await expect(listAudits()).rejects.toMatchObject({ code: "MALFORMED_RESPONSE" });
   });
 
+  it.each([
+    { id: "not-a-uuid", name: "Completer" },
+    { id: "00000000-0000-4000-8000-000000000901" },
+    { id: "00000000-0000-4000-8000-000000000901", name: "" },
+    { id: "00000000-0000-4000-8000-000000000901", name: "Completer", email: "not-allowed@example.test" }
+  ])("rejects malformed non-null completion actors", async (completedBy) => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ ...audit, audit_status: "APPROVED", completed_at: "2026-08-30T04:00:00.000Z", completed_by: completedBy })));
+    await expect(getAudit(auditId)).rejects.toMatchObject({ code: "MALFORMED_RESPONSE" });
+  });
+
+  it("rejects a false completion actor on an in-progress Audit", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ ...audit, completed_by: { id: "00000000-0000-4000-8000-000000000901", name: "False Completer" } })));
+    await expect(getAudit(auditId)).rejects.toMatchObject({ code: "MALFORMED_RESPONSE" });
+  });
+
   it("uses exact selector discovery paths without mutation fields", async () => {
     const responses = [
       { facilities: [{ id: "00000000-0000-4000-8000-000000000301", business_identifier: "FACILITY-2026-000001", name: "North Pool", operational_status: "ACTIVE", client: { id: "00000000-0000-4000-8000-000000000401", business_identifier: "CLIENT-2026-000001", name: "North Aquatics" } }] },
@@ -194,9 +210,20 @@ describe("Audit execution API", () => {
       expect(init?.method).toBe("POST");
       expect(new Headers(init?.headers).get("Idempotency-Key")).toBe(key);
       expect(init?.body).toBeUndefined();
-      return jsonResponse({ audit: { ...audit, audit_status: "APPROVED", completed_at: "2026-08-30T04:00:00.000Z" }, findings: [], replayed: false });
+      return jsonResponse({ audit: { ...audit, audit_status: "APPROVED", completed_at: "2026-08-30T04:00:00.000Z", completed_by: { id: "00000000-0000-4000-8000-000000000901", name: "Completion Actor" } }, findings: [], replayed: false });
     }));
     await expect(completeAudit(auditId, key)).resolves.toMatchObject({ replayed: false });
+  });
+
+  it.each([
+    null,
+    { id: "not-a-uuid", name: "Submitter" },
+    { id: "00000000-0000-4000-8000-000000000901" },
+    { id: "00000000-0000-4000-8000-000000000901", name: "" },
+    { id: "00000000-0000-4000-8000-000000000901", name: "Submitter", username: "not-allowed" }
+  ])("rejects malformed canonical response submitter %j", async (submittedBy) => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ ...responseResult(1), response: { ...responseResult(1).response, submitted_by: submittedBy } })));
+    await expect(saveAuditResponse({ auditId, templateId: audit.template.id, sectionCode: "OPERATIONS", expectedVersion: null, responsePayload: { check: false } }, "key")).rejects.toMatchObject({ code: "MALFORMED_RESPONSE" });
   });
 });
 
@@ -209,7 +236,7 @@ function executionProjection() {
 }
 
 function responseResult(version: number) {
-  return { response: { id: "00000000-0000-4000-8000-000000000801", audit_id: auditId, template_id: audit.template.id, section_code: "OPERATIONS", response_payload: { check: false }, version, checksum: "b".repeat(64), submitted_at: "2026-08-30T03:00:00.000Z" }, completeness: { is_complete: true, incomplete: [] } };
+  return { response: { id: "00000000-0000-4000-8000-000000000801", audit_id: auditId, template_id: audit.template.id, section_code: "OPERATIONS", response_payload: { check: false }, version, checksum: "b".repeat(64), submitted_by: { id: "00000000-0000-4000-8000-000000000901", name: "Response Submitter" }, submitted_at: "2026-08-30T03:00:00.000Z" }, completeness: { is_complete: true, incomplete: [] } };
 }
 
 function jsonResponse(body: unknown) {

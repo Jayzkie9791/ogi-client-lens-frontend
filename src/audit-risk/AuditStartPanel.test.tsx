@@ -18,6 +18,7 @@ const audit = {
   audit_status: "IN_PROGRESS",
   started_at: "2026-08-30T01:00:00.000Z",
   completed_at: null,
+  completed_by: null,
   template: { id: templateId, name: "Full Safety Audit", type: "FULL_SAFETY_AUDIT", version: 2 },
   facility: { id: facilityId, business_identifier: "FACILITY-2026-000001", name: "North Pool" },
   client: { id: "00000000-0000-4000-8000-000000000401", business_identifier: "CLIENT-2026-000001", name: "North Aquatics" },

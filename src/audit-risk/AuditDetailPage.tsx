@@ -43,7 +43,8 @@ export function AuditDetailPage() {
           <Context label="Template" value={`${audit.template.name} · ${displayCode(audit.template.type)} · v${audit.template.version}`} />
           <Context label="Auditor" value={audit.auditor?.name ?? "Not assigned"} />
           <Context label="Started" value={formatDateTime(audit.started_at)} />
-          <Context label="Completed" value={audit.completed_at ? formatDateTime(audit.completed_at) : "Not completed"} />
+          {audit.completed_at ? <Context label="Completed by" value={audit.completed_by?.name ?? "Historical actor unavailable"} /> : null}
+          {audit.completed_at ? <Context label="Completed at" value={formatDateTime(audit.completed_at)} /> : null}
         </dl>
       </Surface>
       <Surface>

@@ -8,6 +8,7 @@ import { AppProviders } from "../app/providers/AppProviders";
 import { appRoutes } from "../app/router";
 import { routes } from "../app/routePaths";
 import { getRefreshTokenStorageKey } from "../auth/storage";
+import { formatDateTime } from "./auditRiskTypes";
 
 const auditId = "00000000-0000-4000-8000-000000000101";
 const session = {
@@ -28,6 +29,7 @@ const audit = {
   audit_status: "IN_PROGRESS",
   started_at: "2026-08-30T01:00:00.000Z",
   completed_at: null,
+  completed_by: null,
   template: { id: "00000000-0000-4000-8000-000000000201", name: "Full Safety Audit", type: "FULL_SAFETY_AUDIT", version: 2 },
   facility: { id: "00000000-0000-4000-8000-000000000301", business_identifier: "FACILITY-2026-000001", name: "North Pool" },
   client: { id: "00000000-0000-4000-8000-000000000401", business_identifier: "CLIENT-2026-000001", name: "North Aquatics" },
@@ -117,10 +119,21 @@ describe("Audit workspace read paths", () => {
     expect(screen.getByText("North Aquatics · CLIENT-2026-000001")).toBeInTheDocument();
     expect(screen.getByText("North Pool · FACILITY-2026-000001")).toBeInTheDocument();
     expect(screen.getByText("Not assigned")).toBeInTheDocument();
-    expect(screen.getByText("Not completed")).toBeInTheDocument();
+    expect(screen.queryByText("Completed by")).not.toBeInTheDocument();
+    expect(screen.queryByText("Completed at")).not.toBeInTheDocument();
     expect(calls).not.toContain("/api/v1/audits");
     expect(calls).toContain(`/api/v1/audits/${auditId}`);
     expect(screen.getByRole("link", { name: "Open Audit execution" })).toHaveAttribute("href", routes.auditExecutionPath(auditId));
+  });
+
+  it.each([
+    [{ id: "00000000-0000-4000-8000-000000000901", name: "Completion Actor" }, "Completion Actor"],
+    [null, "Historical actor unavailable"]
+  ] as const)("renders completed Audit accountability on a direct detail link", async (completedBy, expectedLabel) => {
+    mockRoutes([...authRoutes(), route(`/api/v1/audits/${auditId}`, { ...audit, audit_status: "APPROVED", completed_at: "2026-05-19T23:57:35.032Z", completed_by: completedBy })]);
+    renderRoute(routes.auditDetailPath(auditId));
+    expect(await screen.findByText(expectedLabel)).toBeInTheDocument();
+    expect(screen.getByText(formatDateTime("2026-05-19T23:57:35.032Z"))).toBeInTheDocument();
   });
 
   it("routes directly to execution by Audit UUID and composes view permission independently", async () => {
