@@ -40,6 +40,12 @@ const auditViewerSession = {
   permissions: ["view_audit"]
 };
 
+const findingViewerSession = {
+  ...session,
+  roles: ["Finding Viewer"],
+  permissions: ["view_finding"]
+};
+
 const administrationUsersResponse = [
   {
     id: "00000000-0000-4000-8000-000000000901",
@@ -1117,7 +1123,7 @@ describe("Client Lens authentication foundation", () => {
     expect(screen.queryByText("Risk Register")).not.toBeInTheDocument();
   });
 
-  it("shows Audit & Risk navigation only with view_audit", async () => {
+  it("routes an Audit viewer from primary navigation to the Audit workspace", async () => {
     window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
     mockFetchQueue([
       { status: 200, body: { accessToken: "access-token" } },
@@ -1127,6 +1133,17 @@ describe("Client Lens authentication foundation", () => {
 
     expect(await screen.findByRole("link", { name: "Audit & Risk" })).toHaveAttribute("href", routes.auditRisk);
     expect(screen.queryByRole("link", { name: "Operations" })).not.toBeInTheDocument();
+  });
+
+  it("routes a Finding-only viewer from primary navigation to Findings", async () => {
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: findingViewerSession }
+    ]);
+    renderWithRoute(routes.workbench);
+
+    expect(await screen.findByRole("link", { name: "Audit & Risk" })).toHaveAttribute("href", routes.auditFindings);
   });
 
   it("routes view-only actors to the existing read-only runtime form", async () => {

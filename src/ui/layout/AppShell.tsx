@@ -24,7 +24,7 @@ const navigationItems = [
   },
   {
     label: "Audit & Risk",
-    permissions: ["view_audit"],
+    permissions: ["view_audit", "view_finding"],
     to: routes.auditRisk,
     implemented: true
   },
@@ -99,6 +99,8 @@ export function AppShell() {
                   const navigationItem =
                     item.label === "Registration"
                       ? { ...item, to: registrationLandingPath(auth) }
+                      : item.label === "Audit & Risk"
+                        ? { ...item, to: auditRiskLandingPath(auth) }
                       : item.label === "Credentials & Certifications"
                         ? { ...item, to: credentialsLandingPath(auth) }
                         : item;
@@ -167,6 +169,10 @@ function registrationLandingPath(auth: ReturnType<typeof useAuth>) {
   }
 
   return routes.registrationTraining;
+}
+
+function auditRiskLandingPath(auth: ReturnType<typeof useAuth>) {
+  return auth.canUsePermission("view_audit") ? routes.auditRisk : routes.auditFindings;
 }
 
 function NavigationListItem({ item }: { item: NavigationItem }) {

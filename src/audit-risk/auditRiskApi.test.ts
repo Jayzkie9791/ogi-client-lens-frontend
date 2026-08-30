@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { configureApiAuth } from "../api/client";
-import { getAudit, listAuditTemplates, listAudits, listEligibleAuditFacilities, startAudit } from "./auditRiskApi";
+import { getAudit, getAuditFinding, listAuditFindings, listAuditTemplates, listAudits, listEligibleAuditFacilities, startAudit } from "./auditRiskApi";
 
 const auditId = "00000000-0000-4000-8000-000000000101";
 const audit = {
@@ -15,10 +15,63 @@ const audit = {
   client: { id: "00000000-0000-4000-8000-000000000401", business_identifier: "CLIENT-2026-000001", name: "North Aquatics" },
   auditor: { id: "00000000-0000-4000-8000-000000000501", name: "Ana Auditor" }
 };
+const finding = {
+  id: "00000000-0000-4000-8000-000000000601",
+  business_identifier: "AUDIT-FINDING-2026-000001",
+  audit: { id: audit.id, business_identifier: audit.business_identifier },
+  facility: audit.facility,
+  client: audit.client,
+  category: "OPERATIONS",
+  severity: "HIGH",
+  title: "Missing inspection record",
+  description: "The current inspection record was unavailable.",
+  recommendation: null,
+  is_resolved: false,
+  identified_at: "2026-08-30T02:00:00.000Z",
+  resolved_at: null,
+  remediation: [{ id: "00000000-0000-4000-8000-000000000701", business_identifier: "CA-2026-000001", status: "OPEN" }]
+};
 
 afterEach(() => {
   configureApiAuth(null);
   vi.unstubAllGlobals();
+});
+
+describe("Audit Finding read API", () => {
+  it("serializes only permission-composed severity and resolution filters", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input), window.location.origin);
+      expect(url.pathname).toBe("/api/v1/audit-findings");
+      expect([...url.searchParams.entries()]).toEqual([["severity", "HIGH"], ["resolved", "false"]]);
+      expect(init?.method).toBe("GET");
+      return jsonResponse({ findings: [finding] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await listAuditFindings({ severity: "HIGH", resolved: false });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("uses the Finding UUID as detail route authority", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input), window.location.origin);
+      expect(url.pathname).toBe(`/api/v1/audit-findings/${finding.id}`);
+      expect(url.search).toBe("");
+      expect(init?.method).toBe("GET");
+      return jsonResponse(finding);
+    }));
+
+    await expect(getAuditFinding(finding.id)).resolves.toEqual(finding);
+  });
+
+  it.each([
+    { ...finding, audit: { id: audit.id } },
+    { ...finding, client: null },
+    { ...finding, remediation: [{ id: finding.remediation[0].id, status: "OPEN" }] }
+  ])("fails closed on malformed Finding context", async (malformed) => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(malformed)));
+    await expect(getAuditFinding(finding.id)).rejects.toMatchObject({ code: "MALFORMED_RESPONSE" });
+  });
 });
 
 describe("Audit read API", () => {

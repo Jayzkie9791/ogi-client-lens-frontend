@@ -15,6 +15,60 @@ export type AuditTemplateType = (typeof auditTemplateTypes)[number];
 export const auditFacilityStatuses = ["ACTIVE", "INACTIVE", "UNDER_MAINTENANCE", "PENDING_APPROVAL", "SUSPENDED"] as const;
 export type AuditFacilityStatus = (typeof auditFacilityStatuses)[number];
 
+export const auditFindingSeverities = ["LOW", "MEDIUM", "HIGH", "CRITICAL"] as const;
+export type AuditFindingSeverity = (typeof auditFindingSeverities)[number];
+
+export interface AuditFindingReadProjection {
+  readonly id: string;
+  readonly business_identifier: string;
+  readonly audit: { readonly id: string; readonly business_identifier: string };
+  readonly facility: { readonly id: string; readonly business_identifier: string; readonly name: string };
+  readonly client: { readonly id: string; readonly business_identifier: string; readonly name: string };
+  readonly category: string;
+  readonly severity: AuditFindingSeverity;
+  readonly title: string;
+  readonly description: string;
+  readonly recommendation: string | null;
+  readonly is_resolved: boolean;
+  readonly identified_at: string;
+  readonly resolved_at: string | null;
+  readonly remediation: readonly {
+    readonly id: string;
+    readonly business_identifier: string;
+    readonly status: string;
+  }[];
+}
+
+export interface AuditFindingListResponse {
+  readonly findings: readonly AuditFindingReadProjection[];
+}
+
+export function isAuditFindingListResponse(value: unknown): value is AuditFindingListResponse {
+  return isRecord(value) && Array.isArray(value.findings) && value.findings.every(isAuditFindingReadProjection);
+}
+
+export function isAuditFindingReadProjection(value: unknown): value is AuditFindingReadProjection {
+  return (
+    isRecord(value) &&
+    isUuid(value.id) &&
+    isNonEmptyString(value.business_identifier) &&
+    isAuditReference(value.audit) &&
+    isGovernedReference(value.facility) &&
+    isGovernedReference(value.client) &&
+    isNonEmptyString(value.category) &&
+    typeof value.severity === "string" &&
+    auditFindingSeverities.includes(value.severity as AuditFindingSeverity) &&
+    isNonEmptyString(value.title) &&
+    isNonEmptyString(value.description) &&
+    (value.recommendation === null || typeof value.recommendation === "string") &&
+    typeof value.is_resolved === "boolean" &&
+    isDateTime(value.identified_at) &&
+    (value.resolved_at === null || isDateTime(value.resolved_at)) &&
+    Array.isArray(value.remediation) &&
+    value.remediation.every(isRemediationReference)
+  );
+}
+
 export interface AuditTemplateSelector {
   readonly id: string;
   readonly name: string;
@@ -127,6 +181,14 @@ function isNamedUuidReference(value: unknown) {
 
 function isAuditStatus(value: unknown): value is AuditStatus {
   return typeof value === "string" && auditStatuses.includes(value as AuditStatus);
+}
+
+function isAuditReference(value: unknown) {
+  return isRecord(value) && isUuid(value.id) && isNonEmptyString(value.business_identifier);
+}
+
+function isRemediationReference(value: unknown) {
+  return isRecord(value) && isUuid(value.id) && isNonEmptyString(value.business_identifier) && isNonEmptyString(value.status);
 }
 
 function isAuditTemplateSelector(value: unknown): value is AuditTemplateSelector {

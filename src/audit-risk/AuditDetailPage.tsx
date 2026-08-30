@@ -7,6 +7,7 @@ import { Surface } from "../ui/components/Surface";
 import { auditQueryKeys, getAudit } from "./auditRiskApi";
 import { AuditReadError, AuditState, Context } from "./AuditRiskWorkspacePage";
 import { displayCode, formatDateTime } from "./auditRiskTypes";
+import { AuditRiskNavigation } from "./AuditRiskNavigation";
 
 export function AuditDetailPage() {
   const canView = useCan("view_audit");
@@ -27,6 +28,7 @@ export function AuditDetailPage() {
   const audit = query.data;
   return (
     <section aria-labelledby="audit-detail-heading" className="space-y-4">
+      <AuditRiskNavigation />
       <Link className="text-sm font-semibold text-primary-blue hover:underline" to={routes.auditRisk}>← Back to Audits</Link>
       <header>
         <p className="text-xs font-semibold uppercase tracking-wide text-primary-blue">Audit &amp; Risk · Audit</p>

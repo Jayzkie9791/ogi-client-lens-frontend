@@ -6,6 +6,10 @@ export const routes = {
   auditDetail: "/workbench/audit-risk/audits/:auditId",
   auditDetailPath: (auditId: string) =>
     `/workbench/audit-risk/audits/${encodeURIComponent(auditId)}`,
+  auditFindings: "/workbench/audit-risk/findings",
+  auditFindingDetail: "/workbench/audit-risk/findings/:findingId",
+  auditFindingDetailPath: (findingId: string) =>
+    `/workbench/audit-risk/findings/${encodeURIComponent(findingId)}`,
   operations: "/workbench/operations",
   records: "/workbench/operations/records",
   administration: "/workbench/administration",

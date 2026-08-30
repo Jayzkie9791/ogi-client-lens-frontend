@@ -11,6 +11,7 @@ import { Surface } from "../ui/components/Surface";
 import { auditQueryKeys, listAudits } from "./auditRiskApi";
 import { AuditReadProjection, AuditStatus, auditStatuses, displayCode, formatDateTime } from "./auditRiskTypes";
 import { AuditStartPanel } from "./AuditStartPanel";
+import { AuditRiskNavigation } from "./AuditRiskNavigation";
 
 export function AuditRiskWorkspacePage() {
   const canView = useCan("view_audit");
@@ -35,6 +36,7 @@ export function AuditRiskWorkspacePage() {
 
   return (
     <section aria-labelledby="audit-workspace-heading" className="space-y-4">
+      <AuditRiskNavigation />
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-primary-blue">Audit &amp; Risk</p>
