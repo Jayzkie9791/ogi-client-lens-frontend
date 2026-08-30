@@ -120,6 +120,20 @@ describe("Audit workspace read paths", () => {
     expect(screen.getByText("Not completed")).toBeInTheDocument();
     expect(calls).not.toContain("/api/v1/audits");
     expect(calls).toContain(`/api/v1/audits/${auditId}`);
+    expect(screen.getByRole("link", { name: "Open Audit execution" })).toHaveAttribute("href", routes.auditExecutionPath(auditId));
+  });
+
+  it("routes directly to execution by Audit UUID and composes view permission independently", async () => {
+    const execution = {
+      audit,
+      definition: { template_id: audit.template.id, version: 2, checksum: "a".repeat(64), schema: { sections: [{ section_code: "S", title: "Section", fields: [{ field_id: "note", label: "Note", type: "text", required: false, source_required: false, edit_authority: "USER_RESPONSE", response_kind: "TEXT" }] }] } },
+      responses: [], findings: [], completeness: { is_complete: true, incomplete: [] }, completion_eligible: true, legacy_history_excluded: true
+    };
+    const { calls } = mockRoutes([...authRoutes(), route(`/api/v1/audits/${auditId}/execution`, execution)]);
+    renderRoute(routes.auditExecutionPath(auditId));
+    expect(await screen.findByRole("heading", { name: audit.business_identifier })).toBeInTheDocument();
+    expect(calls).toContain(`/api/v1/audits/${auditId}/execution`);
+    expect(screen.queryByRole("button", { name: /Save Section/ })).not.toBeInTheDocument();
   });
 
   it.each([

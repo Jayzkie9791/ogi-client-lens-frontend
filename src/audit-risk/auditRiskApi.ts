@@ -8,11 +8,17 @@ import {
   AuditFindingSeverity,
   AuditEligibleFacilityList,
   AuditTemplateSelector,
+  AuditCompletionResult,
+  AuditExecutionProjection,
+  AuditResponseCommandResult,
+  isAuditCompletionResult,
   isAuditEligibleFacilityList,
+  isAuditExecutionProjection,
   isAuditFindingListResponse,
   isAuditFindingReadProjection,
   isAuditListResponse,
   isAuditReadProjection,
+  isAuditResponseCommandResult,
   isAuditTemplateList
 } from "./auditRiskTypes";
 
@@ -23,6 +29,14 @@ export interface AuditListFilters {
 export interface StartAuditCommand {
   readonly templateId: string;
   readonly facilityId: string;
+}
+
+export interface SaveAuditResponseCommand {
+  readonly auditId: string;
+  readonly templateId: string;
+  readonly sectionCode: string;
+  readonly expectedVersion: number | null;
+  readonly responsePayload: Readonly<Record<string, unknown>>;
 }
 
 export interface AuditFindingListFilters {
@@ -41,6 +55,7 @@ export const auditQueryKeys = {
   lists: ["audits", "list"] as const,
   list: (filters: AuditListFilters) => ["audits", "list", filters.status ?? null] as const,
   detail: (auditId: string) => ["audits", "detail", auditId] as const,
+  execution: (auditId: string) => ["audit-execution", auditId] as const,
   eligibleFacilities: ["audits", "selectors", "eligible-facilities"] as const,
   templates: ["audits", "selectors", "templates"] as const
 };
@@ -77,6 +92,22 @@ export function getAudit(auditId: string) {
     `/api/v1/audits/${encodeURIComponent(auditId)}`,
     { validate: isAuditReadProjection }
   );
+}
+
+export function getAuditExecution(auditId: string) {
+  return apiRequest<AuditExecutionProjection>(`/api/v1/audits/${encodeURIComponent(auditId)}/execution`, { validate: isAuditExecutionProjection });
+}
+
+export function saveAuditResponse(command: SaveAuditResponseCommand, idempotencyKey: string) {
+  return apiRequest<AuditResponseCommandResult>("/api/v1/audit-responses", {
+    method: "POST", body: command, headers: { "Idempotency-Key": idempotencyKey }, validate: isAuditResponseCommandResult
+  });
+}
+
+export function completeAudit(auditId: string, idempotencyKey: string) {
+  return apiRequest<AuditCompletionResult>(`/api/v1/audits/${encodeURIComponent(auditId)}/complete`, {
+    method: "POST", headers: { "Idempotency-Key": idempotencyKey }, validate: isAuditCompletionResult
+  });
 }
 
 export function listAuditFindings(filters: AuditFindingListFilters = {}) {

@@ -46,6 +46,13 @@ export function AuditDetailPage() {
           <Context label="Completed" value={audit.completed_at ? formatDateTime(audit.completed_at) : "Not completed"} />
         </dl>
       </Surface>
+      <Surface>
+        <h2 className="font-semibold text-text-primary">Audit execution</h2>
+        <p className="mt-1 text-sm text-text-muted">Open the authoritative execution definition, persisted responses, completeness, and Finding context.</p>
+        <Link className="mt-3 inline-block font-semibold text-primary-blue hover:underline" to={routes.auditExecutionPath(audit.id)}>
+          {audit.audit_status === "IN_PROGRESS" ? "Open Audit execution" : "View Audit execution"}
+        </Link>
+      </Surface>
     </section>
   );
 }
