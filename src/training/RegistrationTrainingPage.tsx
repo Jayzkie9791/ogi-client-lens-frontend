@@ -6,9 +6,17 @@ import { isApiError } from "../api/errors";
 import { routes } from "../app/routePaths";
 import { useAuth } from "../auth/useAuth";
 import {
+  getPersonnelCredentials,
+  CredentialsCertificationProjection
+} from "../credentials/credentialsApi";
+import {
   listRegistrationClients,
   RegistrationClient
 } from "../registration/registrationClientApi";
+import {
+  listRegistrationFacilities,
+  RegistrationFacility
+} from "../registration/registrationFacilityApi";
 import {
   listRegistrationPersonnel,
   RegistrationPersonnel
@@ -18,6 +26,7 @@ import { Button } from "../ui/components/Button";
 import { Surface } from "../ui/components/Surface";
 import {
   assignTrainingEnrollmentSession,
+  createTrainingSession,
   createTrainingAttendanceEvidenceDraft,
   createTrainingEvidenceDraft,
   createTrainingEnrollment,
@@ -38,7 +47,9 @@ import {
   TrainingEvidenceWorkspaceRecord,
   TrainingEvidenceWorkspaceSlot,
   TrainingProgramCode,
+  TrainingOperationalSkill,
   TrainingSession,
+  trainingOperationalSkills,
   trainingProgramOptions,
   TrainingTrainee
 } from "./trainingApi";
@@ -49,8 +60,11 @@ const permissions = {
   linkPersonnel: "link_training_staff_member",
   createEnrollment: "create_training_enrollment",
   assignSession: "assign_training_session",
+  createSession: "create_training_session",
   viewClients: "view_client",
-  viewPersonnel: "view_staff_member"
+  viewPersonnel: "view_staff_member",
+  viewFacilities: "view_facility",
+  viewCertifications: "view_certification"
 } as const;
 
 interface TraineeFormState {
@@ -64,6 +78,18 @@ interface EnrollmentFormState {
   programCode: TrainingProgramCode | "";
   clientId: string;
   trainingSessionId: string;
+  notes: string;
+}
+
+interface SessionFormState {
+  title: string;
+  operationalSkill: TrainingOperationalSkill;
+  startDate: string;
+  endDate: string;
+  durationMinutes: string;
+  facilityId: string;
+  instructorStaffMemberId: string;
+  qualificationCertificationId: string;
   notes: string;
 }
 
@@ -81,6 +107,18 @@ const emptyEnrollmentForm: EnrollmentFormState = {
   notes: ""
 };
 
+const emptySessionForm: SessionFormState = {
+  title: "",
+  operationalSkill: "RESCUE_SKILLS",
+  startDate: "",
+  endDate: "",
+  durationMinutes: "",
+  facilityId: "",
+  instructorStaffMemberId: "",
+  qualificationCertificationId: "",
+  notes: ""
+};
+
 export function RegistrationTrainingPage() {
   const auth = useAuth();
   const queryClient = useQueryClient();
@@ -91,8 +129,13 @@ export function RegistrationTrainingPage() {
     permissions.createEnrollment
   );
   const canAssignSession = auth.canUsePermission(permissions.assignSession);
+  const canCreateSession = auth.canUsePermission(permissions.createSession);
   const canViewClients = auth.canUsePermission(permissions.viewClients);
   const canViewPersonnel = auth.canUsePermission(permissions.viewPersonnel);
+  const canViewFacilities = auth.canUsePermission(permissions.viewFacilities);
+  const canViewCertifications = auth.canUsePermission(
+    permissions.viewCertifications
+  );
   const [selectedTraineeId, setSelectedTraineeId] = useState<string | null>(null);
   const [traineeIdBeforeCreate, setTraineeIdBeforeCreate] = useState<
     string | null
@@ -110,6 +153,10 @@ export function RegistrationTrainingPage() {
   const [enrollmentForm, setEnrollmentForm] =
     useState<EnrollmentFormState>(emptyEnrollmentForm);
   const [message, setMessage] = useState<string | null>(null);
+  const [isCreatingSession, setIsCreatingSession] = useState(false);
+  const [sessionForm, setSessionForm] =
+    useState<SessionFormState>(emptySessionForm);
+  const [sessionIdempotencyKey, setSessionIdempotencyKey] = useState("");
 
   const traineesQuery = useQuery({
     queryKey: ["training-trainees"],
@@ -168,7 +215,9 @@ export function RegistrationTrainingPage() {
   const sessionsQuery = useQuery({
     queryKey: ["training-sessions"],
     queryFn: () => listTrainingSessions(),
-    enabled: canView && (isAddingEnrollment || assigningEnrollmentId !== null),
+    enabled:
+      canView &&
+      (isCreatingSession || isAddingEnrollment || assigningEnrollmentId !== null),
     retry: false
   });
   const sessions = useMemo(
@@ -179,12 +228,59 @@ export function RegistrationTrainingPage() {
   const personnelQuery = useQuery({
     queryKey: ["registration-personnel"],
     queryFn: () => listRegistrationPersonnel(),
-    enabled: canViewPersonnel && isLinkingPersonnel,
+    enabled: canViewPersonnel && (isLinkingPersonnel || isCreatingSession),
     retry: false
   });
   const personnel = useMemo(
     () => personnelQuery.data?.personnel ?? [],
     [personnelQuery.data]
+  );
+
+  const facilitiesQuery = useQuery({
+    queryKey: ["registration-facilities", "training-session-create"],
+    queryFn: () => listRegistrationFacilities(),
+    enabled: canViewFacilities && isCreatingSession,
+    retry: false
+  });
+  const activeFacilities = useMemo(
+    () =>
+      (facilitiesQuery.data?.facilities ?? []).filter(
+        (facility) => facility.operational_status === "ACTIVE"
+      ),
+    [facilitiesQuery.data]
+  );
+  const selectedFacility =
+    activeFacilities.find((facility) => facility.id === sessionForm.facilityId) ??
+    null;
+  const eligiblePersonnel = useMemo(
+    () =>
+      personnel.filter(
+        (staffMember) =>
+          staffMember.employment_status === "ACTIVE" &&
+          Boolean(staffMember.user_id) &&
+          staffMember.client_id === selectedFacility?.client_id
+      ),
+    [personnel, selectedFacility]
+  );
+  const instructorCredentialsQuery = useQuery({
+    queryKey: [
+      "credentials-personnel",
+      sessionForm.instructorStaffMemberId,
+      "training-qualification-selector"
+    ],
+    queryFn: () => getPersonnelCredentials(sessionForm.instructorStaffMemberId),
+    enabled:
+      canViewCertifications &&
+      isCreatingSession &&
+      Boolean(sessionForm.instructorStaffMemberId),
+    retry: false
+  });
+  const eligibleInstructorCertifications = useMemo(
+    () =>
+      (instructorCredentialsQuery.data?.certifications ?? []).filter(
+        isCurrentInstructorCertification
+      ),
+    [instructorCredentialsQuery.data]
   );
 
   const createTraineeMutation = useMutation({
@@ -261,6 +357,23 @@ export function RegistrationTrainingPage() {
     }
   });
 
+  const createSessionMutation = useMutation({
+    mutationFn: () =>
+      createTrainingSession(
+        buildCreateSessionRequest(sessionForm),
+        sessionIdempotencyKey
+      ),
+    onSuccess: (session) => {
+      setMessage(
+        `Training Session ${session.business_identifier} created successfully.`
+      );
+      setSessionForm(emptySessionForm);
+      setSessionIdempotencyKey("");
+      setIsCreatingSession(false);
+      void queryClient.invalidateQueries({ queryKey: ["training-sessions"] });
+    }
+  });
+
   function startRegisterTrainee() {
     setMessage(null);
     setTraineeIdBeforeCreate(selectedTraineeId);
@@ -315,6 +428,12 @@ export function RegistrationTrainingPage() {
     assignSessionMutation.mutate();
   }
 
+  function submitTrainingSession(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setMessage(null);
+    createSessionMutation.mutate();
+  }
+
   if (!canView) {
     return (
       <SafeState title="You are not authorized to view Training registration.">
@@ -333,15 +452,32 @@ export function RegistrationTrainingPage() {
         <p className="text-sm leading-6 text-text-muted">
           Register trainees, link known Personnel records when appropriate, and add governed training enrollments.
         </p>
-        {canRegisterTrainee ? (
-          <Button
-            aria-expanded={isCreatingTrainee}
-            onClick={startRegisterTrainee}
-            type="button"
-          >
-            Register Trainee
-          </Button>
-        ) : null}
+        <div className="flex flex-wrap gap-2">
+          {canCreateSession ? (
+            <Button
+              aria-expanded={isCreatingSession}
+              onClick={() => {
+                setMessage(null);
+                setSessionForm(emptySessionForm);
+                setSessionIdempotencyKey(crypto.randomUUID());
+                setIsCreatingSession(true);
+              }}
+              type="button"
+              variant="secondary"
+            >
+              Create Training Session
+            </Button>
+          ) : null}
+          {canRegisterTrainee ? (
+            <Button
+              aria-expanded={isCreatingTrainee}
+              onClick={startRegisterTrainee}
+              type="button"
+            >
+              Register Trainee
+            </Button>
+          ) : null}
+        </div>
       </div>
 
       {message ? (
@@ -355,9 +491,30 @@ export function RegistrationTrainingPage() {
           createTraineeMutation.error ??
           linkPersonnelMutation.error ??
           createEnrollmentMutation.error ??
-          assignSessionMutation.error
+          assignSessionMutation.error ??
+          createSessionMutation.error
         }
       />
+
+      {isCreatingSession ? (
+        <TrainingSessionCreatePanel
+          certifications={eligibleInstructorCertifications}
+          certificationsLoading={instructorCredentialsQuery.isLoading}
+          facilities={activeFacilities}
+          facilitiesLoading={facilitiesQuery.isLoading}
+          formState={sessionForm}
+          isSubmitting={createSessionMutation.isPending}
+          onCancel={() => {
+            setIsCreatingSession(false);
+            setSessionForm(emptySessionForm);
+            setSessionIdempotencyKey("");
+          }}
+          onChange={(next) => setSessionForm(next)}
+          onSubmit={submitTrainingSession}
+          personnel={eligiblePersonnel}
+          personnelLoading={personnelQuery.isLoading}
+        />
+      ) : null}
 
       {traineesQuery.isLoading ? (
         <SafeState title="Loading Trainee records." role="status">
@@ -1984,6 +2141,216 @@ function MetadataItem({
   );
 }
 
+function TrainingSessionCreatePanel({
+  certifications,
+  certificationsLoading,
+  facilities,
+  facilitiesLoading,
+  formState,
+  isSubmitting,
+  onCancel,
+  onChange,
+  onSubmit,
+  personnel,
+  personnelLoading
+}: {
+  certifications: readonly CredentialsCertificationProjection[];
+  certificationsLoading: boolean;
+  facilities: readonly RegistrationFacility[];
+  facilitiesLoading: boolean;
+  formState: SessionFormState;
+  isSubmitting: boolean;
+  onCancel: () => void;
+  onChange: (state: SessionFormState) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  personnel: readonly RegistrationPersonnel[];
+  personnelLoading: boolean;
+}) {
+  const setField = <K extends keyof SessionFormState,>(
+    field: K,
+    value: SessionFormState[K]
+  ) => onChange({ ...formState, [field]: value });
+
+  return (
+    <Surface>
+      <form aria-label="Create Training Session" className="space-y-4" onSubmit={onSubmit}>
+        <div>
+          <h2 className="text-lg font-semibold text-text-primary">
+            Create qualified Training Session
+          </h2>
+          <p className="mt-1 text-sm text-text-muted">
+            Select the Facility, exact StaffMember, and exact current L6/L7
+            Certification. Permission to create does not establish instructor
+            qualification.
+          </p>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2">
+          <label className="block text-sm font-semibold text-text-primary">
+            Session title
+            <input
+              className={inputClassName}
+              maxLength={255}
+              onChange={(event) => setField("title", event.currentTarget.value)}
+              required
+              value={formState.title}
+            />
+          </label>
+          <label className="block text-sm font-semibold text-text-primary">
+            Operational skill
+            <select
+              className={inputClassName}
+              onChange={(event) =>
+                setField(
+                  "operationalSkill",
+                  event.currentTarget.value as TrainingOperationalSkill
+                )
+              }
+              value={formState.operationalSkill}
+            >
+              {trainingOperationalSkills.map((skill) => (
+                <option key={skill} value={skill}>{humanizeCode(skill)}</option>
+              ))}
+            </select>
+          </label>
+          <label className="block text-sm font-semibold text-text-primary">
+            Starts
+            <input
+              className={inputClassName}
+              onChange={(event) => setField("startDate", event.currentTarget.value)}
+              required
+              type="datetime-local"
+              value={formState.startDate}
+            />
+          </label>
+          <label className="block text-sm font-semibold text-text-primary">
+            Ends
+            <input
+              className={inputClassName}
+              min={formState.startDate || undefined}
+              onChange={(event) => setField("endDate", event.currentTarget.value)}
+              type="datetime-local"
+              value={formState.endDate}
+            />
+          </label>
+          <label className="block text-sm font-semibold text-text-primary">
+            Duration (minutes)
+            <input
+              className={inputClassName}
+              min="1"
+              onChange={(event) =>
+                setField("durationMinutes", event.currentTarget.value)
+              }
+              type="number"
+              value={formState.durationMinutes}
+            />
+          </label>
+          <label className="block text-sm font-semibold text-text-primary">
+            Facility
+            <select
+              className={inputClassName}
+              disabled={facilitiesLoading}
+              onChange={(event) =>
+                onChange({
+                  ...formState,
+                  facilityId: event.currentTarget.value,
+                  instructorStaffMemberId: "",
+                  qualificationCertificationId: ""
+                })
+              }
+              required
+              value={formState.facilityId}
+            >
+              <option value="">Select active Facility</option>
+              {facilities.map((facility) => (
+                <option key={facility.id} value={facility.id}>
+                  {facility.facility_name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block text-sm font-semibold text-text-primary">
+            Primary instructor
+            <select
+              className={inputClassName}
+              disabled={!formState.facilityId || personnelLoading}
+              onChange={(event) =>
+                onChange({
+                  ...formState,
+                  instructorStaffMemberId: event.currentTarget.value,
+                  qualificationCertificationId: ""
+                })
+              }
+              required
+              value={formState.instructorStaffMemberId}
+            >
+              <option value="">Select bound active Personnel</option>
+              {personnel.map((staffMember) => (
+                <option key={staffMember.id} value={staffMember.id}>
+                  {staffMember.full_name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block text-sm font-semibold text-text-primary">
+            Exact qualifying Certification
+            <select
+              className={inputClassName}
+              disabled={!formState.instructorStaffMemberId || certificationsLoading}
+              onChange={(event) =>
+                setField(
+                  "qualificationCertificationId",
+                  event.currentTarget.value
+                )
+              }
+              required
+              value={formState.qualificationCertificationId}
+            >
+              <option value="">Select current L6/L7 Certification</option>
+              {certifications.map((certification) => (
+                <option key={certification.id} value={certification.id}>
+                  {certification.business_identifier} — {certification.certification_level} — expires {formatDateTime(certification.expiry_date)}
+                </option>
+              ))}
+            </select>
+            {formState.instructorStaffMemberId && !certificationsLoading && certifications.length === 0 ? (
+              <span className="mt-2 block font-normal text-text-muted">
+                No current L6/L7 Certification is available. L5 alone is not
+                sufficient for the primary instructor.
+              </span>
+            ) : null}
+          </label>
+        </div>
+        <label className="block text-sm font-semibold text-text-primary">
+          Notes
+          <textarea
+            className={inputClassName}
+            maxLength={10000}
+            onChange={(event) => setField("notes", event.currentTarget.value)}
+            rows={3}
+            value={formState.notes}
+          />
+        </label>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            disabled={
+              isSubmitting ||
+              !formState.facilityId ||
+              !formState.instructorStaffMemberId ||
+              !formState.qualificationCertificationId
+            }
+            type="submit"
+          >
+            Create Training Session
+          </Button>
+          <Button disabled={isSubmitting} onClick={onCancel} type="button" variant="secondary">
+            Cancel
+          </Button>
+        </div>
+      </form>
+    </Surface>
+  );
+}
+
 function TrainingErrorAlert({ error }: { error: Error | null }) {
   if (!error) {
     return null;
@@ -2047,6 +2414,39 @@ function buildCreateEnrollmentRequest(formState: EnrollmentFormState) {
     training_session_id: nullableText(formState.trainingSessionId),
     notes: nullableText(formState.notes)
   };
+}
+
+function buildCreateSessionRequest(formState: SessionFormState) {
+  return {
+    training_title: formState.title.trim(),
+    operational_skill: formState.operationalSkill,
+    training_start_date: new Date(formState.startDate).toISOString(),
+    training_end_date: formState.endDate
+      ? new Date(formState.endDate).toISOString()
+      : null,
+    duration_minutes: formState.durationMinutes
+      ? Number(formState.durationMinutes)
+      : null,
+    facility_id: formState.facilityId,
+    instructor_staff_member_id: formState.instructorStaffMemberId,
+    instructor_qualification_certification_id:
+      formState.qualificationCertificationId,
+    training_notes: nullableText(formState.notes)
+  };
+}
+
+function isCurrentInstructorCertification(
+  certification: CredentialsCertificationProjection
+) {
+  const now = Date.now();
+
+  return (
+    (certification.certification_level === "L6" ||
+      certification.certification_level === "L7") &&
+    certification.certification_status === "ACTIVE" &&
+    new Date(certification.issue_date).getTime() <= now &&
+    new Date(certification.expiry_date).getTime() > now
+  );
 }
 
 function studentNumberLabel(value: string | null) {
@@ -2178,11 +2578,16 @@ function sessionOptionLabel(session: TrainingSession) {
     session.instructor_name ??
     session.instructor_staff_member?.full_name ??
     "Instructor not specified";
+  const qualification = session.instructor_qualification_certification
+    ? `${session.instructor_qualification_certification.business_identifier} (${session.instructor_qualification_certification.certification_level})`
+    : "Qualification not recorded";
 
   return [
+    session.business_identifier,
     startDate,
     session.training_title,
     instructor,
+    qualification,
     session.facility?.facility_name ?? "No facility"
   ].join(" - ");
 }

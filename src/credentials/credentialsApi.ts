@@ -80,6 +80,7 @@ export interface CredentialsCertificationProgramProjection {
 
 export interface CredentialsCertificationProjection {
   id: string;
+  business_identifier: string;
   certification_level: string;
   program?: CredentialsCertificationProgramProjection;
   certification_number: string;
@@ -95,6 +96,7 @@ export interface CredentialsCertificationProjection {
 
 export interface CredentialsOperationalAuthorizationProjection {
   id: string;
+  business_identifier: string;
   authorization_number: string;
   authorization_level: string;
   program?: CredentialsCertificationProgramProjection;
@@ -416,6 +418,7 @@ function isCredentialsCertificationProjection(
   return (
     isRecord(value) &&
     typeof value.id === "string" &&
+    typeof value.business_identifier === "string" &&
     typeof value.certification_level === "string" &&
     (value.program === undefined ||
       isCredentialsCertificationProgramProjection(value.program)) &&
@@ -467,6 +470,7 @@ function isCredentialsOperationalAuthorizationProjection(
   return (
     isRecord(value) &&
     typeof value.id === "string" &&
+    typeof value.business_identifier === "string" &&
     typeof value.authorization_number === "string" &&
     typeof value.authorization_level === "string" &&
     (value.program === undefined ||

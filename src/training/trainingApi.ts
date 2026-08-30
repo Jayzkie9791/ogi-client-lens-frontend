@@ -122,8 +122,18 @@ export interface TrainingSessionInstructorStaffMemberSummary {
   readonly email: string | null;
 }
 
+export interface TrainingSessionInstructorQualificationSummary {
+  readonly id: string;
+  readonly business_identifier: string;
+  readonly certification_level: "L6" | "L7";
+  readonly certification_status: string;
+  readonly issue_date: string;
+  readonly expiry_date: string;
+}
+
 export interface TrainingSession {
   readonly id: string;
+  readonly business_identifier: string;
   readonly training_title: string;
   readonly operational_skill: string;
   readonly training_start_date: string;
@@ -133,6 +143,8 @@ export interface TrainingSession {
   readonly instructor_name: string | null;
   readonly instructor_license_number: string | null;
   readonly instructor_staff_member_id: string | null;
+  readonly instructor_qualification_certification_id: string | null;
+  readonly conducted_by_user_id: string | null;
   readonly training_notes: string | null;
   readonly created_at: string;
   readonly updated_at: string;
@@ -140,10 +152,45 @@ export interface TrainingSession {
   readonly instructor_staff_member:
     | TrainingSessionInstructorStaffMemberSummary
     | null;
+  readonly instructor_qualification_certification:
+    | TrainingSessionInstructorQualificationSummary
+    | null;
 }
 
 export interface TrainingSessionListResponse {
   readonly sessions: readonly TrainingSession[];
+}
+
+export const trainingOperationalSkills = [
+  "RESCUE_SKILLS",
+  "CPR_AED",
+  "FIRST_AID",
+  "SPINAL_MANAGEMENT",
+  "SCANNING_SURVEILLANCE",
+  "EAP",
+  "OPEN_WATER_NAVIGATION",
+  "SURF_OPERATIONS",
+  "WATER_ENTRY_APPROACH",
+  "VICTIM_EXTRACTION",
+  "COMMUNICATION_COMMAND",
+  "RIP_CURRENT_MANAGEMENT",
+  "BOARD_RESCUE",
+  "TECHNICAL_RESCUE"
+] as const;
+
+export type TrainingOperationalSkill =
+  (typeof trainingOperationalSkills)[number];
+
+export interface CreateTrainingSessionRequest {
+  readonly training_title: string;
+  readonly operational_skill: TrainingOperationalSkill;
+  readonly training_start_date: string;
+  readonly training_end_date?: string | null;
+  readonly duration_minutes?: number | null;
+  readonly facility_id?: string | null;
+  readonly instructor_staff_member_id?: string | null;
+  readonly instructor_qualification_certification_id?: string | null;
+  readonly training_notes?: string | null;
 }
 
 export interface TrainingEnrollment {
@@ -429,6 +476,18 @@ export function createTrainingEnrollment(
 export function listTrainingSessions() {
   return apiRequest<TrainingSessionListResponse>("/api/v1/training/sessions", {
     validate: isTrainingSessionListResponse
+  });
+}
+
+export function createTrainingSession(
+  request: CreateTrainingSessionRequest,
+  idempotencyKey: string
+) {
+  return apiRequest<TrainingSession>("/api/v1/training/sessions", {
+    method: "POST",
+    body: request,
+    headers: { "idempotency-key": idempotencyKey },
+    validate: isTrainingSession
   });
 }
 
@@ -887,6 +946,7 @@ function isTrainingSession(value: unknown): value is TrainingSession {
   return (
     isRecord(value) &&
     typeof value.id === "string" &&
+    typeof value.business_identifier === "string" &&
     typeof value.training_title === "string" &&
     typeof value.operational_skill === "string" &&
     typeof value.training_start_date === "string" &&
@@ -897,12 +957,32 @@ function isTrainingSession(value: unknown): value is TrainingSession {
     isNullableString(value.instructor_name) &&
     isNullableString(value.instructor_license_number) &&
     isNullableString(value.instructor_staff_member_id) &&
+    isNullableString(value.instructor_qualification_certification_id) &&
+    isNullableString(value.conducted_by_user_id) &&
     isNullableString(value.training_notes) &&
     typeof value.created_at === "string" &&
     typeof value.updated_at === "string" &&
     (value.facility === null || isTrainingSessionFacilitySummary(value.facility)) &&
     (value.instructor_staff_member === null ||
-      isTrainingSessionInstructorStaffMemberSummary(value.instructor_staff_member))
+      isTrainingSessionInstructorStaffMemberSummary(value.instructor_staff_member)) &&
+    (value.instructor_qualification_certification === null ||
+      isTrainingSessionInstructorQualificationSummary(
+        value.instructor_qualification_certification
+      ))
+  );
+}
+
+function isTrainingSessionInstructorQualificationSummary(
+  value: unknown
+): value is TrainingSessionInstructorQualificationSummary {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.business_identifier === "string" &&
+    (value.certification_level === "L6" || value.certification_level === "L7") &&
+    typeof value.certification_status === "string" &&
+    typeof value.issue_date === "string" &&
+    typeof value.expiry_date === "string"
   );
 }
 

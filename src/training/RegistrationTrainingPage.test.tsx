@@ -10,6 +10,7 @@ import { routes } from "../app/routePaths";
 import { getRefreshTokenStorageKey } from "../auth/storage";
 import { AuthenticatedSession } from "../auth/types";
 import { RegistrationClient } from "../registration/registrationClientApi";
+import { RegistrationFacility } from "../registration/registrationFacilityApi";
 import { RegistrationPersonnel } from "../registration/registrationPersonnelApi";
 import {
   TrainingAttendanceEvidenceWorkspace,
@@ -47,6 +48,8 @@ const baseSession: AuthenticatedSession = {
     "link_training_staff_member",
     "create_training_enrollment",
     "assign_training_session",
+    "create_training_session",
+    "view_certification",
     "submit_operational_evidence"
   ]
 };
@@ -140,7 +143,7 @@ const clientB: RegistrationClient = {
 const staffA: RegistrationPersonnel = {
   id: staffAId,
   client_id: clientAId,
-  user_id: null,
+  user_id: "00000000-0000-4000-8000-000000800001",
   full_name: "Ana Santos",
   email: "ana.santos@example.test",
   phone_number: "+63 900 000 2001",
@@ -166,6 +169,20 @@ const staffB: RegistrationPersonnel = {
   updated_at: "2026-08-12T00:00:00.000Z",
   deleted_at: null
 };
+
+const trainingFacility: RegistrationFacility = {
+  id: "00000000-0000-4000-8000-000000870001",
+  client_id: clientAId,
+  facility_name: "Makati Training Pool",
+  facility_type: "TRAINING_CENTER",
+  operational_status: "ACTIVE",
+  created_at: "2026-08-01T00:00:00.000Z",
+  updated_at: "2026-08-01T00:00:00.000Z"
+};
+
+const qualificationCertificationId =
+  "00000000-0000-4000-8000-000000880001";
+const qualificationBusinessIdentifier = "CERTIFICATION-2026-000101";
 
 const enrollmentA: TrainingEnrollment = {
   id: "00000000-0000-4000-8000-000000850001",
@@ -202,6 +219,7 @@ const enrollmentA: TrainingEnrollment = {
 
 const trainingSessionA: TrainingSession = {
   id: trainingSessionAId,
+  business_identifier: "TRAINING-SESSION-2026-000001",
   training_title: "Open Water Guardian Cohort A",
   operational_skill: "OPEN_WATER_RESCUE",
   training_start_date: "2026-08-22T08:00:00.000Z",
@@ -211,6 +229,8 @@ const trainingSessionA: TrainingSession = {
   instructor_name: "Braven Burrows",
   instructor_license_number: "OGI-INS-2026-0001",
   instructor_staff_member_id: null,
+  instructor_qualification_certification_id: null,
+  conducted_by_user_id: null,
   training_notes: "Pool and open water practical block.",
   created_at: "2026-08-17T05:00:00.000Z",
   updated_at: "2026-08-17T05:00:00.000Z",
@@ -220,7 +240,8 @@ const trainingSessionA: TrainingSession = {
     facility_name: "Makati Training Pool",
     operational_status: "ACTIVE"
   },
-  instructor_staff_member: null
+  instructor_staff_member: null,
+  instructor_qualification_certification: null
 };
 
 const assignedEnrollmentA: TrainingEnrollment = {
@@ -804,6 +825,132 @@ describe("Registration Training frontend", () => {
     expect(calls.map(({ url }) => url)).toContain("/api/v1/auth/refresh");
     expect(calls.map(({ url }) => url)).toContain("/api/v1/auth/me");
     expect(calls.map(({ url }) => url)).toContain("/api/v1/training/trainees");
+  });
+
+  it("creates a qualified Training Session with exact UUID authority and governed references", async () => {
+    const user = userEvent.setup();
+    const qualifiedSession: TrainingSession = {
+      ...trainingSessionA,
+      business_identifier: "TRAINING-SESSION-2026-000102",
+      instructor_name: null,
+      instructor_license_number: null,
+      instructor_staff_member_id: staffAId,
+      instructor_qualification_certification_id: qualificationCertificationId,
+      instructor_staff_member: {
+        id: staffAId,
+        client_id: clientAId,
+        full_name: staffA.full_name,
+        email: staffA.email ?? null
+      },
+      instructor_qualification_certification: {
+        id: qualificationCertificationId,
+        business_identifier: qualificationBusinessIdentifier,
+        certification_level: "L6",
+        certification_status: "ACTIVE",
+        issue_date: "2020-01-01T00:00:00.000Z",
+        expiry_date: "2099-01-01T00:00:00.000Z"
+      }
+    };
+    const { calls } = mockFetchRoutes(
+      standardRoutes([
+        {
+          url: "/api/v1/training/sessions",
+          responses: [
+            { status: 200, body: { sessions: [] } },
+            { status: 200, body: { sessions: [qualifiedSession] } }
+          ]
+        },
+        {
+          url: "/api/v1/registration/facilities",
+          responses: [{ status: 200, body: { facilities: [trainingFacility] } }]
+        },
+        {
+          url: "/api/v1/registration/personnel",
+          responses: [{ status: 200, body: { personnel: [staffA, staffB] } }]
+        },
+        {
+          url: `/api/v1/credentials/personnel/${staffAId}`,
+          responses: [
+            {
+              status: 200,
+              body: {
+                id: staffAId,
+                full_name: staffA.full_name,
+                hire_date: staffA.hire_date,
+                employment_status: "ACTIVE",
+                client: { id: clientAId, organization_name: clientA.organization_name },
+                facilities: [],
+                qualifications: [],
+                email: staffA.email,
+                phone_number: staffA.phone_number,
+                notes: null,
+                certifications: [
+                  {
+                    id: qualificationCertificationId,
+                    business_identifier: qualificationBusinessIdentifier,
+                    certification_level: "L6",
+                    certification_number: "CERT-L6-101",
+                    certification_status: "ACTIVE",
+                    issue_date: "2020-01-01T00:00:00.000Z",
+                    expiry_date: "2099-01-01T00:00:00.000Z",
+                    medical_clearance_provided: true,
+                    fitness_standard_achieved: true,
+                    training_hours_completed: 120,
+                    written_exam_score: 95,
+                    endorsements: []
+                  }
+                ],
+                operational_authorizations: []
+              }
+            }
+          ]
+        },
+        {
+          method: "POST",
+          url: "/api/v1/training/sessions",
+          responses: [{ status: 201, body: qualifiedSession }]
+        }
+      ])
+    );
+
+    renderWithRoute(routes.registrationTraining);
+    await user.click(
+      await screen.findByRole("button", { name: "Create Training Session" })
+    );
+    await user.type(screen.getByLabelText("Session title"), "Qualified cohort");
+    await user.type(screen.getByLabelText("Starts"), "2026-09-01T08:00");
+    await user.selectOptions(screen.getByLabelText("Facility"), trainingFacility.id);
+    await user.selectOptions(screen.getByLabelText("Primary instructor"), staffAId);
+    await user.selectOptions(
+      await screen.findByLabelText("Exact qualifying Certification"),
+      qualificationCertificationId
+    );
+    expect(screen.getByText(new RegExp(qualificationBusinessIdentifier))).toBeInTheDocument();
+    const createSessionForm = screen.getByRole("form", {
+      name: "Create Training Session"
+    });
+    await user.click(
+      within(createSessionForm).getByRole("button", {
+        name: "Create Training Session"
+      })
+    );
+
+    expect(
+      await screen.findByText(
+        "Training Session TRAINING-SESSION-2026-000102 created successfully."
+      )
+    ).toBeInTheDocument();
+    const createCall = calls.find(
+      (call) =>
+        call.url === "/api/v1/training/sessions" && call.init?.method === "POST"
+    );
+    expect(JSON.parse(String(createCall?.init?.body))).toMatchObject({
+      facility_id: trainingFacility.id,
+      instructor_staff_member_id: staffAId,
+      instructor_qualification_certification_id: qualificationCertificationId
+    });
+    const headers = createCall?.init?.headers as Headers;
+    expect(headers.get("idempotency-key")).toMatch(/^[0-9a-f-]{36}$/);
   });
 
   it("hides Training navigation without view_training and does not call Training endpoints", async () => {

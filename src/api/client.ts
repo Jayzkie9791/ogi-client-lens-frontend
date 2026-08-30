@@ -10,6 +10,7 @@ interface ApiRequestOptions<T> {
   method?: "GET" | "PATCH" | "POST";
   body?: unknown;
   auth?: boolean;
+  headers?: Readonly<Record<string, string>>;
   validate: (value: unknown) => value is T;
 }
 
@@ -139,9 +140,8 @@ async function refreshAccessTokenSingleFlight() {
 }
 
 function buildHeaders(options: ApiRequestOptions<unknown>) {
-  const headers = new Headers({
-    Accept: "application/json"
-  });
+  const headers = new Headers(options.headers);
+  headers.set("Accept", "application/json");
 
   if (options.body !== undefined) {
     headers.set("Content-Type", "application/json");

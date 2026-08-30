@@ -129,6 +129,7 @@ const anaCredentialsDetail: CredentialsPersonnelDetailProjection = {
   certifications: [
     {
       id: "00000000-0000-4000-8000-000000400001",
+      business_identifier: "CERTIFICATION-2026-000001",
       certification_level: "L2",
       certification_number: "CERT-001",
       certification_status: "ACTIVE",
@@ -149,6 +150,7 @@ const anaCredentialsDetail: CredentialsPersonnelDetailProjection = {
   operational_authorizations: [
     {
       id: "00000000-0000-4000-8000-000000500001",
+      business_identifier: "AUTHORIZATION-2026-000001",
       authorization_number: "AUTH-001",
       authorization_level: "L2",
       authorization_status: "ACTIVE",

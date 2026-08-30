@@ -171,6 +171,7 @@ const anaDetail: CredentialsPersonnelDetailProjection = {
   certifications: [
     {
       id: certificationId,
+      business_identifier: "CERTIFICATION-2026-000001",
       certification_level: "L3",
       program: {
         program_code: "OPEN_WATER_GUARDIAN",
@@ -203,6 +204,7 @@ const anaDetail: CredentialsPersonnelDetailProjection = {
     },
     {
       id: newCertificationId,
+      business_identifier: "CERTIFICATION-2026-000002",
       certification_level: "L3",
       certification_number: "CERT-002",
       certification_status: "PENDING",
@@ -247,6 +249,7 @@ const anaDetailWithNewEndorsement: CredentialsPersonnelDetailProjection = {
 
 const activeOperationalAuthorization: CredentialsOperationalAuthorizationProjection = {
   id: operationalAuthorizationId,
+  business_identifier: "AUTHORIZATION-2026-000001",
   authorization_number: "AUTH-001",
   authorization_level: "L3",
   program: {
