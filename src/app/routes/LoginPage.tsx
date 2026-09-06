@@ -52,39 +52,56 @@ export function LoginPage() {
   const visibleError = fieldError ?? auth.errorMessage;
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-canvas px-4 py-8">
-      <section
-        aria-labelledby="login-heading"
-        className="w-full max-w-md rounded-panel border border-border bg-surface p-6 shadow-panel"
-      >
-        <img
-          alt="Client Lens by OGI Ltd."
-          className="h-14 w-auto"
-          src="/brand/client-lens-logo.png"
-        />
-        <div className="mt-6">
-          <p className="text-xs font-semibold uppercase tracking-wide text-primary-blue">
+    <main
+      className="relative min-h-screen overflow-hidden bg-cover bg-center bg-no-repeat px-5 py-8 sm:px-8 lg:bg-cover lg:bg-[center_15%] lg:px-12"
+      data-testid="login-page"
+      style={{ backgroundImage: "url('/brand/LoginBackround.png')" }}
+    >
+      <div
+        className="absolute inset-0 bg-gradient-to-r from-transparent via-white/80 to-white/100"
+        aria-hidden="true"
+      />
+      <div className="relative mx-auto grid min-h-[calc(100vh-4rem)] max-w-[1540px] items-center gap-10 lg:grid-cols-[0.95fr_1.05fr] lg:gap-12">
+        <div className="relative flex flex-col items-center justify-center lg:-translate-y-10 lg:items-start lg:pl-[3%] xl:-translate-y-14">
+          <img
+            alt="Client Lens by OGI Ltd."
+            className="w-full max-w-[32rem] drop-shadow-[0_12px_32px_rgba(255,255,255,0.62)] sm:max-w-[36rem] lg:w-[90%] lg:max-w-[30rem] lg:translate-x-12 xl:w-[80%] xl:max-w-[35rem] xl:translate-x-60"
+            src="/brand/client-lens-logo.png"
+          />
+          <p className="mt-3 text-center text-xs font-semibold uppercase leading-relaxed tracking-[0.32em] text-primary-navy sm:text-sm lg:ml-[70%] whitespace-nowrap lg:-translate-y-[40px] lg:text-left xl:mt-4 xl:text-base">
+            Safer operations.
+            <br />
+            Stronger tomorrows.
+          </p>
+        </div>
+
+        <section
+          aria-labelledby="login-heading"
+          className="w-full max-w-[39rem] justify-self-center rounded-[1rem] border border-white/80 bg-white/[0.88] p-7 shadow-[0_24px_70px_rgba(15,45,95,0.14)] backdrop-blur-md sm:p-10 lg:justify-self-end lg:p-12"
+        >
+        <div>
+          <p className="text-sm font-semibold uppercase tracking-wide text-primary-blue sm:text-base">
             Secure access
           </p>
           <h1
             id="login-heading"
-            className="mt-2 text-2xl font-semibold text-text-primary"
+            className="mt-3 text-3xl font-semibold tracking-tight text-primary-navy sm:text-4xl"
           >
             Sign in to Client Lens
           </h1>
         </div>
 
-        <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
+        <form className="mt-9 space-y-6" onSubmit={handleSubmit}>
           <div>
             <label
-              className="block text-sm font-semibold text-text-primary"
+              className="block text-base font-semibold text-primary-navy"
               htmlFor="identifier"
             >
               Email or Username
             </label>
             <input
               autoComplete="username"
-              className="mt-1 min-h-11 w-full rounded-component border border-border bg-surface px-3 text-sm outline-none focus:border-focus focus:ring-2 focus:ring-focus"
+              className="mt-2 min-h-14 w-full rounded-lg border border-blue-200 bg-blue-50/70 px-4 text-base outline-none transition focus:border-focus focus:bg-white focus:ring-2 focus:ring-focus"
               id="identifier"
               name="identifier"
               onChange={(event) => setIdentifier(event.target.value)}
@@ -95,14 +112,14 @@ export function LoginPage() {
 
           <div>
             <label
-              className="block text-sm font-semibold text-text-primary"
+              className="block text-base font-semibold text-primary-navy"
               htmlFor="password"
             >
               Password
             </label>
             <input
               autoComplete="current-password"
-              className="mt-1 min-h-11 w-full rounded-component border border-border bg-surface px-3 text-sm outline-none focus:border-focus focus:ring-2 focus:ring-focus"
+              className="mt-2 min-h-14 w-full rounded-lg border border-blue-200 bg-blue-50/70 px-4 text-base outline-none transition focus:border-focus focus:bg-white focus:ring-2 focus:ring-focus"
               id="password"
               name="password"
               onChange={(event) => setPassword(event.target.value)}
@@ -118,14 +135,19 @@ export function LoginPage() {
           ) : null}
 
           <button
-            className="inline-flex min-h-11 w-full items-center justify-center rounded-component bg-primary-blue px-4 text-sm font-semibold text-text-inverse outline-none hover:bg-primary-navy focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:cursor-not-allowed disabled:opacity-70"
+            className="inline-flex min-h-14 w-full items-center justify-center rounded-lg bg-primary-blue px-4 text-base font-semibold text-text-inverse shadow-sm outline-none transition hover:bg-primary-navy focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:cursor-not-allowed disabled:opacity-70"
             disabled={isSubmitting}
             type="submit"
           >
             {isSubmitting ? "Signing in..." : "Sign in"}
           </button>
         </form>
-      </section>
+        </section>
+      </div>
+
+      <p className="relative mt-4 text-center text-[0.7rem] font-semibold uppercase tracking-[0.28em] text-primary-navy/70 lg:absolute lg:bottom-8 lg:right-12 lg:mt-0">
+        People <span aria-hidden="true">|</span> Places <span aria-hidden="true">|</span> Progress
+      </p>
     </main>
   );
 }

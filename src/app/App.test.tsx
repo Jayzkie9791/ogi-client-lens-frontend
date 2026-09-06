@@ -331,6 +331,14 @@ describe("Client Lens authentication foundation", () => {
     expect(
       await screen.findByRole("heading", { name: "Sign in to Client Lens" })
     ).toBeInTheDocument();
+    expect(screen.getByTestId("login-page")).toHaveStyle({
+      backgroundImage: "url('/brand/LoginBackround.png')"
+    });
+    expect(
+      screen.getByRole("img", { name: "Client Lens by OGI Ltd." })
+    ).toHaveAttribute("src", "/brand/client-lens-logo.png");
+    expect(screen.getByText(/Safer operations/i)).toBeInTheDocument();
+    expect(screen.getByText(/Stronger tomorrows/i)).toBeInTheDocument();
   });
 
   it("renders the application shell and brand treatment", () => {
