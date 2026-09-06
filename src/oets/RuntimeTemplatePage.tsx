@@ -16,6 +16,7 @@ import {
   getAuthorizedClientFacilities
 } from "./clientContextApi";
 import { narrowOetsDefinition } from "./definitionGuards";
+import { isOetsDeveloperDiagnosticsEnabled } from "./developerDiagnostics";
 import {
   createOperationalEvidenceRecord,
   createOperationalEvidenceDraft,
@@ -217,14 +218,16 @@ export function RuntimeTemplatePage() {
   if (!activeEditingSession) {
     return (
       <SafeState title="Template definition is not renderable.">
-        {(narrowing?.errors ?? ["definition_jsonb was not returned."]).join(" ")}
+        {isOetsDeveloperDiagnosticsEnabled()
+          ? (narrowing?.errors ?? ["definition_jsonb was not returned."]).join(" ")
+          : "This template cannot be displayed. Contact an administrator if the problem continues."}
       </SafeState>
     );
   }
 
   return (
     <div className="space-y-4">
-      {activeEditingSession.warnings.length > 0 ? (
+      {isOetsDeveloperDiagnosticsEnabled() && activeEditingSession.warnings.length > 0 ? (
         <Surface className="border-state-warning">
           <h2 className="text-base font-semibold text-text-primary">
             Unsupported renderer metadata
@@ -260,7 +263,7 @@ export function RuntimeTemplatePage() {
       session &&
       !needsExplicitClientContext &&
       session.facilityIds.length > 1 ? (
-        <Surface>
+        <Surface className="border-blue-100 bg-blue-50/50 py-3">
           <label className="block text-sm font-semibold text-text-primary">
             Facility context
             <select
@@ -487,7 +490,7 @@ function ClientContextPanel({
 }) {
   if (!needsExplicitClientContext) {
     return (
-      <Surface>
+        <Surface className="border-blue-100 bg-blue-50/50 py-3">
         <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
           Client context
         </p>
@@ -499,7 +502,7 @@ function ClientContextPanel({
   }
 
   return (
-    <Surface>
+    <Surface className="border-blue-100 bg-blue-50/50 py-3">
       <label className="block text-sm font-semibold text-text-primary">
         Client context
         <select
@@ -537,7 +540,7 @@ function FacilityContextPanel({
   selectedFacilityId: string;
 }) {
   return (
-    <Surface>
+    <Surface className="border-blue-100 bg-blue-50/50 py-3">
       <label className="block text-sm font-semibold text-text-primary">
         Facility context
         <select

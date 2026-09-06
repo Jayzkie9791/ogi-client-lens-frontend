@@ -1,4 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { readFile } from "node:fs/promises";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { act } from "react";
@@ -18,6 +19,7 @@ import { AuthenticatedSession } from "../auth/types";
 import { appRoutes } from "../app/router";
 import { AppProviders } from "../app/providers/AppProviders";
 import { narrowOetsDefinition } from "./definitionGuards";
+import { isOetsDeveloperDiagnosticsEnabled } from "./developerDiagnostics";
 import {
   getOperationalEvidenceRecord,
   transitionOperationalEvidenceRecord
@@ -401,11 +403,13 @@ function governedAttestation(status: "CURRENT" | "STALE" = "CURRENT") {
 
 beforeEach(() => {
   window.sessionStorage.clear();
+  vi.stubEnv("VITE_OETS_DEVELOPER_DIAGNOSTICS", "enabled");
 });
 
 afterEach(() => {
   configureApiAuth(null);
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   window.sessionStorage.clear();
 });
 
@@ -771,6 +775,7 @@ describe("Generic OETS renderer", () => {
   });
 
   it("maps persisted-Draft field validation and presents unmapped validation at form level", async () => {
+    vi.stubEnv("VITE_OETS_DEVELOPER_DIAGNOSTICS", "disabled");
     const user = userEvent.setup();
     const queryClient = createTestQueryClient();
     const signingSession = {
@@ -817,8 +822,12 @@ describe("Generic OETS renderer", () => {
     await user.type(await screen.findByLabelText("Text Field"), "Changed evidence");
     await user.click(screen.getByRole("button", { name: "Save Draft" }));
 
-    expect(await screen.findByText("Text evidence is required.")).toBeInTheDocument();
-    expect(screen.getByText("Unsupported payload property.")).toBeInTheDocument();
+    expect(await screen.findByText("Review this field.")).toBeInTheDocument();
+    expect(screen.queryByText("Text evidence is required.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Unsupported payload property.")).not.toBeInTheDocument();
+    const progressToggle = screen.getByRole("button", { name: /Form progress/s });
+    await user.click(progressToggle);
+    expect(screen.getByText("This form needs attention.")).toBeInTheDocument();
     expect(screen.getAllByRole("alert").some((alert) =>
       alert.textContent?.includes("Review the validation details and try again.")
     )).toBe(true);
@@ -1887,6 +1896,7 @@ describe("Generic OETS renderer", () => {
   });
 
   it("renders ordered sections and every Phase 2 supported field type generically", () => {
+    vi.stubEnv("VITE_OETS_DEVELOPER_DIAGNOSTICS", "disabled");
     render(
       <OetsRenderer definition={definition} runtimeTemplate={runtimeTemplate} />
     );
@@ -1895,8 +1905,7 @@ describe("Generic OETS renderer", () => {
 
     expect(headings.map((heading) => heading.textContent)).toEqual([
       "General Evidence",
-      "Repeatable Observations",
-      "Current Audit Payload"
+      "Repeatable Observations"
     ]);
     expect(screen.getByLabelText("Text Field")).toHaveAttribute("type", "text");
     expect(screen.getByLabelText("Textarea Field").tagName).toBe("TEXTAREA");
@@ -1970,11 +1979,10 @@ describe("Generic OETS renderer", () => {
     );
 
     await user.selectOptions(screen.getByLabelText("Select Field"), "OPTION_B");
-    await user.click(screen.getByLabelText("Radio Beta"));
-    await user.selectOptions(screen.getByLabelText("Multiselect Field"), [
-      "OPTION_A",
-      "OPTION_B"
-    ]);
+    await user.click(screen.getByRole("radio", { name: "Radio Beta" }));
+    const multiselect = screen.getByRole("group", { name: "Multiselect Field" });
+    await user.click(within(multiselect).getByLabelText("Option Alpha"));
+    await user.click(within(multiselect).getByLabelText("Radio Beta"));
 
     expect(screen.getByText(/"SELECT_FIELD": "OPTION_B"/)).toBeInTheDocument();
     expect(screen.getByText(/"RADIO_FIELD": "OPTION_B"/)).toBeInTheDocument();
@@ -2399,6 +2407,7 @@ describe("Generic OETS renderer", () => {
   });
 
   it("maps backend 422 validation details to form, section, field, and repeatable messages", async () => {
+    vi.stubEnv("VITE_OETS_DEVELOPER_DIAGNOSTICS", "disabled");
     window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
     mockFetchQueue([
       { status: 200, body: { accessToken: "access-token" } },
@@ -2458,14 +2467,17 @@ describe("Generic OETS renderer", () => {
         "The backend rejected this audit. Review the highlighted validation messages."
       )
     ).toBeInTheDocument();
-    expect(screen.getByText("Form issue")).toBeInTheDocument();
-    expect(screen.getByText("Section issue")).toBeInTheDocument();
-    expect(screen.getByText("Backend field issue")).toBeInTheDocument();
-    expect(screen.getByText("Repeatable field issue")).toBeInTheDocument();
-    expect(screen.getByText("Unrecognized path issue")).toBeInTheDocument();
+    for (const diagnostic of ["Form issue", "Section issue", "Backend field issue", "Repeatable field issue", "Unrecognized path issue"]) {
+      expect(screen.queryByText(diagnostic)).not.toBeInTheDocument();
+    }
+    expect(screen.getAllByText("Review this field.")).toHaveLength(2);
+    await user.click(screen.getByRole("button", { name: /Form progress/s }));
+    expect(screen.getByText("This form needs attention.")).toBeInTheDocument();
+    expect(screen.getAllByText("Needs attention")).toHaveLength(2);
   });
 
   it("keeps contradictory backend validation details visible without attaching them to the wrong field", async () => {
+    vi.stubEnv("VITE_OETS_DEVELOPER_DIAGNOSTICS", "disabled");
     window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
     mockFetchQueue([
       { status: 200, body: { accessToken: "access-token" } },
@@ -2510,14 +2522,17 @@ describe("Generic OETS renderer", () => {
 
     await user.click(await screen.findByRole("button", { name: "Create Audit Draft" }));
 
-    expect(await screen.findByText("Conflicting field issue")).toBeInTheDocument();
-    expect(screen.getByText("Section-only path issue")).toBeInTheDocument();
-    expect(screen.getByText("Conflicting section issue")).toBeInTheDocument();
+    expect(await screen.findByText("The backend rejected this audit. Review the highlighted validation messages.")).toBeInTheDocument();
+    expect(screen.queryByText("Conflicting field issue")).not.toBeInTheDocument();
+    expect(screen.queryByText("Section-only path issue")).not.toBeInTheDocument();
+    expect(screen.queryByText("Conflicting section issue")).not.toBeInTheDocument();
 
     const textField = screen.getByLabelText("Text Field");
     expect(textField.parentElement).not.toHaveTextContent("Conflicting field issue");
     expect(textField.parentElement).not.toHaveTextContent("Section-only path issue");
     expect(textField.parentElement).not.toHaveTextContent("Conflicting section issue");
+    await user.click(screen.getByRole("button", { name: /Form progress/s }));
+    expect(screen.getAllByText("Needs attention")).toHaveLength(1);
   });
 
   it("clears a selected facility when the authenticated facility context changes", async () => {
@@ -3512,4 +3527,248 @@ function optionField(
     expect(await screen.findByText("Persisted evidence record route")).toBeVisible();
     expect(calls).toHaveLength(2);
     expect(JSON.parse(String(calls[0].init?.body)).idempotency_key).toBe(JSON.parse(String(calls[1].init?.body)).idempotency_key);
+  });
+
+  it("applies the shared section visual hierarchy across unrelated template fixtures", () => {
+    const fixtures = ["Training Assessment", "Emergency Preparedness Assessment", "Risk Register"];
+    const view = render(<OetsRenderer definition={{ ...definition, template_metadata: { ...definition.template_metadata, template_name: fixtures[0] } }} runtimeTemplate={runtimeTemplate} />);
+    for (const templateName of fixtures) {
+      view.rerender(<OetsRenderer definition={{ ...definition, template_metadata: { ...definition.template_metadata, template_name: templateName } }} runtimeTemplate={runtimeTemplate} />);
+      expect(screen.getByRole("heading", { name: templateName })).toHaveClass("text-primary-navy");
+      const sectionHeading = screen.getByRole("heading", { name: "General Evidence" });
+      expect(sectionHeading).toHaveClass("text-primary-navy");
+      expect(sectionHeading.parentElement).toHaveClass("bg-blue-50", "before:bg-accent-red");
+      expect(screen.getByTestId("oets-section-stack")).toHaveClass("bg-[#EEF3F9]", "space-y-5", "lg:px-6");
+      expect(sectionHeading.closest(".rounded-panel")).toHaveClass("overflow-hidden", "border-[#CFDCEB]", "bg-white", "shadow-[0_2px_8px_rgba(15,45,95,0.06)]");
+      expect(screen.getByRole("group", { name: "Multiselect Field" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Repeatable Observations" })).toBeInTheDocument();
+    }
+  });
+
+  it("hides raw diagnostics in production mode while retaining safe field guidance", () => {
+    vi.stubEnv("VITE_OETS_DEVELOPER_DIAGNOSTICS", "disabled");
+    render(<OetsRenderer backendValidation={{ formMessages: ["internal form diagnostic"], sectionMessages: { GENERAL_EVIDENCE: ["internal section diagnostic"] }, fieldMessages: { "GENERAL_EVIDENCE/TEXT_FIELD": ["internal field diagnostic"] } }} definition={definition} runtimeTemplate={runtimeTemplate} />);
+    expect(screen.queryByText(/internal .* diagnostic/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Developer validation diagnostics")).not.toBeInTheDocument();
+    expect(screen.queryByText("Developer payload diagnostics")).not.toBeInTheDocument();
+    expect(screen.queryByText(/"template_code"\s*:/)).not.toBeInTheDocument();
+    expect(screen.getByText("Review this field.")).toBeInTheDocument();
+  });
+
+  it("keeps diagnostics explicitly available only through collapsed developer surfaces", () => {
+    render(<OetsRenderer backendValidation={{ formMessages: ["developer detail"], sectionMessages: {}, fieldMessages: {} }} definition={definition} runtimeTemplate={runtimeTemplate} />);
+    expect(screen.getByText("Developer validation diagnostics").closest("details")).not.toHaveAttribute("open");
+    expect(screen.getByText("Developer payload diagnostics").closest("details")).not.toHaveAttribute("open");
+  });
+
+  it("derives global navigation from ordered rendered sections without template-specific entries", async () => {
+    const user = userEvent.setup();
+    render(<OetsRenderer definition={definition} runtimeTemplate={runtimeTemplate} />);
+    const mobileProgress = screen.getByRole("button", {
+      name: /Form progress.*Section 1.*General Evidence/s
+    });
+    expect(mobileProgress).toHaveAttribute("aria-expanded", "false");
+    await user.click(mobileProgress);
+    const navigation = screen.getByRole("navigation", { name: "Form sections" });
+    expect(within(navigation).getAllByRole("button").map((button) => button.textContent))
+      .toEqual([
+        expect.stringContaining("Section 1"),
+        expect.stringContaining("Section 2")
+      ]);
+    expect(screen.getAllByText("No required inputs").length).toBeGreaterThan(0);
+    expect(screen.getByTestId("oets-workspace")).toHaveClass(
+      "lg:grid", "lg:grid-cols-[minmax(0,1fr)_17rem]", "lg:items-start"
+    );
+    expect(screen.getByTestId("oets-progress-column")).toHaveClass(
+      "lg:row-start-1", "lg:sticky", "lg:top-[7.5rem]", "lg:pt-4"
+    );
+    expect(screen.getByTestId("oets-section-stack")).toHaveClass("lg:row-start-1");
+    for (const id of ["oets-section-section-1", "oets-section-section-2"]) {
+      expect(document.getElementById(id)).toHaveClass(
+        "scroll-mt-[10.5rem]", "lg:scroll-mt-[8.5rem]"
+      );
+    }
+  });
+
+  it("keeps the one prop-authorized action in a compact sticky strip", () => {
+    const onSubmit = vi.fn();
+    render(
+      <OetsRenderer
+        definition={definition}
+        onSubmit={onSubmit}
+        runtimeTemplate={runtimeTemplate}
+        submitDisabledReason="Select an authorized context."
+        submitLabel="Authority supplied action"
+      />
+    );
+    const strip = screen.getByTestId("oets-action-strip");
+    expect(strip).toHaveClass("sticky", "top-0", "z-20");
+    expect(within(strip).getByRole("button", { name: "Authority supplied action" }))
+      .toBeDisabled();
+    expect(within(strip).getByText("Select an authorized context.")).toBeVisible();
+    expect(screen.getAllByRole("button", { name: "Authority supplied action" })).toHaveLength(1);
+  });
+
+  it("does not invent an action for a read-only OETS record", () => {
+    render(
+      <OetsRenderer
+        definition={definition}
+        onSubmit={vi.fn()}
+        readOnly
+        runtimeTemplate={runtimeTemplate}
+        submitLabel="Must not render"
+      />
+    );
+    expect(screen.queryByRole("button", { name: "Must not render" })).not.toBeInTheDocument();
+    expect(screen.getByText("Read only")).toBeInTheDocument();
+  });
+
+  it("keeps success and error feedback in document flow outside the sticky action strip", () => {
+    render(
+      <OetsRenderer
+        definition={definition}
+        formMessage="Flow error"
+        runtimeTemplate={runtimeTemplate}
+        submitSuccess={{ evidenceRecordId: "record-1", lifecycleState: "DRAFT" }}
+        submitSuccessMessage="Flow success"
+      />
+    );
+    const flow = screen.getByTestId("oets-flow-messages");
+    expect(within(flow).getByRole("status")).toHaveTextContent("Flow success");
+    expect(within(flow).getByRole("alert")).toHaveTextContent("Flow error");
+    expect(within(screen.getByTestId("oets-action-strip")).queryByRole("alert"))
+      .not.toBeInTheDocument();
+  });
+
+  it("does not treat an untouched false Boolean as answered but accepts an explicit false answer", async () => {
+    const user = userEvent.setup();
+    const requiredBooleanDefinition: OetsDefinition = {
+      ...definition,
+      sections: [{
+        ...definition.sections[1],
+        fields: [{
+          ...booleanField("BOOLEAN_FIELD", "Boolean Field", "BOOLEAN", 1),
+          required: true
+        }]
+      }]
+    };
+    render(
+      <OetsRenderer
+        definition={requiredBooleanDefinition}
+        runtimeTemplate={runtimeTemplate}
+      />
+    );
+    expect(screen.getByRole("button", { name: /Form progress.*0%/s })).toBeInTheDocument();
+    const checkbox = screen.getByRole("checkbox", { name: /Boolean Field/ });
+    await user.click(checkbox);
+    await user.click(checkbox);
+    expect(screen.getByRole("button", { name: /Form progress.*100%/s })).toBeInTheDocument();
+  });
+
+  it("recognizes an authoritatively loaded false Boolean as present", () => {
+    const requiredBooleanDefinition: OetsDefinition = {
+      ...definition,
+      sections: [{
+        ...definition.sections[1],
+        fields: [{
+          ...booleanField("BOOLEAN_FIELD", "Boolean Field", "BOOLEAN", 1),
+          required: true
+        }]
+      }]
+    };
+    render(
+      <OetsRenderer
+        definition={requiredBooleanDefinition}
+        initialPayload={{ sections: { GENERAL_EVIDENCE: { BOOLEAN_FIELD: false } } }}
+        runtimeTemplate={runtimeTemplate}
+      />
+    );
+    expect(screen.getByRole("button", { name: /Form progress.*100%/s })).toBeInTheDocument();
+  });
+
+  it("uses the renderer visibility projection for required progress obligations", () => {
+    const requiredDefinition: OetsDefinition = {
+      ...definition,
+      sections: [{
+        ...definition.sections[1],
+        fields: [{ ...textField("TEXT_FIELD", "Text Field", "TEXT", 1), required: true }]
+      }]
+    };
+    render(
+      <OetsRenderer
+        definition={requiredDefinition}
+        fieldVisibilityPolicy={() => false}
+        runtimeTemplate={runtimeTemplate}
+      />
+    );
+    expect(screen.queryByRole("heading", { name: "General Evidence" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "Form sections" })).not.toBeInTheDocument();
+  });
+
+  it("does not expose unsupported metadata paths in the normal runtime page", async () => {
+    vi.stubEnv("VITE_OETS_DEVELOPER_DIAGNOSTICS", "disabled");
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    const definitionWithBackendRules = {
+      ...definition,
+      sections: definition.sections.map((section, sectionIndex) => sectionIndex === 0 ? {
+        ...section,
+        fields: section.fields.map((field, fieldIndex) => fieldIndex === 0 ? { ...field, validation: { rules: [{ rule: "required" }] } } : field)
+      } : section)
+    };
+    mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: session },
+      { status: 200, body: { ...runtimeTemplate, definition_jsonb: definitionWithBackendRules } }
+    ]);
+    renderWithRoute(`/workbench/oets/${runtimeTemplate.template_code}`);
+    expect(await screen.findByRole("heading", { name: definition.template_metadata.template_name })).toBeInTheDocument();
+    expect(screen.queryByText("Unsupported renderer metadata")).not.toBeInTheDocument();
+    expect(screen.queryByText(/sections\[0\]\.fields\[0\]\.validation\.rules/)).not.toBeInTheDocument();
+  });
+
+  it("shows unsupported metadata paths only with the exact development opt-in", async () => {
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    const definitionWithBackendRules = {
+      ...definition,
+      sections: definition.sections.map((section, sectionIndex) => sectionIndex === 0 ? {
+        ...section,
+        fields: section.fields.map((field, fieldIndex) => fieldIndex === 0 ? { ...field, validation: { rules: [{ rule: "required" }] } } : field)
+      } : section)
+    };
+    mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: session },
+      { status: 200, body: { ...runtimeTemplate, definition_jsonb: definitionWithBackendRules } }
+    ]);
+    renderWithRoute(`/workbench/oets/${runtimeTemplate.template_code}`);
+    expect(await screen.findByText("Unsupported renderer metadata")).toBeInTheDocument();
+    expect(screen.getByText(/sections\[0\]\.fields\[0\]\.validation\.rules/)).toBeInTheDocument();
+  });
+
+  it("contains no template-specific visual branch", async () => {
+    const source = (await Promise.all([
+      readFile("src/oets/OetsRenderer.tsx", "utf8"),
+      readFile("src/oets/RuntimeTemplatePage.tsx", "utf8"),
+      readFile("src/oets/OperationalEvidenceRecordPage.tsx", "utf8"),
+      readFile("src/oets/oetsProgress.ts", "utf8"),
+      readFile("src/oets/OetsProgressNavigator.tsx", "utf8")
+    ])).join("\n");
+    expect(source).not.toMatch(/OGI_F_?01|Facility Information, Risk Intelligence & Service Request Form/);
+    expect(source).not.toMatch(/templateCode\s*===/);
+  });
+
+  it("keeps progress presentation-only without persistence or API authority", async () => {
+    const source = (await Promise.all([
+      readFile("src/oets/oetsProgress.ts", "utf8"),
+      readFile("src/oets/OetsProgressNavigator.tsx", "utf8")
+    ])).join("\n");
+    expect(source).not.toMatch(/apiRequest|fetch\(|localStorage|sessionStorage/);
+    expect(source).not.toMatch(/onSubmit|lifecycleMutation|governanceMutation/);
+  });
+
+  it("requires both development mode and the exact diagnostics opt-in", () => {
+    expect(isOetsDeveloperDiagnosticsEnabled({ development: true, flag: undefined })).toBe(false);
+    expect(isOetsDeveloperDiagnosticsEnabled({ development: true, flag: "true" })).toBe(false);
+    expect(isOetsDeveloperDiagnosticsEnabled({ development: true, flag: "enabled" })).toBe(true);
+    expect(isOetsDeveloperDiagnosticsEnabled({ development: false, flag: "enabled" })).toBe(false);
   });

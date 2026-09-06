@@ -7,6 +7,7 @@ import { useAuth } from "../auth/useAuth";
 import { Button } from "../ui/components/Button";
 import { Surface } from "../ui/components/Surface";
 import { narrowOetsDefinition } from "./definitionGuards";
+import { isOetsDeveloperDiagnosticsEnabled } from "./developerDiagnostics";
 import {
   displayLifecycleStatus,
   displayReviewAuthority,
@@ -457,7 +458,9 @@ export function OperationalEvidenceRecordPage() {
   if (!templateQuery.data || !narrowing?.definition) {
     return (
       <SafeState title="Audit record could not be displayed.">
-        {(narrowing?.errors ?? ["definition_jsonb was not returned."]).join(" ")}
+        {isOetsDeveloperDiagnosticsEnabled()
+          ? (narrowing?.errors ?? ["definition_jsonb was not returned."]).join(" ")
+          : "This audit definition cannot be displayed. Contact an administrator if the problem continues."}
       </SafeState>
     );
   }
@@ -612,7 +615,7 @@ export function OperationalEvidenceRecordPage() {
         selectedId={selectedConclusionId}
       />
 
-      {narrowing.warnings.length > 0 ? (
+      {isOetsDeveloperDiagnosticsEnabled() && narrowing.warnings.length > 0 ? (
         <Surface className="border-state-warning">
           <h2 className="text-base font-semibold text-text-primary">
             Unsupported renderer metadata
