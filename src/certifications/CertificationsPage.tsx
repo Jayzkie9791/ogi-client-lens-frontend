@@ -1,4 +1,4 @@
-import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
+import { FormEvent, ReactNode, useMemo, useState } from "react";
 import { QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
@@ -7,6 +7,7 @@ import { isApiError } from "../api/errors";
 import { useAuth } from "../auth/useAuth";
 import { Button } from "../ui/components/Button";
 import { Surface } from "../ui/components/Surface";
+import { DigitalCertificateModal } from "../credentials/DigitalCertificateModal";
 import {
   CredentialsCertificationEndorsementProjection,
   CredentialsCertificationProjection,
@@ -186,6 +187,8 @@ export function CertificationsPage() {
   const [credentialIssuanceSuccess, setCredentialIssuanceSuccess] =
     useState<string | null>(null);
   const [recentIssuedCredentialId, setRecentIssuedCredentialId] =
+    useState<string | null>(null);
+  const [digitalCertificateIssuanceId, setDigitalCertificateIssuanceId] =
     useState<string | null>(null);
 
   const credentialsQuery = useQuery({
@@ -410,28 +413,6 @@ export function CertificationsPage() {
     ? findCertification(detailQuery.data, selectedCertificationId)
     : null;
 
-  useEffect(() => {
-    const preparation = credentialIssuancePreparationQuery.data;
-
-    if (!preparation || !credentialIssuanceMode) {
-      return;
-    }
-
-    setCredentialIssuanceForm((current) => ({
-      ...current,
-      selectedEvidenceRecordId:
-        current.selectedEvidenceRecordId ||
-        (preparation.eligible_f048_evidence.length === 1
-          ? preparation.eligible_f048_evidence[0].operational_evidence_record_id
-          : ""),
-      selectedAuthorizationId:
-        current.selectedAuthorizationId ||
-        (preparation.operational_authorization_options.length === 1
-          ? preparation.operational_authorization_options[0].id
-          : "")
-    }));
-  }, [credentialIssuanceMode, credentialIssuancePreparationQuery.data]);
-
   if (!canViewCertifications) {
     return (
       <CertificationWorkspaceFrame>
@@ -502,6 +483,7 @@ export function CertificationsPage() {
                 setCredentialIssuanceSuccess(null);
                 setRecentIssuedCredentialId(null);
                 endorsementMutation.reset();
+                setDigitalCertificateIssuanceId(null);
                 setSelectedCertificationId(entry.certificationId);
               }}
               selectedCertificationId={selectedCertificationId}
@@ -628,11 +610,16 @@ export function CertificationsPage() {
                 }}
                 onSubmitCredentialIssuance={(event) => {
                   event.preventDefault();
-                  credentialIssuanceMutation.mutate();
                 }}
                 issuanceHistory={issuanceHistoryQuery.data?.issuances ?? []}
                 issuanceHistoryError={issuanceHistoryQuery.error}
                 issuanceHistoryLoading={issuanceHistoryQuery.isLoading}
+                onViewDigitalCertificate={() => {
+                  const currentIssuance = issuanceHistoryQuery.data?.issuances[0];
+                  if (currentIssuance) {
+                    setDigitalCertificateIssuanceId(currentIssuance.id);
+                  }
+                }}
                 recentIssuedCredentialId={recentIssuedCredentialId}
               />            ) : (
               <Surface>
@@ -646,6 +633,12 @@ export function CertificationsPage() {
             )}
           </div>
         )}
+        {digitalCertificateIssuanceId ? (
+          <DigitalCertificateModal
+            issuanceId={digitalCertificateIssuanceId}
+            onClose={() => setDigitalCertificateIssuanceId(null)}
+          />
+        ) : null}
       </section>
     </CertificationWorkspaceFrame>
   );
@@ -732,7 +725,7 @@ function CertificationRegistry({
                         : "secondary"
                     }
                   >
-                    View Certification
+                    View Certificate Details
                   </Button>
                 </td>
               </tr>
@@ -794,7 +787,8 @@ function CertificationDetailPanel({
   issuanceHistoryError,
   issuanceHistoryLoading,
   recentIssuedCredentialId,
-  onSubmitEndorsement
+  onSubmitEndorsement,
+  onViewDigitalCertificate
 }: {
   authorizationCommandError: Error | null;
   authorizationCommandPending: boolean;
@@ -849,6 +843,7 @@ function CertificationDetailPanel({
   issuanceHistoryLoading: boolean;
   recentIssuedCredentialId: string | null;
   onSubmitEndorsement: (event: FormEvent<HTMLFormElement>) => void;
+  onViewDigitalCertificate: () => void;
 }) {
   if (loading) {
     return (
@@ -887,7 +882,17 @@ function CertificationDetailPanel({
           </h2>
           <p className="mt-1 text-sm text-text-muted">{detail.full_name}</p>
         </div>
-        <StatusBadge value={certification.certification_status} />
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusBadge value={certification.certification_status} />
+          {!issuanceHistoryLoading && !issuanceHistoryError && issuanceHistory.length > 0 ? (
+            <Button
+              onClick={onViewDigitalCertificate}
+              variant="secondary"
+            >
+              View Digital Certificate
+            </Button>
+          ) : null}
+        </div>
       </div>
       <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
         <MetadataItem label="Personnel" value={detail.full_name} />
@@ -1131,12 +1136,7 @@ function CredentialIssuanceSection({
     (candidate) =>
       candidate.operational_evidence_record_id === form.selectedEvidenceRecordId
   );
-  const canSubmitPreparation =
-    Boolean(preparation) &&
-    preparation?.preparation_status !== "BLOCKED" &&
-    preparation?.preparation_status !== "ALREADY_ISSUED" &&
-    Boolean(form.selectedEvidenceRecordId) &&
-    allRequiredIssueFieldsPresent(preparation, form);
+  const canSubmitPreparation = false;
   const showIssuanceControls =
     preparation?.preparation_status === "READY_FOR_REVIEW" ||
     preparation?.preparation_status === "REQUIRES_INPUT";
@@ -1389,6 +1389,9 @@ function CredentialIssuanceSection({
               ) : null}
             </>
           ) : null}
+          <p className="rounded-component border border-blue-200 bg-blue-50/60 px-3 py-3 text-sm text-primary-navy" role="status">
+            Credential issuance preparation is temporarily unavailable while authoritative issuance validation is being completed.
+          </p>
           <div className="flex flex-wrap gap-2">
             <Button disabled={submitting || !canSubmitPreparation} type="submit">
               {submitting ? "Issuing Credential" : "Confirm Issue Credential"}
@@ -1509,37 +1512,6 @@ function PreparationIssueField({
       />
     </label>
   );
-}
-
-function allRequiredIssueFieldsPresent(
-  preparation: CredentialIssuancePreparationResponse | null | undefined,
-  form: CredentialIssuanceFormState
-) {
-  if (!preparation) {
-    return false;
-  }
-
-  return (
-    requiredFieldPresent(preparation.training.completion_date, form.completionDate) &&
-    requiredFieldPresent(preparation.training.training_location, form.trainingLocation) &&
-    requiredFieldPresent(preparation.training.instructor, form.instructor) &&
-    requiredFieldPresent(preparation.training.training_center, form.trainingCenter)
-  );
-}
-
-function requiredFieldPresent(
-  field: CredentialIssuancePreparationResponse["training"]["completion_date"],
-  value: string
-) {
-  if (field.provenance_status === "DERIVED") {
-    return Boolean(field.value);
-  }
-
-  if (field.provenance_status === "REQUIRES_INPUT") {
-    return value.trim().length > 0;
-  }
-
-  return true;
 }
 
 function resolveIssueFieldValue(

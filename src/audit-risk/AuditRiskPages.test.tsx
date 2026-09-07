@@ -59,7 +59,8 @@ describe("Audit workspace read paths", () => {
 
     const list = await screen.findByRole("list", { name: "Scoped Audits" });
     expect(within(list).getByRole("link", { name: "AUDIT-2026-000001" })).toHaveAttribute("href", routes.auditDetailPath(auditId));
-    expect(within(list).getByText("North Pool · North Aquatics")).toBeInTheDocument();
+    expect(within(list).getByText("North Pool")).toBeInTheDocument();
+    expect(within(list).getByText("North Aquatics")).toBeInTheDocument();
     expect(within(list).getByText(/Full Safety Audit · Full Safety Audit · v2/)).toBeInTheDocument();
 
     await user.selectOptions(screen.getByRole("combobox", { name: "Audit status" }), "APPROVED");

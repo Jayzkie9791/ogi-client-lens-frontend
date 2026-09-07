@@ -17,6 +17,7 @@ import {
   setPrimaryRegistrationFacilityAssignment
 } from "./registrationFacilityAssignmentApi";
 import { RegistrationPersonnel } from "./registrationPersonnelApi";
+import { formatRegistrationDate } from "./registrationPresentation";
 
 const permissions = {
   view: "view_facility_assignment",
@@ -185,9 +186,13 @@ export function RegistrationFacilityAssignmentsPanel({
   }
 
   return (
-    <Surface aria-label="Facility assignment" className="space-y-4">
-      <div>
-        <h2 className="text-lg font-semibold text-text-primary">
+    <Surface
+      aria-label="Facility assignment"
+      className="space-y-4 overflow-hidden"
+      data-registration-section="operational"
+    >
+      <div className="-mx-5 -mt-5 border-b border-l-4 border-b-border border-l-accent-red bg-elevated px-5 py-3">
+        <h2 className="text-lg font-semibold text-primary-navy">
           Facility Assignments
         </h2>
         <p className="mt-1 text-sm leading-6 text-text-muted">
@@ -311,7 +316,7 @@ function FacilityAssignmentHistory({
                       {facilityLabel}
                     </h3>
                     <p className="mt-1 break-all text-xs text-text-muted">
-                      Assignment ID {assignment.id}
+                      Administrative assignment reference {assignment.id}
                     </p>
                   </div>
                   <dl className="grid gap-2 text-sm sm:grid-cols-2">
@@ -321,11 +326,11 @@ function FacilityAssignmentHistory({
                     />
                     <MetadataItem
                       label="Assigned from"
-                      value={assignment.assigned_from}
+                      value={formatRegistrationDate(assignment.assigned_from)}
                     />
                     <MetadataItem
                       label="Assigned to"
-                      value={assignment.assigned_to ?? "Currently active"}
+                      value={assignment.assigned_to ? formatRegistrationDate(assignment.assigned_to) : "Currently active"}
                     />
                     <MetadataItem
                       label="Primary"

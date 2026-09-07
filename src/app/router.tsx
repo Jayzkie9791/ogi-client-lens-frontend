@@ -13,6 +13,7 @@ import { routes } from "./routePaths";
 import { AdministrationPage } from "./routes/AdministrationPage";
 import { ClientPocProvisioningPage } from "./routes/ClientPocProvisioningPage";
 import { LoginPage } from "./routes/LoginPage";
+import { ForgotPasswordPage, ResetPasswordPage } from "./routes/PasswordResetPages";
 import { NotFoundPage } from "./routes/NotFoundPage";
 import { OperationsPage } from "./routes/OperationsPage";
 import { RecordsPage } from "./routes/RecordsPage";
@@ -40,6 +41,14 @@ export const appRoutes: RouteObject[] = [
       {
         path: routes.login,
         element: <LoginPage />
+      },
+      {
+        path: routes.forgotPassword,
+        element: <ForgotPasswordPage />
+      },
+      {
+        path: routes.resetPassword,
+        element: <ResetPasswordPage />
       }
     ]
   },

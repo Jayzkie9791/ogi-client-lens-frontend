@@ -3,11 +3,13 @@ import { Link, useParams } from "react-router-dom";
 
 import { routes } from "../app/routePaths";
 import { useCan } from "../auth/useCan";
+import { Button } from "../ui/components/Button";
 import { Surface } from "../ui/components/Surface";
 import { auditQueryKeys, getAudit } from "./auditRiskApi";
 import { AuditReadError, AuditState, Context } from "./AuditRiskWorkspacePage";
 import { displayCode, formatDateTime } from "./auditRiskTypes";
 import { AuditRiskNavigation } from "./AuditRiskNavigation";
+import { AuditRiskMetadataGrid, AuditRiskPageHeader, AuditRiskSectionCard, AuditRiskStatusBadge } from "./AuditRiskUi";
 
 export function AuditDetailPage() {
   const canView = useCan("view_audit");
@@ -30,30 +32,28 @@ export function AuditDetailPage() {
     <section aria-labelledby="audit-detail-heading" className="space-y-4">
       <AuditRiskNavigation />
       <Link className="text-sm font-semibold text-primary-blue hover:underline" to={routes.auditRisk}>← Back to Audits</Link>
-      <header>
-        <p className="text-xs font-semibold uppercase tracking-wide text-primary-blue">Audit &amp; Risk · Audit</p>
-        <h1 className="mt-2 text-2xl font-semibold text-text-primary" id="audit-detail-heading">{audit.business_identifier}</h1>
-        <p className="mt-2 text-sm text-text-muted">Governed Audit reference</p>
-      </header>
-      <Surface>
-        <dl className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          <Context label="Status" value={displayCode(audit.audit_status)} />
+      <AuditRiskPageHeader eyebrow="Audit & Risk · Audit" headingId="audit-detail-heading" status={<AuditRiskStatusBadge value={audit.audit_status} />} summary="Governed Audit reference" title={audit.business_identifier} />
+      <Surface className="border-blue-100 bg-blue-50/60 shadow-none">
+        <AuditRiskMetadataGrid>
           <Context label="Client" value={`${audit.client.name} · ${audit.client.business_identifier}`} />
           <Context label="Facility" value={`${audit.facility.name} · ${audit.facility.business_identifier}`} />
           <Context label="Template" value={`${audit.template.name} · ${displayCode(audit.template.type)} · v${audit.template.version}`} />
           <Context label="Auditor" value={audit.auditor?.name ?? "Not assigned"} />
+        </AuditRiskMetadataGrid>
+      </Surface>
+      <AuditRiskSectionCard heading="Lifecycle and accountability" headingId="audit-lifecycle-heading">
+        <AuditRiskMetadataGrid>
           <Context label="Started" value={formatDateTime(audit.started_at)} />
           {audit.completed_at ? <Context label="Completed by" value={audit.completed_by?.name ?? "Historical actor unavailable"} /> : null}
           {audit.completed_at ? <Context label="Completed at" value={formatDateTime(audit.completed_at)} /> : null}
-        </dl>
-      </Surface>
-      <Surface>
-        <h2 className="font-semibold text-text-primary">Audit execution</h2>
+        </AuditRiskMetadataGrid>
+      </AuditRiskSectionCard>
+      <AuditRiskSectionCard heading="Audit execution" headingId="audit-execution-action-heading">
         <p className="mt-1 text-sm text-text-muted">Open the authoritative execution definition, persisted responses, completeness, and Finding context.</p>
-        <Link className="mt-3 inline-block font-semibold text-primary-blue hover:underline" to={routes.auditExecutionPath(audit.id)}>
-          {audit.audit_status === "IN_PROGRESS" ? "Open Audit execution" : "View Audit execution"}
-        </Link>
-      </Surface>
+        <Button asChild className="mt-4" variant={audit.audit_status === "IN_PROGRESS" ? "primary" : "secondary"}>
+          <Link to={routes.auditExecutionPath(audit.id)}>{audit.audit_status === "IN_PROGRESS" ? "Open Audit execution" : "View Audit execution"}</Link>
+        </Button>
+      </AuditRiskSectionCard>
     </section>
   );
 }

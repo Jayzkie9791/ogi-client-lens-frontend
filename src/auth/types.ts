@@ -23,6 +23,9 @@ export interface RefreshResponse {
   accessToken: string;
 }
 
+export interface PasswordResetRequestResponse { accepted: true }
+export interface PasswordResetConfirmResponse { reset: true }
+
 export interface AuthenticatedSession {
   id: string;
   email: string | null;

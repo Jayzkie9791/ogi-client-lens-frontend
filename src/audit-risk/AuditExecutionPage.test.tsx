@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -32,6 +32,9 @@ describe("authoritative Audit execution workspace", () => {
     renderExecution();
 
     expect(await screen.findByRole("heading", { name: "AUDIT-2026-000001" })).toBeInTheDocument();
+    expect(screen.getByText("Operational checks · Long note")).toBeInTheDocument();
+    expect(screen.getByText("Reference: OPERATIONS · long_note")).toBeInTheDocument();
+    expect(screen.queryByText(/% complete/i)).not.toBeInTheDocument();
     const form = screen.getByRole("form", { name: "Operational checks" });
     expect(within(form).getByRole("combobox", { name: "Boolean check (required)" })).toHaveValue("false");
     expect(within(form).getByRole("combobox", { name: "Compliance check" })).toHaveValue("true");
@@ -42,7 +45,7 @@ describe("authoritative Audit execution workspace", () => {
     expect(within(form).getByRole("checkbox", { name: /Acknowledgement/ })).toBeChecked();
     for (const label of ["Derived percentage read-only field", "Risk context read-only field", "Finding workspace read-only field", "Corrective workspace read-only field", "System choice read-only field"]) expect(within(form).getByRole("region", { name: label })).toBeInTheDocument();
     expect(screen.getByText("Current source condition: Passing")).toBeInTheDocument();
-    expect(screen.getByText("Governance status: Unresolved")).toBeInTheDocument();
+    expect(screen.getByText("Unresolved")).toBeInTheDocument();
     const accountability = screen.getByLabelText("Operational checks authoritative submission");
     expect(within(accountability).getByText("Persisted Submitter")).toBeInTheDocument();
     expect(within(accountability).getByText(formatDateTime("2026-08-30T03:00:00.000Z"))).toBeInTheDocument();
@@ -125,6 +128,139 @@ describe("authoritative Audit execution workspace", () => {
     await user.click(await screen.findByRole("button", { name: "Retry same section save" }));
     expect(requests).toHaveLength(2);
     expect(requests[1]).toEqual(requests[0]);
+  });
+
+  it("locks editing during delayed stale reconciliation and saves next with the refreshed version", async () => {
+    const user = userEvent.setup();
+    const refreshedResponse = canonicalResponse(4, {
+      boolean_check: false,
+      compliance: true,
+      text_note: "Concurrent authoritative note",
+      choice: "A",
+      date: "2026-08-30",
+      signature: true
+    });
+    const requests: Record<string, unknown>[] = [];
+    let executionReads = 0;
+    let saves = 0;
+    let resolveRefresh!: (response: Response) => void;
+    const delayedRefresh = new Promise<Response>((resolve) => {
+      resolveRefresh = resolve;
+    });
+    mockRoutes([
+      ...authRoutes(),
+      {
+        url: executionPath(),
+        response: () => {
+          executionReads += 1;
+          return executionReads === 1
+            ? Promise.resolve(jsonResponse(execution()))
+            : delayedRefresh;
+        }
+      },
+      {
+        method: "POST",
+        url: "/api/v1/audit-responses",
+        response: (_input, init) => {
+          const command = JSON.parse(String(init?.body)) as Record<string, unknown>;
+          requests.push(command);
+          saves += 1;
+          return Promise.resolve(saves === 1
+            ? jsonResponse({ code: "AUDIT_RESPONSE_STALE_VERSION" }, 409)
+            : jsonResponse(responseResult(5, command.responsePayload as Record<string, unknown>)));
+        }
+      }
+    ]);
+
+    renderExecution();
+    const form = await screen.findByRole("form", { name: "Operational checks" });
+    const note = within(form).getByRole("textbox", { name: "Short note" });
+    await user.clear(note);
+    await user.type(note, "Stale local edit");
+    await user.click(within(form).getByRole("button", { name: "Save Operational checks" }));
+
+    expect(await screen.findByText(/reloading the latest responses/i)).toBeInTheDocument();
+    expect(note).toBeDisabled();
+    expect(within(form).getByRole("button", { name: "Save Operational checks" })).toBeDisabled();
+    await user.type(note, "Ignored during reconciliation");
+    expect(note).toHaveValue("Stale local edit");
+
+    resolveRefresh(jsonResponse(execution({ responses: [refreshedResponse] })));
+    await waitFor(() => expect(note).toHaveValue("Concurrent authoritative note"));
+    expect(note).not.toHaveValue("Stale local edit");
+    expect(note).toBeEnabled();
+
+    await user.clear(note);
+    await user.type(note, "Reviewed replacement");
+    await user.click(within(form).getByRole("button", { name: "Save Operational checks" }));
+    expect(requests[1]).toMatchObject({ expectedVersion: 4 });
+  });
+
+  it("fails closed when stale reconciliation cannot obtain a fresh response and retries only the reload", async () => {
+    const user = userEvent.setup();
+    const refreshedResponse = canonicalResponse(4, {
+      boolean_check: false,
+      compliance: true,
+      text_note: "Recovered authoritative note",
+      choice: "A",
+      date: "2026-08-30",
+      signature: true
+    });
+    let executionReads = 0;
+    let saveRequests = 0;
+    mockRoutes([
+      ...authRoutes(),
+      {
+        url: executionPath(),
+        response: () => {
+          executionReads += 1;
+          if (executionReads === 1) return Promise.resolve(jsonResponse(execution()));
+          if (executionReads === 2) return Promise.resolve(jsonResponse({ code: "INTERNAL_ERROR" }, 500));
+          return Promise.resolve(jsonResponse(execution({ responses: [refreshedResponse] })));
+        }
+      },
+      {
+        method: "POST",
+        url: "/api/v1/audit-responses",
+        response: () => {
+          saveRequests += 1;
+          return Promise.resolve(jsonResponse({ code: "AUDIT_RESPONSE_STALE_VERSION" }, 409));
+        }
+      }
+    ]);
+
+    renderExecution();
+    const form = await screen.findByRole("form", { name: "Operational checks" });
+    const note = within(form).getByRole("textbox", { name: "Short note" });
+    await user.clear(note);
+    await user.type(note, "Stale local edit");
+    await user.click(within(form).getByRole("button", { name: "Save Operational checks" }));
+
+    expect(await screen.findByText(/latest responses could not be reloaded/i)).toBeInTheDocument();
+    expect(note).toBeDisabled();
+    expect(note).toHaveValue("Stale local edit");
+    expect(within(form).getByRole("button", { name: "Save Operational checks" })).toBeDisabled();
+    expect(saveRequests).toBe(1);
+
+    const retryReload = screen.getByRole("button", { name: "Retry Audit reload" });
+    await waitFor(() => expect(retryReload).toBeEnabled());
+    await user.click(retryReload);
+    await waitFor(() => expect(note).toHaveValue("Recovered authoritative note"));
+    expect(note).toBeEnabled();
+    expect(executionReads).toBe(3);
+    expect(saveRequests).toBe(1);
+  });
+
+  it("fails safely when an authoritative incomplete reference cannot resolve through the definition", async () => {
+    const value = execution();
+    mockRoutes([...authRoutes(), route(executionPath(), {
+      ...value,
+      completeness: { is_complete: false, incomplete: [{ section_code: "UNKNOWN_SECTION", field_id: "unknown_field" }] }
+    })]);
+    renderExecution();
+
+    expect(await screen.findByText("Unresolved required Audit response")).toBeInTheDocument();
+    expect(screen.getByText("Reference: UNKNOWN_SECTION · unknown_field")).toBeInTheDocument();
   });
 
   it("renders truthful legacy completion accountability on a fresh execution deep link", async () => {

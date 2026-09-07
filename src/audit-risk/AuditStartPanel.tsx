@@ -87,14 +87,14 @@ export function AuditStartPanel({ onClose }: AuditStartPanelProps) {
   }
 
   return (
-    <Surface aria-labelledby="start-audit-heading">
+    <Surface aria-labelledby="start-audit-heading" className="overflow-hidden border-[#CFDCEB] bg-white p-0">
       <form aria-labelledby="start-audit-heading" className="space-y-4" onSubmit={submit}>
-        <div>
-          <h2 className="text-lg font-semibold text-text-primary" id="start-audit-heading">Start Audit</h2>
+        <div className="relative border-b border-blue-100 bg-blue-50 px-5 py-4 before:absolute before:inset-y-0 before:left-0 before:w-1 before:bg-accent-red">
+          <h2 className="text-lg font-semibold text-primary-navy" id="start-audit-heading">Start Audit</h2>
           <p className="mt-1 text-sm text-text-muted">Choose an eligible Facility and active Audit template. The server will assign the governed Audit reference.</p>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-5 px-5 md:grid-cols-2">
           <SelectorField
             disabled={frozen || mutation.isPending || facilitiesQuery.isLoading || facilitiesQuery.isError || facilities.length === 0}
             label="Eligible Facility"
@@ -120,13 +120,13 @@ export function AuditStartPanel({ onClose }: AuditStartPanelProps) {
         </div>
 
         {failure ? (
-          <div aria-live="polite" className="rounded-component border border-border bg-elevated p-3 text-sm text-text-primary" role="alert">
+          <div aria-live="polite" className="mx-5 rounded-component border border-red-200 bg-red-50 p-3 text-sm text-text-primary" role="alert">
             <h3 className="font-semibold">{failure.message}</h3>
             <p className="mt-1 text-text-muted">{failure.kind === "AMBIGUOUS" ? "The exact command and reconciliation key have been retained." : "Start a new intent before changing the command."}</p>
           </div>
         ) : null}
 
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-wrap gap-3 px-5 pb-5">
           {!submittedAttempt ? <Button disabled={!canSubmit} type="submit">Start Audit</Button> : null}
           {failure?.kind === "AMBIGUOUS" ? <Button disabled={mutation.isPending} onClick={retrySameCommand} type="button">Retry same command</Button> : null}
           {failure?.kind === "DEFINITIVE" ? <Button onClick={beginNewIntent} type="button" variant="secondary">Start new intent</Button> : null}
@@ -148,9 +148,9 @@ function SelectorField({ disabled, label, onChange, options, state, value }: {
 }) {
   return (
     <div>
-      <label className="block text-sm font-semibold text-text-primary">
-        {label}
-        <select className="mt-1 min-h-10 w-full rounded-component border border-border bg-surface px-3 text-text-primary" disabled={disabled} onChange={(event) => onChange(event.currentTarget.value)} value={value}>
+      <label className="block text-sm font-semibold text-primary-navy">
+        <span className="block">{label}</span>
+        <select className="mt-2 min-h-11 w-full rounded-component border border-blue-200 bg-blue-50/30 px-3 text-text-primary outline-none hover:border-primary-blue focus:bg-white focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:border-border disabled:bg-elevated" disabled={disabled} onChange={(event) => onChange(event.currentTarget.value)} value={value}>
           <option value="">Select {label.toLowerCase()}</option>
           {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
         </select>

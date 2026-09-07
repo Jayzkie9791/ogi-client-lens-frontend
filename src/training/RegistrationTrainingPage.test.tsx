@@ -824,7 +824,9 @@ describe("Registration Training frontend", () => {
     );
     expect(calls.map(({ url }) => url)).toContain("/api/v1/auth/refresh");
     expect(calls.map(({ url }) => url)).toContain("/api/v1/auth/me");
-    expect(calls.map(({ url }) => url)).toContain("/api/v1/training/trainees");
+    await waitFor(() => {
+      expect(calls.map(({ url }) => url)).toContain("/api/v1/training/trainees");
+    });
   });
 
   it("creates a qualified Training Session with exact UUID authority and governed references", async () => {

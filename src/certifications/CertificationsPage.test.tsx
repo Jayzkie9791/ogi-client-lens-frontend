@@ -770,7 +770,7 @@ describe("Certification workspace frontend", () => {
 
     renderWithRoute(routes.certifications);
 
-    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
 
     expect(await screen.findByText("CERT-001")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Endorsements" })).toBeInTheDocument();
@@ -796,7 +796,7 @@ describe("Certification workspace frontend", () => {
 
     renderWithRoute(routes.certifications);
 
-    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
 
     expect(await screen.findByText("No endorsements recorded.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add Endorsement" })).toBeInTheDocument();
@@ -808,7 +808,7 @@ describe("Certification workspace frontend", () => {
 
     renderWithRoute(routes.certifications);
 
-    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
     await user.click(await screen.findByRole("button", { name: "Add Endorsement" }));
 
     expect(screen.getByText("Endorsing Open Water Guardian certificate CERT-001.")).toBeInTheDocument();
@@ -860,7 +860,7 @@ describe("Certification workspace frontend", () => {
 
     renderWithRoute(routes.certifications);
 
-    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
     await user.click(await screen.findByRole("button", { name: "Add Endorsement" }));
     await user.selectOptions(screen.getByLabelText("Endorsement"), "WATERFRONT");
     const addButtons = screen.getAllByRole("button", { name: "Add Endorsement" });
@@ -934,7 +934,7 @@ describe("Certification workspace frontend", () => {
 
     renderWithRoute(routes.certifications);
 
-    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
     await user.click(await screen.findByRole("button", { name: "Add Endorsement" }));
     await user.selectOptions(screen.getByLabelText("Endorsement"), "WATERFRONT");
     const addButtons = screen.getAllByRole("button", { name: "Add Endorsement" });
@@ -990,7 +990,7 @@ describe("Certification workspace frontend", () => {
 
     renderWithRoute(routes.certifications);
 
-    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
     await user.click(await screen.findByRole("button", { name: "Add Endorsement" }));
     const addButtons = screen.getAllByRole("button", { name: "Add Endorsement" });
     const submitButton = addButtons[addButtons.length - 1];
@@ -1019,7 +1019,7 @@ describe("Certification workspace frontend", () => {
 
     renderWithRoute(routes.certifications);
 
-    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
 
     expect(screen.queryByRole("heading", { name: "Operational Authorization" })).not.toBeInTheDocument();
     expect(screen.queryByText("AUTH-001")).not.toBeInTheDocument();
@@ -1036,7 +1036,7 @@ describe("Certification workspace frontend", () => {
     );
 
     renderWithRoute(routes.certifications);
-    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
 
     expect(
       await screen.findByRole("heading", { name: "Operational Authorization" })
@@ -1078,7 +1078,7 @@ describe("Certification workspace frontend", () => {
 
     renderWithRoute(routes.certifications);
 
-    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
     await user.click(await screen.findByRole("button", { name: "Create Operational Authorization" }));
     await user.type(screen.getByLabelText("Authorization number"), "AUTH-001");
     await user.selectOptions(screen.getByLabelText("Authorization level"), "L3");
@@ -1133,7 +1133,7 @@ describe("Certification workspace frontend", () => {
     );
 
     renderWithRoute(routes.certifications);
-    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
 
     expect(await screen.findByText("AUTH-001")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Renew" })).not.toBeInTheDocument();
@@ -1152,7 +1152,7 @@ describe("Certification workspace frontend", () => {
     );
 
     renderWithRoute(routes.certifications);
-    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
 
     expect(await screen.findByRole("button", { name: "Renew" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Suspend" })).toBeInTheDocument();
@@ -1171,7 +1171,7 @@ describe("Certification workspace frontend", () => {
     );
 
     renderWithRoute(routes.certifications);
-    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
 
     expect(await screen.findByRole("button", { name: "Reinstate" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Revoke" })).toBeInTheDocument();
@@ -1190,7 +1190,7 @@ describe("Certification workspace frontend", () => {
     );
 
     renderWithRoute(routes.certifications);
-    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
 
     expect(await screen.findByText("AUTH-001")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Renew" })).not.toBeInTheDocument();
@@ -1213,7 +1213,7 @@ describe("Certification workspace frontend", () => {
 
     renderWithRoute(routes.certifications);
 
-    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
 
     expect(await screen.findByText("AUTH-002")).toBeInTheDocument();
     expect(screen.getByText("AUTH-001")).toBeInTheDocument();
@@ -1255,7 +1255,7 @@ describe("Certification workspace frontend", () => {
 
     renderWithRoute(routes.certifications);
 
-    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
     await user.click(await screen.findByRole("button", { name: "Renew" }));
     await user.type(screen.getByLabelText("Authorization number"), "AUTH-002");
     await user.type(screen.getByLabelText("Issue date"), "2026-02-01");
@@ -1314,7 +1314,7 @@ describe("Certification workspace frontend", () => {
 
     renderWithRoute(routes.certifications);
 
-    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
     await user.click(await screen.findByRole("button", { name: "Suspend" }));
     await user.type(screen.getByLabelText("Reason"), "Temporary operating restriction");
     await user.click(screen.getByRole("button", { name: "Suspend Authorization" }));
@@ -1380,7 +1380,7 @@ describe("Certification workspace frontend", () => {
 
       renderWithRoute(routes.certifications);
 
-      await user.click(await screen.findByRole("button", { name: "View Certification" }));
+      await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
       await user.click(await screen.findByRole("button", { name: actionLabel }));
       await user.type(screen.getByLabelText("Reason"), "Governed lifecycle update");
       await user.type(screen.getByLabelText("Notes"), "Reviewed by OGI");
@@ -1434,7 +1434,7 @@ describe("Certification workspace frontend", () => {
 
     renderWithRoute(routes.certifications);
 
-    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
     await user.click(await screen.findByRole("button", { name: "Suspend" }));
     await user.type(screen.getByLabelText("Reason"), "Duplicate lifecycle command");
     await user.click(screen.getByRole("button", { name: "Suspend Authorization" }));
@@ -1457,7 +1457,7 @@ describe("Certification workspace frontend", () => {
 
     renderWithRoute(routes.certifications);
 
-    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
 
     expect(
       await screen.findByRole("heading", { name: "Credential Issuances" })
@@ -1476,7 +1476,7 @@ describe("Certification workspace frontend", () => {
     mockFetchRoutes(certificationRoutes(anaDetail, issueSession));
 
     renderWithRoute(routes.certifications);
-    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
 
     expect(await screen.findByRole("button", { name: "Issue Credential" })).toBeInTheDocument();
   });
@@ -1504,7 +1504,7 @@ describe("Certification workspace frontend", () => {
 
     renderWithRoute(routes.certifications);
 
-    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
 
     expect(await screen.findByText("Credential OGI-OWG-000001")).toBeInTheDocument();
     expect(screen.getByText("Credential OGI-OWG-000000")).toBeInTheDocument();
@@ -1513,6 +1513,143 @@ describe("Certification workspace frontend", () => {
       "href",
       routes.credentialCertificatePath(credentialIssuanceId)
     );
+  });
+
+  it("opens the authoritative digital certificate from the populated detail pane only", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetchRoutes([
+      ...authRoutes(certificationSession),
+      {
+        url: "/api/v1/credentials",
+        responses: [{ status: 200, body: credentialsListResponse }]
+      },
+      {
+        url: `/api/v1/credentials/personnel/${staffMemberId}`,
+        responses: [{ status: 200, body: anaDetail }]
+      },
+      issuanceHistoryRoute([
+        {
+          status: 200,
+          body: { issuances: [credentialIssuance] }
+        }
+      ]),
+      {
+        url: `/api/v1/credentials/issuances/${credentialIssuanceId}`,
+        responses: [{ status: 200, body: credentialIssuance }]
+      }
+    ]);
+
+    renderWithRoute(routes.certifications);
+
+    const detailsButton = await screen.findByRole("button", {
+      name: "View Certificate Details"
+    });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    await user.click(detailsButton);
+
+    const digitalCertificateButton = await screen.findByRole("button", {
+      name: "View Digital Certificate"
+    });
+    const backgroundRoot = digitalCertificateButton.closest("[data-testid='certifications-workspace']") ?? document.body.firstElementChild;
+    expect(backgroundRoot).not.toBeNull();
+    const backgroundElement = backgroundRoot as HTMLElement;
+    backgroundElement.inert = true;
+    backgroundElement.setAttribute("aria-hidden", "false");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    await user.click(digitalCertificateButton);
+
+    const dialog = await screen.findByRole("dialog", { name: "Digital Certificate" });
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    expect(backgroundElement).toHaveAttribute("aria-hidden", "true");
+    expect(backgroundElement.inert).toBe(true);
+    expect(dialog).toHaveFocus();
+    expect(
+      await screen.findByLabelText("Digital certificate visual preview")
+    ).toBeInTheDocument();
+    expect(calls.map(({ url }) => url)).toContain(
+      `/api/v1/credentials/issuances/${credentialIssuanceId}`
+    );
+
+    await user.click(screen.getByRole("button", { name: "Close" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(backgroundElement).toHaveAttribute("aria-hidden", "false");
+    expect(backgroundElement.inert).toBe(true);
+    expect(digitalCertificateButton).toHaveFocus();
+
+    backgroundElement.inert = false;
+    backgroundElement.removeAttribute("aria-hidden");
+    await user.click(digitalCertificateButton);
+    expect(await screen.findByRole("dialog", { name: "Digital Certificate" })).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(digitalCertificateButton).toHaveFocus();
+    expect(
+      calls
+        .filter(({ url }) => url.startsWith("/api/v1/credentials/issuances/"))
+        .every(({ init }) => (init?.method ?? "GET") === "GET")
+    ).toBe(true);
+  });
+
+  it.each([
+    {
+      name: "authorization failure",
+      response: { status: 403, body: { code: "FORBIDDEN", message: "Forbidden" } },
+      message: "The digital certificate is not available with your current authorization."
+    },
+    {
+      name: "concealed or missing artifact",
+      response: { status: 404, body: { code: "NOT_FOUND", message: "Not found" } },
+      message: "The digital certificate is unavailable or no longer visible to your current scope."
+    },
+    {
+      name: "server failure",
+      response: { status: 500, body: { code: "INTERNAL_ERROR", message: "Failed" } },
+      message: "The digital certificate could not be loaded. Try again later."
+    },
+    {
+      name: "malformed authoritative response",
+      response: { status: 200, body: {} },
+      message: "The digital certificate could not be loaded. Try again later."
+    }
+  ])("fails safely for $name", async ({ response, message }) => {
+    const user = userEvent.setup();
+    mockFetchRoutes([
+      ...authRoutes(certificationSession),
+      {
+        url: "/api/v1/credentials",
+        responses: [{ status: 200, body: credentialsListResponse }]
+      },
+      {
+        url: `/api/v1/credentials/personnel/${staffMemberId}`,
+        responses: [{ status: 200, body: anaDetail }]
+      },
+      issuanceHistoryRoute([
+        {
+          status: 200,
+          body: { issuances: [credentialIssuance] }
+        }
+      ]),
+      {
+        url: `/api/v1/credentials/issuances/${credentialIssuanceId}`,
+        responses: [response]
+      }
+    ]);
+
+    renderWithRoute(routes.certifications);
+    await user.click(await screen.findByRole("button", {
+      name: "View Certificate Details"
+    }));
+    await user.click(await screen.findByRole("button", {
+      name: "View Digital Certificate"
+    }));
+
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Digital Certificate" })).toBeInTheDocument();
   });
 
   it("navigates from persisted Credential Issuance history to the Certificate viewer", async () => {
@@ -1552,7 +1689,7 @@ describe("Certification workspace frontend", () => {
     ]);
     const { router } = renderWithRoute(routes.certifications);
 
-    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
 
     const viewCertificateLink = await screen.findByRole("link", {
       name: "View Certificate"
@@ -1610,10 +1747,11 @@ describe("Certification workspace frontend", () => {
 
     renderWithRoute(routes.certifications);
 
-    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
 
     expect(await screen.findByText("Loading credential issuance history.")).toBeInTheDocument();
     expect(await screen.findByText("No credentials have been issued from this certification.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "View Digital Certificate" })).not.toBeInTheDocument();
 
     cleanup();
     vi.unstubAllGlobals();
@@ -1642,7 +1780,7 @@ describe("Certification workspace frontend", () => {
     ]);
 
     renderWithRoute(routes.certifications);
-    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Credential issuance could not be completed."
@@ -1660,7 +1798,7 @@ describe("Certification workspace frontend", () => {
 
     renderWithRoute(routes.certifications);
 
-    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
     await user.click(await screen.findByRole("button", { name: "Issue Credential" }));
 
     expect(screen.getByText("Issuing from selected certificate CERT-001.")).toBeInTheDocument();
@@ -1680,82 +1818,48 @@ describe("Certification workspace frontend", () => {
     ).toBe(false);
   });
 
-  it("submits exact Credential Issuances contract, refetches projections, and links to the returned certificate", async () => {
+  it("does not auto-select sole issuance authorities or post the superseded raw command", async () => {
     const user = userEvent.setup();
     const { calls } = mockFetchRoutes([
-      ...authRoutes(credentialIssuanceSession),
-      {
-        url: "/api/v1/credentials",
-        responses: [
-          { status: 200, body: credentialsListResponse },
-          { status: 200, body: credentialsListResponse }
-        ]
-      },
-      {
-        url: `/api/v1/credentials/personnel/${staffMemberId}`,
-        responses: [
-          { status: 200, body: detailWithAuthorizations([activeOperationalAuthorization]) },
-          { status: 200, body: detailWithAuthorizations([activeOperationalAuthorization]) }
-        ]
-      },
-      issuanceHistoryRoute([
-        { status: 200, body: { issuances: [] } },
-        { status: 200, body: { issuances: [credentialIssuance] } }
-      ]),
-      issuancePreparationRoute(),
-      {
-        method: "POST",
-        url: "/api/v1/credentials/issuances",
-        responses: [{ status: 201, body: credentialIssuance }]
-      }
+      ...certificationRoutes(anaDetail, credentialIssuanceSession),
+      issuancePreparationRoute()
     ]);
 
     renderWithRoute(routes.certifications);
-
-    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
     await user.click(await screen.findByRole("button", { name: "Issue Credential" }));
-    expect(await screen.findByLabelText("F-048 evidence")).toHaveValue(sourceEvidenceRecordId);
+
+    expect(await screen.findByLabelText("F-048 evidence")).toHaveValue("");
     const authorizationSelector = screen
       .getAllByLabelText("Operational Authorization")
       .find((element): element is HTMLSelectElement => element instanceof HTMLSelectElement);
-    expect(authorizationSelector).toHaveValue(operationalAuthorizationId);
-    expect(screen.queryByLabelText("F-048 evidence record ID")).not.toBeInTheDocument();
-    await user.type(screen.getByLabelText("Completion date"), "2025-12-31");
-    await user.type(screen.getByLabelText("Training location"), "Subic Bay");
-    await user.type(screen.getByLabelText("Instructor"), "Braven Burrows");
-    await user.type(screen.getByLabelText("Training center"), "OGI Training Center");
-    await user.click(screen.getByRole("button", { name: "Confirm Issue Credential" }));
-
-    expect(await screen.findByText("Credential issued successfully.")).toBeInTheDocument();
-    expect(await screen.findByText("Credential OGI-OWG-000001")).toBeInTheDocument();
-    expect(screen.getByText("Newly issued")).toBeInTheDocument();
-    expect(screen.getByText("Ocean Guardian International Ltd.")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "View Certificate" })).toHaveAttribute(
-      "href",
-      routes.credentialCertificatePath(credentialIssuanceId)
-    );
-    expect(screen.getByText("CERT-001")).toBeInTheDocument();
-
-    const issuanceCall = calls.find((call) => call.url === "/api/v1/credentials/issuances");
-
-    expect(issuanceCall?.init?.method).toBe("POST");
-    expect(JSON.parse(String(issuanceCall?.init?.body))).toEqual({
-      certification_id: certificationId,
-      source_evidence_record_id: sourceEvidenceRecordId,
-      source_authorization_id: operationalAuthorizationId,
-      completion_date: "2025-12-31",
-      training_location: "Subic Bay",
-      instructor: "Braven Burrows",
-      training_center: "OGI Training Center"
-    });
-    expect(
-      calls.filter((call) => call.url === `/api/v1/credentials/personnel/${staffMemberId}`)
-    ).toHaveLength(2);
-    expect(calls.map(({ url }) => url)).not.toContain("/api/v1/registration/facility-assignments");
-    expect(calls.map(({ url }) => url)).not.toContain("/api/v1/auth/user-facility-access");
+    expect(authorizationSelector).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Confirm Issue Credential" })).toBeDisabled();
+    expect(calls.some((call) => call.url === "/api/v1/credentials/issuances" && call.init?.method === "POST")).toBe(false);
   });
 
-  it("uses derived preparation facts without editable fields or invented authorization", async () => {
+  it("keeps new Credential issuance fail closed until authoritative evaluation is available", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetchRoutes([
+      ...certificationRoutes(anaDetail, issueSession),
+      issuancePreparationRoute()
+    ]);
+
+    renderWithRoute(routes.certifications);
+    await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
+    await user.click(await screen.findByRole("button", { name: "Issue Credential" }));
+
+    expect(await screen.findByText(/temporarily unavailable while authoritative issuance validation/i)).toBeInTheDocument();
+    expect(screen.getByLabelText("F-048 evidence")).toHaveValue("");
+    const authorizationSelector = screen
+      .getAllByLabelText("Operational Authorization")
+      .find((element): element is HTMLSelectElement => element instanceof HTMLSelectElement);
+    expect(authorizationSelector).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Confirm Issue Credential" })).toBeDisabled();
+    expect(calls.some((call) => call.url === "/api/v1/credentials/issuances" && call.init?.method === "POST")).toBe(false);
+  });
+
+  it("shows derived preparation facts read-only without authorizing final issuance", async () => {
     const user = userEvent.setup();
     const traineePreparation: CredentialIssuancePreparationResponse = {
       ...issuancePreparation,
@@ -1824,7 +1928,7 @@ describe("Certification workspace frontend", () => {
 
     renderWithRoute(routes.certifications);
 
-    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
     await user.click(await screen.findByRole("button", { name: "Issue Credential" }));
 
     expect(await screen.findByText("Mika Reyes")).toBeInTheDocument();
@@ -1834,21 +1938,11 @@ describe("Certification workspace frontend", () => {
     expect(screen.getByText("Completion date")).toBeInTheDocument();
     expect(screen.getByText("Subic Bay")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Confirm Issue Credential" }));
-
-    const issuanceCall = calls.find((call) => call.url === "/api/v1/credentials/issuances");
-
-    expect(JSON.parse(String(issuanceCall?.init?.body))).toEqual({
-      certification_id: certificationId,
-      source_evidence_record_id: sourceEvidenceRecordId,
-      completion_date: "2025-12-31",
-      training_location: "Subic Bay",
-      instructor: "Braven Burrows",
-      training_center: "OGI Training Center"
-    });
+    expect(screen.getByRole("button", { name: "Confirm Issue Credential" })).toBeDisabled();
+    expect(calls.some((call) => call.url === "/api/v1/credentials/issuances" && call.init?.method === "POST")).toBe(false);
   });
 
-  it("requires an explicit F-048 choice when multiple governed evidence candidates are available", async () => {
+  it("does not let multiple F-048 choices authorize the superseded final command", async () => {
     const user = userEvent.setup();
     const { calls } = mockFetchRoutes([
       ...certificationRoutes(anaDetail, issueSession),
@@ -1887,7 +1981,7 @@ describe("Certification workspace frontend", () => {
 
     renderWithRoute(routes.certifications);
 
-    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
     await user.click(await screen.findByRole("button", { name: "Issue Credential" }));
 
     const evidenceSelector = await screen.findByLabelText("F-048 evidence");
@@ -1897,13 +1991,8 @@ describe("Certification workspace frontend", () => {
     await user.type(screen.getByLabelText("Training location"), "Subic Bay");
     await user.type(screen.getByLabelText("Instructor"), "Braven Burrows");
     await user.type(screen.getByLabelText("Training center"), "OGI Training Center");
-    await user.click(screen.getByRole("button", { name: "Confirm Issue Credential" }));
-
-    const issuanceCall = calls.find((call) => call.url === "/api/v1/credentials/issuances");
-
-    expect(JSON.parse(String(issuanceCall?.init?.body))).toMatchObject({
-      source_evidence_record_id: secondSourceEvidenceRecordId
-    });
+    expect(screen.getByRole("button", { name: "Confirm Issue Credential" })).toBeDisabled();
+    expect(calls.some((call) => call.url === "/api/v1/credentials/issuances" && call.init?.method === "POST")).toBe(false);
   });
 
   it("renders blocked and already-issued preparation states without a usable issuance workflow", async () => {
@@ -1925,7 +2014,7 @@ describe("Certification workspace frontend", () => {
 
     renderWithRoute(routes.certifications);
 
-    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
     await user.click(await screen.findByRole("button", { name: "Issue Credential" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
@@ -1961,7 +2050,7 @@ describe("Certification workspace frontend", () => {
 
     renderWithRoute(routes.certifications);
 
-    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
     await user.click(await screen.findByRole("button", { name: "Issue Credential" }));
 
     expect(await screen.findByText("Credential already issued.")).toBeInTheDocument();
@@ -2017,30 +2106,20 @@ describe("Certification workspace frontend", () => {
 
     renderWithRoute(routes.certifications);
 
-    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
     expect(screen.queryByRole("heading", { name: "Operational Authorization" })).not.toBeInTheDocument();
     await user.click(await screen.findByRole("button", { name: "Issue Credential" }));
-    expect(await screen.findByLabelText("F-048 evidence")).toHaveValue(sourceEvidenceRecordId);
+    expect(await screen.findByLabelText("F-048 evidence")).toHaveValue("");
     expect(screen.getByText("No Operational Authorization selected.")).toBeInTheDocument();
     await user.type(screen.getByLabelText("Completion date"), "2025-12-31");
     await user.type(screen.getByLabelText("Training location"), "Subic Bay");
     await user.type(screen.getByLabelText("Instructor"), "Braven Burrows");
     await user.type(screen.getByLabelText("Training center"), "OGI Training Center");
-    await user.click(screen.getByRole("button", { name: "Confirm Issue Credential" }));
-
-    const issuanceCall = calls.find((call) => call.url === "/api/v1/credentials/issuances");
-
-    expect(JSON.parse(String(issuanceCall?.init?.body))).toEqual({
-      certification_id: certificationId,
-      source_evidence_record_id: sourceEvidenceRecordId,
-      completion_date: "2025-12-31",
-      training_location: "Subic Bay",
-      instructor: "Braven Burrows",
-      training_center: "OGI Training Center"
-    });
+    expect(screen.getByRole("button", { name: "Confirm Issue Credential" })).toBeDisabled();
+    expect(calls.some((call) => call.url === "/api/v1/credentials/issuances" && call.init?.method === "POST")).toBe(false);
   });
 
-  it("prevents duplicate Credential Issuances submission while pending", async () => {
+  it("prevents button and implicit-form submission through the superseded issuance command", async () => {
     const user = userEvent.setup();
     const { calls } = mockFetchRoutes([
       ...authRoutes(issueSession),
@@ -2077,18 +2156,17 @@ describe("Certification workspace frontend", () => {
 
     renderWithRoute(routes.certifications);
 
-    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
     await user.click(await screen.findByRole("button", { name: "Issue Credential" }));
-    expect(await screen.findByLabelText("F-048 evidence")).toHaveValue(sourceEvidenceRecordId);
+    expect(await screen.findByLabelText("F-048 evidence")).toHaveValue("");
     await user.type(screen.getByLabelText("Completion date"), "2025-12-31");
     await user.type(screen.getByLabelText("Training location"), "Subic Bay");
     await user.type(screen.getByLabelText("Instructor"), "Braven Burrows");
     await user.type(screen.getByLabelText("Training center"), "OGI Training Center");
-    await user.click(screen.getByRole("button", { name: "Confirm Issue Credential" }));
-    await user.click(screen.getByRole("button", { name: "Issuing Credential" }));
-
-    expect(await screen.findByText("Credential issued successfully.")).toBeInTheDocument();
-    expect(calls.filter((call) => call.url === "/api/v1/credentials/issuances")).toHaveLength(1);
+    const confirmation = screen.getByRole("button", { name: "Confirm Issue Credential" });
+    expect(confirmation).toBeDisabled();
+    await user.type(screen.getByLabelText("Training center"), "{enter}");
+    expect(calls.filter((call) => call.url === "/api/v1/credentials/issuances")).toHaveLength(0);
   });
 
   it.each([
@@ -2098,7 +2176,7 @@ describe("Certification workspace frontend", () => {
     [409, "Credential issuance could not be completed because of a conflict."],
     [422, "Credential issuance input is invalid."],
     [500, "Credential issuance could not be completed."]
-  ])("maps Credential Issuances %i errors safely and refetches authoritative state", async (status, message) => {
+  ])("maps preparation-read %i errors safely without exposing final issuance", async (status, message) => {
     const user = userEvent.setup();
     const { calls } = mockFetchRoutes([
       ...authRoutes(issueSession),
@@ -2113,47 +2191,21 @@ describe("Certification workspace frontend", () => {
           { status: 200, body: anaDetail }
         ]
       },
-      issuancePreparationRoute([
-        { status: 200, body: issuancePreparation },
-        { status: 200, body: issuancePreparation }
-      ]),
-      {
-        method: "POST",
-        url: "/api/v1/credentials/issuances",
-        responses: [
-          {
-            status,
-            body: {
-              code: "CREDENTIAL_ISSUANCE_ERROR",
-              message: "Backend detail should not be shown.",
-              status
-            }
-          }
-        ]
-      }
+      issuancePreparationRoute([{ status, body: {
+        code: "CREDENTIAL_ISSUANCE_ERROR",
+        message: "Backend detail should not be shown.",
+        status
+      } }])
     ]);
 
     renderWithRoute(routes.certifications);
 
-    await user.click(await screen.findByRole("button", { name: "View Certification" }));
+    await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
     await user.click(await screen.findByRole("button", { name: "Issue Credential" }));
-    expect(await screen.findByLabelText("F-048 evidence")).toHaveValue(sourceEvidenceRecordId);
-    await user.type(screen.getByLabelText("Completion date"), "2025-12-31");
-    await user.type(screen.getByLabelText("Training location"), "Subic Bay");
-    await user.type(screen.getByLabelText("Instructor"), "Braven Burrows");
-    await user.type(screen.getByLabelText("Training center"), "OGI Training Center");
-    await user.click(screen.getByRole("button", { name: "Confirm Issue Credential" }));
-
     expect(await screen.findByRole("alert")).toHaveTextContent(message);
     expect(screen.queryByText("Backend detail should not be shown.")).not.toBeInTheDocument();
-    await waitFor(() =>
-      expect(
-        calls.filter((call) => call.url === `/api/v1/credentials/personnel/${staffMemberId}`)
-      ).toHaveLength(2)
-    );
-    await waitFor(() =>
-      expect(calls.filter((call) => call.url === issuancePreparationUrl())).toHaveLength(2)
-    );
+    expect(screen.getByRole("button", { name: "Confirm Issue Credential" })).toBeDisabled();
+    expect(calls.some((call) => call.url === "/api/v1/credentials/issuances" && call.init?.method === "POST")).toBe(false);
   });
 
   it("renders loading, empty, and safe error states", async () => {

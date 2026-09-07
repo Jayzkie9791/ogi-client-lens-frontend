@@ -22,6 +22,17 @@ import {
   updateRegistrationFacility
 } from "./registrationFacilityApi";
 import { RegistrationWorkspaceShell } from "./RegistrationWorkspaceShell";
+import { formatRegistrationDateTime } from "./registrationPresentation";
+import {
+  RegistrationDirectoryItem,
+  RegistrationDirectoryPane,
+  RegistrationEditableSection,
+  RegistrationEntityHeader,
+  RegistrationMetadataGroup,
+  RegistrationMetadataItem,
+  RegistrationStatusBadge,
+  RegistrationWorkspaceFrame
+} from "./RegistrationWorkspaceUi";
 
 const permissions = {
   viewClients: "view_client",
@@ -275,15 +286,15 @@ export function RegistrationFacilitiesPage() {
       ) : facilitiesQuery.isError ? (
         <RegistrationFacilitiesErrorState error={facilitiesQuery.error} />
       ) : (
-        <div className="grid gap-4 lg:grid-cols-[minmax(16rem,0.8fr)_minmax(0,1.2fr)]">
-          <FacilitiesList
+        <RegistrationWorkspaceFrame
+          directory={<FacilitiesList
             clientNameById={clientNameById}
             facilities={facilities}
             onSelectFacility={selectFacility}
             selectedFacilityId={selectedFacilityId}
             scopedToClient={Boolean(clientFilter)}
-          />
-          {isCreating ? (
+          />}
+          workspace={isCreating ? (
             <FacilityCreatePanel
               clients={clients}
               formState={createForm}
@@ -309,7 +320,7 @@ export function RegistrationFacilitiesPage() {
               onSubmit={submitEditForm}
             />
           )}
-        </div>
+        />
       )}
     </RegistrationWorkspaceShell>
   );
@@ -362,24 +373,22 @@ function FacilitiesList({
   selectedFacilityId: string | null;
 }) {
   return (
-    <Surface>
-      <div className="mb-3">
-        <h2 className="text-base font-semibold text-text-primary">Facility records</h2>
-        <p className="mt-1 text-sm text-text-muted">
-          Select a facility to review its registration details.
-        </p>
-      </div>
-      {facilities.length === 0 ? (
+    <RegistrationDirectoryPane
+      description="Select a facility to review its registration details."
+      title="Facility Records"
+      emptyState={
         <div className="rounded-component border border-dashed border-border p-4">
           <h3 className="text-sm font-semibold text-text-primary">
-            {scopedToClient
-              ? "No Facilities registered for this Client."
-              : "No Facilities registered."}
+            {scopedToClient ? "No Facilities registered for this Client." : "No Facilities registered."}
           </h3>
           <p className="mt-2 text-sm text-text-muted">
             Use Register Facility to add a facility when you have create authority.
           </p>
         </div>
+      }
+    >
+      {facilities.length === 0 ? (
+        undefined
       ) : (
         <ul aria-label="Facility records" className="space-y-2">
           {facilities.map((facility) => {
@@ -387,35 +396,25 @@ function FacilitiesList({
 
             return (
               <li key={facility.id}>
-                <button
-                  aria-current={isSelected ? "true" : undefined}
-                  className={[
-                    "w-full rounded-component border px-3 py-3 text-left outline-none transition focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface",
-                    isSelected
-                      ? "border-primary-navy bg-elevated shadow-sm"
-                      : "border-border bg-surface hover:bg-elevated"
-                  ].join(" ")}
-                  onClick={() => onSelectFacility(facility.id)}
-                  type="button"
-                >
+                <RegistrationDirectoryItem isSelected={isSelected} onSelect={() => onSelectFacility(facility.id)}>
                   <span className="block break-words text-sm font-semibold text-text-primary">
                     {facility.facility_name}
                   </span>
                   <span className="mt-2 flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-wide text-text-muted">
                     <span>{displayCode(facility.facility_type)}</span>
-                    <span>{displayCode(facility.operational_status)}</span>
+                    <RegistrationStatusBadge value={facility.operational_status} />
                     {facility.country ? <span>{facility.country}</span> : null}
                   </span>
                   <span className="mt-2 block break-words text-sm text-text-muted">
                     {clientLabel(facility.client_id, clientNameById)}
                   </span>
-                </button>
+                </RegistrationDirectoryItem>
               </li>
             );
           })}
         </ul>
       )}
-    </Surface>
+    </RegistrationDirectoryPane>
   );
 }
 
@@ -461,33 +460,48 @@ function FacilityDetailsPanel({
   return (
     <Surface>
       <div className="space-y-4">
-        <div>
-          <h2 className="text-lg font-semibold text-text-primary">
-            Facility Details
-          </h2>
-          <p className="mt-1 break-words text-sm text-text-muted">{facility.facility_name}</p>
-        </div>
+        <RegistrationEntityHeader
+          heading="Facility Details"
+          identity={facility.facility_name}
+          secondary={`${displayCode(facility.facility_type)} · ${clientLabel(facility.client_id, clientNameById)}`}
+          status={facility.operational_status}
+        />
 
-        <dl className="grid gap-2 text-sm sm:grid-cols-2">
-          <MetadataItem label="Client" value={clientLabel(facility.client_id, clientNameById)} />
-          <MetadataItem label="Facility ID" value={facility.id} />
-          <MetadataItem label="Client ID" value={facility.client_id} />
-          <MetadataItem label="Created" value={facility.created_at} />
-          <MetadataItem label="Updated" value={facility.updated_at} />
-        </dl>
+        <RegistrationMetadataGroup title="Operational context">
+          <RegistrationMetadataItem
+            label="Client"
+            value={clientLabel(facility.client_id, clientNameById)}
+          />
+          <RegistrationMetadataItem
+            label="Facility type"
+            value={displayCode(facility.facility_type)}
+          />
+        </RegistrationMetadataGroup>
+
+        <RegistrationMetadataGroup description="System references and record history remain available for traceability.">
+          <RegistrationMetadataItem label="Administrative Facility ID" value={facility.id} subtle />
+          <RegistrationMetadataItem label="Administrative Client ID" value={facility.client_id} subtle />
+          <RegistrationMetadataItem label="Created" value={formatRegistrationDateTime(facility.created_at)} />
+          <RegistrationMetadataItem label="Updated" value={formatRegistrationDateTime(facility.updated_at)} />
+        </RegistrationMetadataGroup>
 
         {canUpdate ? (
-          <FacilityForm
-            actionLabel="Save Facility"
-            clients={[]}
-            formId="edit-registration-facility"
-            formState={editForm}
-            isSubmitting={isSubmitting}
-            lockClientSelection
-            canChangeOperationalStatus={canDeactivate}
-            onChange={onEditChange}
-            onSubmit={onSubmit}
-          />
+          <RegistrationEditableSection
+            description="Update the operational information governed by Facility registration."
+            title="Editable Facility information"
+          >
+            <FacilityForm
+              actionLabel="Save Facility"
+              clients={[]}
+              formId="edit-registration-facility"
+              formState={editForm}
+              isSubmitting={isSubmitting}
+              lockClientSelection
+              canChangeOperationalStatus={canDeactivate}
+              onChange={onEditChange}
+              onSubmit={onSubmit}
+            />
+          </RegistrationEditableSection>
         ) : (
           <FacilityReadOnlyDetails facility={facility} />
         )}
@@ -737,14 +751,17 @@ function FormInput({
 
 function FacilityReadOnlyDetails({ facility }: { facility: RegistrationFacility }) {
   return (
-    <dl className="grid gap-2 text-sm sm:grid-cols-2">
-      <MetadataItem label="Facility type" value={displayCode(facility.facility_type)} />
-      <MetadataItem label="Operational status" value={displayCode(facility.operational_status)} />
-      <MetadataItem label="Country" value={facility.country ?? "Not specified"} />
-      <MetadataItem label="Address" value={facility.address ?? "Not specified"} />
-      <MetadataItem label="Timezone" value={facility.timezone ?? "Not specified"} />
-      <MetadataItem label="Notes" value={facility.notes ?? "Not specified"} />
-    </dl>
+    <RegistrationMetadataGroup
+      description="This information is read-only with your current authority."
+      title="Facility information"
+    >
+      <RegistrationMetadataItem label="Facility type" value={displayCode(facility.facility_type)} />
+      <RegistrationMetadataItem label="Operational status" value={displayCode(facility.operational_status)} />
+      <RegistrationMetadataItem label="Country" value={facility.country ?? "Not specified"} />
+      <RegistrationMetadataItem label="Address" value={facility.address ?? "Not specified"} />
+      <RegistrationMetadataItem label="Timezone" value={facility.timezone ?? "Not specified"} />
+      <RegistrationMetadataItem label="Notes" value={facility.notes ?? "Not specified"} />
+    </RegistrationMetadataGroup>
   );
 }
 
@@ -775,17 +792,6 @@ function RegistrationFacilitiesErrorState({ error }: { error: Error }) {
     <SafeState title="Facility registration could not be loaded.">
       The registration service returned an error.
     </SafeState>
-  );
-}
-
-function MetadataItem({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="min-w-0">
-      <dt className="text-xs font-semibold uppercase tracking-wide text-text-muted">
-        {label}
-      </dt>
-      <dd className="mt-1 break-words text-text-primary">{value}</dd>
-    </div>
   );
 }
 
@@ -853,7 +859,7 @@ function buildClientNameMap(clients: RegistrationClient[]) {
 function clientLabel(clientId: string, clientNameById: Map<string, string>) {
   const name = clientNameById.get(clientId);
 
-  return name ? `${name} (${clientId})` : clientId;
+  return name ?? clientId;
 }
 
 function displayCode(value: string) {

@@ -356,7 +356,7 @@ describe("Registration Clients frontend", () => {
       screen.queryByRole("form", { name: "Create Client" })
     ).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /New Aquatics Client/i })).toHaveAttribute(
-      "aria-current",
+      "aria-pressed",
       "true"
     );
     expect(JSON.parse(String(createCall?.init?.body))).toEqual({

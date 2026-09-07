@@ -1,5 +1,5 @@
 import { FormEvent, useState } from "react";
-import { Navigate, useLocation, useNavigate } from "react-router-dom";
+import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 
 import { isApiError } from "../../api/errors";
 import { useAuth } from "../../auth/useAuth";
@@ -141,6 +141,8 @@ export function LoginPage() {
           >
             {isSubmitting ? "Signing in..." : "Sign in"}
           </button>
+          <div className="flex items-center gap-4 pt-2" aria-hidden="true"><span className="h-px flex-1 bg-border"/><span className="text-xs font-semibold text-text-muted">OR</span><span className="h-px flex-1 bg-border"/></div>
+          <Link className="block text-center text-sm font-semibold text-primary-blue hover:text-primary-navy" to={routes.forgotPassword}>Forgot your password?</Link>
         </form>
         </section>
       </div>

@@ -267,7 +267,7 @@ function CertificatePreviewControls({
   );
 }
 
-function CertificateVisual({
+export function CertificateVisual({
   issuance,
   showGuides
 }: {

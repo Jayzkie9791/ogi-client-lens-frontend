@@ -16,6 +16,17 @@ import {
   updateRegistrationClient
 } from "./registrationClientApi";
 import { RegistrationWorkspaceShell } from "./RegistrationWorkspaceShell";
+import { formatRegistrationDateTime } from "./registrationPresentation";
+import {
+  RegistrationDirectoryItem,
+  RegistrationDirectoryPane,
+  RegistrationEditableSection,
+  RegistrationEntityHeader,
+  RegistrationMetadataGroup,
+  RegistrationMetadataItem,
+  RegistrationStatusBadge,
+  RegistrationWorkspaceFrame
+} from "./RegistrationWorkspaceUi";
 
 const permissions = {
   view: "view_client",
@@ -206,36 +217,40 @@ export function RegistrationClientsPage() {
       ) : clientsQuery.isError ? (
         <RegistrationClientsErrorState error={clientsQuery.error} />
       ) : (
-        <div className="grid gap-4 lg:grid-cols-[minmax(16rem,0.8fr)_minmax(0,1.2fr)]">
-          <ClientsList
-            clients={clients}
-            onSelectClient={selectClient}
-            selectedClientId={selectedClientId}
-          />
-          {isCreating ? (
-            <ClientCreatePanel
-              formState={createForm}
-              isSubmitting={createMutation.isPending}
-              onCancel={cancelCreateClient}
-              onChange={setCreateForm}
-              onSubmit={submitCreateForm}
+        <RegistrationWorkspaceFrame
+          directory={
+            <ClientsList
+              clients={clients}
+              onSelectClient={selectClient}
+              selectedClientId={selectedClientId}
             />
-          ) : clients.length === 0 ? (
-            <ClientEmptyDetailPanel canCreate={canCreate} />
-          ) : (
-            <ClientDetailsPanel
-              canDeactivate={canDeactivate}
-              canUpdate={canUpdate}
-              client={selectedClientQuery.data ?? null}
-              editForm={editForm}
-              isLoading={selectedClientQuery.isLoading}
-              isSubmitting={updateMutation.isPending}
-              onDeactivate={deactivateSelectedClient}
-              onEditChange={setEditForm}
-              onSubmit={submitEditForm}
-            />
-          )}
-        </div>
+          }
+          workspace={
+            isCreating ? (
+              <ClientCreatePanel
+                formState={createForm}
+                isSubmitting={createMutation.isPending}
+                onCancel={cancelCreateClient}
+                onChange={setCreateForm}
+                onSubmit={submitCreateForm}
+              />
+            ) : clients.length === 0 ? (
+              <ClientEmptyDetailPanel canCreate={canCreate} />
+            ) : (
+              <ClientDetailsPanel
+                canDeactivate={canDeactivate}
+                canUpdate={canUpdate}
+                client={selectedClientQuery.data ?? null}
+                editForm={editForm}
+                isLoading={selectedClientQuery.isLoading}
+                isSubmitting={updateMutation.isPending}
+                onDeactivate={deactivateSelectedClient}
+                onEditChange={setEditForm}
+                onSubmit={submitEditForm}
+              />
+            )
+          }
+        />
       )}
     </RegistrationWorkspaceShell>
   );
@@ -251,14 +266,10 @@ function ClientsList({
   selectedClientId: string | null;
 }) {
   return (
-    <Surface>
-      <div className="mb-3">
-        <h2 className="text-base font-semibold text-text-primary">Clients</h2>
-        <p className="mt-1 text-sm text-text-muted">
-          Select an organization to review its registration details.
-        </p>
-      </div>
-      {clients.length === 0 ? (
+    <RegistrationDirectoryPane
+      description="Select an organization to review its registration details."
+      title="Client Records"
+      emptyState={
         <div className="rounded-component border border-dashed border-border p-4">
           <h3 className="text-sm font-semibold text-text-primary">
             No Clients registered yet.
@@ -267,29 +278,24 @@ function ClientsList({
             Use Register Client to add the first organization when you have create authority.
           </p>
         </div>
-      ) : (
+      }
+    >
+      {clients.length === 0 ? undefined : (
         <ul aria-label="Client / Organization records" className="space-y-2">
           {clients.map((client) => {
             const isSelected = selectedClientId === client.id;
 
             return (
               <li key={client.id}>
-                <button
-                  aria-current={isSelected ? "true" : undefined}
-                  className={[
-                    "w-full rounded-component border px-3 py-3 text-left outline-none transition focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface",
-                    isSelected
-                      ? "border-primary-navy bg-elevated shadow-sm"
-                      : "border-border bg-surface hover:bg-elevated"
-                  ].join(" ")}
-                  onClick={() => onSelectClient(client.id)}
-                  type="button"
+                <RegistrationDirectoryItem
+                  isSelected={isSelected}
+                  onSelect={() => onSelectClient(client.id)}
                 >
                   <span className="block break-words text-sm font-semibold text-text-primary">
                     {client.organization_name}
                   </span>
                   <span className="mt-2 flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-wide text-text-muted">
-                    <span>{client.status}</span>
+                    <RegistrationStatusBadge value={client.status} />
                     {client.country ? <span>{client.country}</span> : null}
                   </span>
                   {client.contact_email ? (
@@ -297,13 +303,13 @@ function ClientsList({
                       {client.contact_email}
                     </span>
                   ) : null}
-                </button>
+                </RegistrationDirectoryItem>
               </li>
             );
           })}
         </ul>
       )}
-    </Surface>
+    </RegistrationDirectoryPane>
   );
 }
 
@@ -347,30 +353,43 @@ function ClientDetailsPanel({
   return (
     <Surface>
       <div className="space-y-4">
-        <div>
-          <h2 className="text-lg font-semibold text-text-primary">
-            Client / Organization Details
-          </h2>
-          <p className="mt-1 break-words text-sm font-semibold text-text-muted">
-            {client.organization_name}
-          </p>
-        </div>
+        <RegistrationEntityHeader
+          heading="Client / Organization Details"
+          identity={client.organization_name}
+          secondary={client.contact_email ?? "No contact email recorded"}
+          status={client.status}
+        />
 
-        <dl className="grid gap-2 text-sm sm:grid-cols-2">
-          <MetadataItem label="Client ID" value={client.id} subtle />
-          <MetadataItem label="Created" value={client.created_at} />
-          <MetadataItem label="Updated" value={client.updated_at} />
-        </dl>
+        <RegistrationMetadataGroup description="System references and record history remain available for traceability.">
+          <RegistrationMetadataItem
+            label="Administrative Client ID"
+            subtle
+            value={client.id}
+          />
+          <RegistrationMetadataItem
+            label="Created"
+            value={formatRegistrationDateTime(client.created_at)}
+          />
+          <RegistrationMetadataItem
+            label="Updated"
+            value={formatRegistrationDateTime(client.updated_at)}
+          />
+        </RegistrationMetadataGroup>
 
         {canUpdate ? (
-          <ClientForm
-            actionLabel="Save Client / Organization"
-            formId="edit-registration-client"
-            formState={editForm}
-            isSubmitting={isSubmitting}
-            onChange={onEditChange}
-            onSubmit={onSubmit}
-          />
+          <RegistrationEditableSection
+            description="Update the organization information governed by Client registration."
+            title="Editable Client information"
+          >
+            <ClientForm
+              actionLabel="Save Client / Organization"
+              formId="edit-registration-client"
+              formState={editForm}
+              isSubmitting={isSubmitting}
+              onChange={onEditChange}
+              onSubmit={onSubmit}
+            />
+          </RegistrationEditableSection>
         ) : (
           <ClientReadOnlyDetails client={client} />
         )}
@@ -568,20 +587,23 @@ function FormInput({
 
 function ClientReadOnlyDetails({ client }: { client: RegistrationClient }) {
   return (
-    <dl className="grid gap-2 text-sm sm:grid-cols-2">
-      <MetadataItem label="Status" value={client.status} />
-      <MetadataItem
+    <RegistrationMetadataGroup
+      description="This information is read-only with your current authority."
+      title="Client information"
+    >
+      <RegistrationMetadataItem label="Status" value={client.status} />
+      <RegistrationMetadataItem
         label="Contact email"
         value={client.contact_email ?? "Not specified"}
       />
-      <MetadataItem
+      <RegistrationMetadataItem
         label="Contact phone"
         value={client.contact_phone ?? "Not specified"}
       />
-      <MetadataItem label="Country" value={client.country ?? "Not specified"} />
-      <MetadataItem label="Address" value={client.address ?? "Not specified"} />
-      <MetadataItem label="Notes" value={client.notes ?? "Not specified"} />
-    </dl>
+      <RegistrationMetadataItem label="Country" value={client.country ?? "Not specified"} />
+      <RegistrationMetadataItem label="Address" value={client.address ?? "Not specified"} />
+      <RegistrationMetadataItem label="Notes" value={client.notes ?? "Not specified"} />
+    </RegistrationMetadataGroup>
   );
 }
 
@@ -612,32 +634,6 @@ function RegistrationClientsErrorState({ error }: { error: Error }) {
     <SafeState title="Client / Organization registration could not be loaded.">
       The registration service returned an error.
     </SafeState>
-  );
-}
-
-function MetadataItem({
-  label,
-  subtle = false,
-  value
-}: {
-  label: string;
-  subtle?: boolean;
-  value: string;
-}) {
-  return (
-    <div className="min-w-0">
-      <dt className="text-xs font-semibold uppercase tracking-wide text-text-muted">
-        {label}
-      </dt>
-      <dd
-        className={[
-          "mt-1 break-words",
-          subtle ? "text-xs text-text-muted" : "text-text-primary"
-        ].join(" ")}
-      >
-        {value}
-      </dd>
-    </div>
   );
 }
 

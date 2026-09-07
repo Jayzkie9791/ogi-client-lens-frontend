@@ -25,6 +25,17 @@ import {
 } from "./registrationPersonnelApi";
 import { RegistrationFacilityAssignmentsPanel } from "./RegistrationFacilityAssignmentsPanel";
 import { RegistrationWorkspaceShell } from "./RegistrationWorkspaceShell";
+import { formatRegistrationDate, formatRegistrationDateTime } from "./registrationPresentation";
+import {
+  RegistrationDirectoryItem,
+  RegistrationDirectoryPane,
+  RegistrationEditableSection,
+  RegistrationEntityHeader,
+  RegistrationMetadataGroup,
+  RegistrationMetadataItem,
+  RegistrationStatusBadge,
+  RegistrationWorkspaceFrame
+} from "./RegistrationWorkspaceUi";
 
 const permissions = {
   viewClients: "view_client",
@@ -345,14 +356,14 @@ export function RegistrationPersonnelPage() {
       ) : personnelQuery.isError ? (
         <RegistrationPersonnelErrorState error={personnelQuery.error} />
       ) : (
-        <div className="grid gap-4 lg:grid-cols-[minmax(16rem,0.8fr)_minmax(0,1.2fr)]">
-          <PersonnelList
+        <RegistrationWorkspaceFrame
+          directory={<PersonnelList
             clientNameById={clientNameById}
             onSelectPersonnel={selectPersonnel}
             personnel={personnel}
             selectedPersonnelId={selectedPersonnelId}
-          />
-          {isCreating ? (
+          />}
+          workspace={isCreating ? (
             <PersonnelCreatePanel
               clients={clients}
               formState={createForm}
@@ -381,7 +392,7 @@ export function RegistrationPersonnelPage() {
               staffMember={selectedPersonnelQuery.data ?? null}
             />
           )}
-        </div>
+        />
       )}
     </RegistrationWorkspaceShell>
   );
@@ -488,22 +499,20 @@ function PersonnelList({
   selectedPersonnelId: string | null;
 }) {
   return (
-    <Surface>
-      <div className="mb-3">
-        <h2 className="text-base font-semibold text-text-primary">Personnel records</h2>
-        <p className="mt-1 text-sm text-text-muted">
-          Select a person to review profile details.
-        </p>
-      </div>
-      {personnel.length === 0 ? (
+    <RegistrationDirectoryPane
+      description="Select a person to review profile details."
+      title="Personnel Records"
+      emptyState={
         <div className="rounded-component border border-dashed border-border p-4">
-          <h3 className="text-sm font-semibold text-text-primary">
-            No Personnel match the current filters.
-          </h3>
+          <h3 className="text-sm font-semibold text-text-primary">No Personnel match the current filters.</h3>
           <p className="mt-2 text-sm text-text-muted">
             Use Register Personnel to add a person when you have create authority.
           </p>
         </div>
+      }
+    >
+      {personnel.length === 0 ? (
+        undefined
       ) : (
         <ul aria-label="Personnel records" className="space-y-2">
           {personnel.map((staffMember) => {
@@ -511,23 +520,13 @@ function PersonnelList({
 
             return (
               <li key={staffMember.id}>
-                <button
-                  aria-current={isSelected ? "true" : undefined}
-                  className={[
-                    "w-full rounded-component border px-3 py-3 text-left outline-none transition focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface",
-                    isSelected
-                      ? "border-primary-navy bg-elevated shadow-sm"
-                      : "border-border bg-surface hover:bg-elevated"
-                  ].join(" ")}
-                  onClick={() => onSelectPersonnel(staffMember.id)}
-                  type="button"
-                >
+                <RegistrationDirectoryItem isSelected={isSelected} onSelect={() => onSelectPersonnel(staffMember.id)}>
                   <span className="block break-words text-sm font-semibold text-text-primary">
                     {staffMember.full_name}
                   </span>
                   <span className="mt-2 flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-wide text-text-muted">
-                    <span>{displayCode(staffMember.employment_status)}</span>
-                    {staffMember.hire_date ? <span>Hired {staffMember.hire_date}</span> : null}
+                    <RegistrationStatusBadge value={staffMember.employment_status} />
+                    {staffMember.hire_date ? <span>Hired {formatRegistrationDate(staffMember.hire_date)}</span> : null}
                   </span>
                   <span className="mt-2 block break-words text-sm text-text-muted">
                     {clientLabel(staffMember.client_id, clientNameById)}
@@ -537,13 +536,13 @@ function PersonnelList({
                       {staffMember.email}
                     </span>
                   ) : null}
-                </button>
+                </RegistrationDirectoryItem>
               </li>
             );
           })}
         </ul>
       )}
-    </Surface>
+    </RegistrationDirectoryPane>
   );
 }
 
@@ -596,17 +595,11 @@ function PersonnelDetailsPanel({
     <div className="space-y-4">
       <Surface>
         <div className="space-y-4">
-          <div>
-            <h2 className="text-lg font-semibold text-text-primary">
-              {staffMember.full_name}
-            </h2>
-            <p className="mt-1 break-words text-sm text-text-muted">
-              {displayCode(staffMember.employment_status)} - {clientLabel(staffMember.client_id, clientNameById)}
-            </p>
-            {staffMember.email ? (
-              <p className="mt-1 break-words text-sm text-text-muted">{staffMember.email}</p>
-            ) : null}
-          </div>
+          <RegistrationEntityHeader
+            identity={staffMember.full_name}
+            secondary={<>{clientLabel(staffMember.client_id, clientNameById)}{staffMember.email ? ` · ${staffMember.email}` : ""}</>}
+            status={staffMember.employment_status}
+          />
 
           <PersonnelSecondaryNavigation
             canViewFacilityAssignments={canViewFacilityAssignments}
@@ -710,32 +703,34 @@ function PersonnelOverview({
       id="personnel-overview-panel"
       role="tabpanel"
     >
-      <dl className="grid gap-2 text-sm sm:grid-cols-2">
-        <MetadataItem
-          label="Client"
-          value={clientLabel(staffMember.client_id, clientNameById)}
-        />
-        <MetadataItem label="Personnel ID" value={staffMember.id} />
-        <MetadataItem label="Client ID" value={staffMember.client_id} />
-        <MetadataItem
+      <RegistrationMetadataGroup description="System relationships and record history remain secondary to the employment profile.">
+        <RegistrationMetadataItem label="Administrative Personnel ID" value={staffMember.id} subtle />
+        <RegistrationMetadataItem label="Administrative Client ID" value={staffMember.client_id} subtle />
+        <RegistrationMetadataItem
           label="Platform user"
           value={staffMember.user_id ?? "No linked user account"}
+          subtle={Boolean(staffMember.user_id)}
         />
-        <MetadataItem label="Created" value={staffMember.created_at} />
-        <MetadataItem label="Updated" value={staffMember.updated_at} />
-      </dl>
+        <RegistrationMetadataItem label="Created" value={formatRegistrationDateTime(staffMember.created_at)} />
+        <RegistrationMetadataItem label="Updated" value={formatRegistrationDateTime(staffMember.updated_at)} />
+      </RegistrationMetadataGroup>
 
       {canUpdate ? (
-        <PersonnelForm
-          actionLabel="Save Personnel"
-          clients={[]}
-          formId="edit-registration-personnel"
-          formState={editForm}
-          isSubmitting={isSubmitting}
-          lockClientSelection
-          onChange={onEditChange}
-          onSubmit={onSubmit}
-        />
+        <RegistrationEditableSection
+          description={`Employment information for ${clientLabel(staffMember.client_id, clientNameById)}.`}
+          title="Employment profile"
+        >
+          <PersonnelForm
+            actionLabel="Save Personnel"
+            clients={[]}
+            formId="edit-registration-personnel"
+            formState={editForm}
+            isSubmitting={isSubmitting}
+            lockClientSelection
+            onChange={onEditChange}
+            onSubmit={onSubmit}
+          />
+        </RegistrationEditableSection>
       ) : (
         <PersonnelReadOnlyDetails staffMember={staffMember} />
       )}
@@ -962,23 +957,26 @@ function PersonnelReadOnlyDetails({
   staffMember: RegistrationPersonnel;
 }) {
   return (
-    <dl className="grid gap-2 text-sm sm:grid-cols-2">
-      <MetadataItem label="Full name" value={staffMember.full_name} />
-      <MetadataItem
+    <RegistrationMetadataGroup
+      description="This employment information is read-only with your current authority."
+      title="Employment profile"
+    >
+      <RegistrationMetadataItem label="Full name" value={staffMember.full_name} />
+      <RegistrationMetadataItem
         label="Employment status"
         value={displayCode(staffMember.employment_status)}
       />
-      <MetadataItem label="Email" value={staffMember.email ?? "Not specified"} />
-      <MetadataItem
+      <RegistrationMetadataItem label="Email" value={staffMember.email ?? "Not specified"} />
+      <RegistrationMetadataItem
         label="Phone"
         value={staffMember.phone_number ?? "Not specified"}
       />
-      <MetadataItem
+      <RegistrationMetadataItem
         label="Hire date"
-        value={staffMember.hire_date ?? "Not specified"}
+        value={staffMember.hire_date ? formatRegistrationDate(staffMember.hire_date) : "Not specified"}
       />
-      <MetadataItem label="Notes" value={staffMember.notes ?? "Not specified"} />
-    </dl>
+      <RegistrationMetadataItem label="Notes" value={staffMember.notes ?? "Not specified"} />
+    </RegistrationMetadataGroup>
   );
 }
 
@@ -1009,17 +1007,6 @@ function RegistrationPersonnelErrorState({ error }: { error: Error }) {
     <SafeState title="Personnel registration could not be loaded.">
       The registration service returned an error.
     </SafeState>
-  );
-}
-
-function MetadataItem({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="min-w-0">
-      <dt className="text-xs font-semibold uppercase tracking-wide text-text-muted">
-        {label}
-      </dt>
-      <dd className="mt-1 break-words text-text-primary">{value}</dd>
-    </div>
   );
 }
 
@@ -1086,7 +1073,7 @@ function buildClientNameMap(clients: RegistrationClient[]) {
 function clientLabel(clientId: string, clientNameById: Map<string, string>) {
   const name = clientNameById.get(clientId);
 
-  return name ? `${name} (${clientId})` : clientId;
+  return name ?? clientId;
 }
 
 function displayCode(value: string) {

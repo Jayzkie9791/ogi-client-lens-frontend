@@ -22,6 +22,16 @@ import {
   RegistrationPersonnel
 } from "../registration/registrationPersonnelApi";
 import { RegistrationWorkspaceShell } from "../registration/RegistrationWorkspaceShell";
+import { formatRegistrationDateTime } from "../registration/registrationPresentation";
+import {
+  RegistrationDirectoryItem,
+  RegistrationDirectoryPane,
+  RegistrationEntityHeader,
+  RegistrationMetadataGroup,
+  RegistrationMetadataItem,
+  RegistrationWorkspaceFrame,
+  RegistrationWorkspaceSection
+} from "../registration/RegistrationWorkspaceUi";
 import { Button } from "../ui/components/Button";
 import { Surface } from "../ui/components/Surface";
 import {
@@ -523,14 +533,13 @@ export function RegistrationTrainingPage() {
       ) : traineesQuery.isError ? (
         <TrainingLoadErrorState error={traineesQuery.error} />
       ) : (
-        <div className="grid gap-4 lg:grid-cols-[minmax(16rem,0.8fr)_minmax(0,1.2fr)]">
-          <TraineeList
+        <RegistrationWorkspaceFrame
+          directory={<TraineeList
             onSelectTrainee={selectTrainee}
             selectedTraineeId={selectedTraineeId}
             trainees={trainees}
-          />
-
-          {isCreatingTrainee ? (
+          />}
+          workspace={isCreatingTrainee ? (
             <TraineeCreatePanel
               formState={traineeForm}
               isSubmitting={createTraineeMutation.isPending}
@@ -606,7 +615,7 @@ export function RegistrationTrainingPage() {
               traineeLoading={selectedTraineeQuery.isLoading}
             />
           )}
-        </div>
+        />
       )}
     </RegistrationWorkspaceShell>
   );
@@ -622,19 +631,17 @@ function TraineeList({
   trainees: readonly TrainingTrainee[];
 }) {
   return (
-    <Surface>
-      <div className="mb-3">
-        <h2 className="text-base font-semibold text-text-primary">Trainees</h2>
-        <p className="mt-1 text-sm text-text-muted">
-          Select a Trainee to review identity, Personnel link, and enrollments.
-        </p>
-      </div>
-      {trainees.length === 0 ? (
+    <RegistrationDirectoryPane
+      description="Select a Trainee to review identity, Personnel link, and enrollments."
+      title="Trainee Records"
+      emptyState={
         <div className="rounded-component border border-dashed border-border p-4">
-          <h3 className="text-sm font-semibold text-text-primary">
-            No trainees registered.
-          </h3>
+          <h3 className="text-sm font-semibold text-text-primary">No trainees registered.</h3>
         </div>
+      }
+    >
+      {trainees.length === 0 ? (
+        undefined
       ) : (
         <ul aria-label="Trainee records" className="space-y-2">
           {trainees.map((trainee) => {
@@ -642,17 +649,7 @@ function TraineeList({
 
             return (
               <li key={trainee.id}>
-                <button
-                  aria-current={isSelected ? "true" : undefined}
-                  className={[
-                    "w-full rounded-component border px-3 py-3 text-left outline-none transition focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface",
-                    isSelected
-                      ? "border-primary-navy bg-elevated shadow-sm"
-                      : "border-border bg-surface hover:bg-elevated"
-                  ].join(" ")}
-                  onClick={() => onSelectTrainee(trainee.id)}
-                  type="button"
-                >
+                <RegistrationDirectoryItem isSelected={isSelected} onSelect={() => onSelectTrainee(trainee.id)}>
                   <span className="block break-words text-sm font-semibold text-text-primary">
                     {trainee.full_name}
                   </span>
@@ -664,13 +661,13 @@ function TraineeList({
                       {trainee.email}
                     </span>
                   ) : null}
-                </button>
+                </RegistrationDirectoryItem>
               </li>
             );
           })}
         </ul>
       )}
-    </Surface>
+    </RegistrationDirectoryPane>
   );
 }
 
@@ -769,29 +766,39 @@ function TraineeDetailsPanel({
     <div className="space-y-4">
       <Surface>
         <div className="space-y-4">
-          <div>
-            <h2 className="text-lg font-semibold text-text-primary">
-              {trainee.full_name}
-            </h2>
-            <p className="mt-1 text-sm text-text-muted">
-              Student number: {studentNumberValue(trainee.student_number)}
-            </p>
-          </div>
+          <RegistrationEntityHeader
+            identity={trainee.full_name}
+            secondary={`Student number: ${studentNumberValue(trainee.student_number)}`}
+          />
 
-          <dl className="grid gap-2 text-sm sm:grid-cols-2">
-            <MetadataItem label="Email" value={trainee.email ?? "Not specified"} />
-            <MetadataItem
+          <RegistrationMetadataGroup title="Trainee contact">
+            <RegistrationMetadataItem
+              label="Email"
+              value={trainee.email ?? "Not specified"}
+            />
+            <RegistrationMetadataItem
               label="Phone"
               value={trainee.phone_number ?? "Not specified"}
             />
-            <MetadataItem label="Notes" value={trainee.notes ?? "Not specified"} />
-            <MetadataItem label="Created" value={trainee.created_at} />
-            <MetadataItem label="Updated" value={trainee.updated_at} />
-          </dl>
+            <RegistrationMetadataItem
+              label="Notes"
+              value={trainee.notes ?? "Not specified"}
+            />
+          </RegistrationMetadataGroup>
+          <RegistrationMetadataGroup
+            description="Record history is secondary to the Trainee's operational identity."
+          >
+            <RegistrationMetadataItem label="Created" value={formatRegistrationDateTime(trainee.created_at)} />
+            <RegistrationMetadataItem label="Updated" value={formatRegistrationDateTime(trainee.updated_at)} />
+          </RegistrationMetadataGroup>
         </div>
       </Surface>
 
-      <Surface>
+      <RegistrationWorkspaceSection
+        description="Maintain the optional relationship between this Trainee and an existing Personnel record."
+        headingId="training-personnel-link-heading"
+        title="Personnel Link"
+      >
         <PersonnelLinkSection
           canLinkPersonnel={canLinkPersonnel}
           canViewPersonnel={canViewPersonnel}
@@ -806,11 +813,15 @@ function TraineeDetailsPanel({
           selectedStaffMemberId={selectedStaffMemberId}
           trainee={trainee}
         />
-      </Surface>
+      </RegistrationWorkspaceSection>
 
       <TrainingAttendanceEvidencePanel enrollments={enrollments} />
 
-      <Surface>
+      <RegistrationWorkspaceSection
+        description="Manage governed program enrollment and Training Session assignment without implying completion."
+        headingId="training-enrollments-heading"
+        title="Enrollments"
+      >
         <EnrollmentSection
           assigningEnrollmentId={assigningEnrollmentId}
           assignmentSessionId={assignmentSessionId}
@@ -836,7 +847,7 @@ function TraineeDetailsPanel({
           sessions={sessions}
           sessionsLoading={sessionsLoading}
         />
-      </Surface>
+      </RegistrationWorkspaceSection>
     </div>
   );
 }
@@ -875,17 +886,9 @@ function PersonnelLinkSection({
   return (
     <section aria-labelledby="training-personnel-link-heading" className="space-y-3">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h3
-            className="text-base font-semibold text-text-primary"
-            id="training-personnel-link-heading"
-          >
-            Personnel Link
-          </h3>
-          <p className="mt-1 text-sm text-text-muted">
-            Explicitly link this Trainee to a known Personnel record when both identities represent the same person.
-          </p>
-        </div>
+        <p className="text-sm text-text-muted">
+          Explicitly link this Trainee to a known Personnel record when both identities represent the same person.
+        </p>
         {!activeLink && canLinkPersonnel ? (
           <Button
             aria-expanded={isLinkingPersonnel}
@@ -1020,17 +1023,9 @@ function EnrollmentSection({
   return (
     <section aria-labelledby="training-enrollments-heading" className="space-y-3">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h3
-            className="text-base font-semibold text-text-primary"
-            id="training-enrollments-heading"
-          >
-            Enrollments
-          </h3>
-          <p className="mt-1 text-sm text-text-muted">
-            Enrollment records show intended program registration only.
-          </p>
-        </div>
+        <p className="text-sm text-text-muted">
+          Enrollment records show intended program registration only.
+        </p>
         {canCreateEnrollment ? (
           <Button
             aria-expanded={isAddingEnrollment}
@@ -1074,7 +1069,7 @@ function EnrollmentSection({
                 ) : null}
               </div>
               <dl className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
-                <MetadataItem label="Enrolled" value={enrollment.enrolled_at} />
+                <MetadataItem label="Enrolled" value={formatRegistrationDateTime(enrollment.enrolled_at)} />
                 <MetadataItem
                   label="Sponsoring Client"
                   value={enrollment.client?.organization_name ?? "None"}
@@ -1349,14 +1344,14 @@ function TrainingAttendanceEvidencePanel({
   }
 
   return (
-    <Surface>
+    <Surface className="overflow-hidden" data-registration-section="operational">
       <section aria-labelledby="training-attendance-evidence-heading" className="space-y-3">
-        <div>
+        <div className="-mx-5 -mt-5 border-b border-l-4 border-b-border border-l-accent-red bg-elevated px-5 py-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-primary-blue">
             Attendance Evidence
           </p>
           <h3
-            className="text-base font-semibold text-text-primary"
+            className="text-base font-semibold text-primary-navy"
             id="training-attendance-evidence-heading"
           >
             F-022 Session Roster
@@ -1726,9 +1721,10 @@ function TrainingEvidenceWorkspacePanel({
   return (
     <section
       aria-label={`${programLabel(enrollment.program)} Training Evidence`}
-      className="mt-4 space-y-3 rounded-component border border-border bg-canvas p-3"
+      className="mt-4 space-y-3 overflow-hidden rounded-component border border-border bg-surface p-3"
+      data-registration-section="operational"
     >
-      <div>
+      <div className="-mx-3 -mt-3 border-b border-l-4 border-b-border border-l-accent-red bg-elevated px-3 py-3">
         <p className="text-xs font-semibold uppercase tracking-wide text-primary-blue">
           Training Evidence
         </p>

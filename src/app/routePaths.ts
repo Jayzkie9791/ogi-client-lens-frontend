@@ -1,6 +1,8 @@
 export const routes = {
   home: "/",
   login: "/login",
+  forgotPassword: "/forgot-password",
+  resetPassword: "/reset-password",
   workbench: "/workbench",
   auditRisk: "/workbench/audit-risk",
   auditDetail: "/workbench/audit-risk/audits/:auditId",

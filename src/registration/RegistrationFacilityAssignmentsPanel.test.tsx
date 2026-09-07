@@ -13,6 +13,7 @@ import { RegistrationClient } from "./registrationClientApi";
 import { RegistrationFacility } from "./registrationFacilityApi";
 import { RegistrationFacilityAssignment } from "./registrationFacilityAssignmentApi";
 import { RegistrationPersonnel } from "./registrationPersonnelApi";
+import { formatRegistrationDate } from "./registrationPresentation";
 
 const clientA: RegistrationClient = {
   id: "00000000-0000-4000-8000-000000100001",
@@ -338,7 +339,15 @@ describe("Registration Facility Assignment frontend", () => {
     expect(within(await screen.findByLabelText("Facility Assignment Makati Training Pool")).getByText("Active")).toBeInTheDocument();
     expect(within(await screen.findByLabelText("Facility Assignment Bluewater Beach Zone")).getByText("Active")).toBeInTheDocument();
     expect(screen.getByText("Completed")).toBeInTheDocument();
-    expect(screen.getByText("2026-01-31")).toBeInTheDocument();
+    const completedAssignmentEndDate = completedAssignment.assigned_to;
+    expect(completedAssignmentEndDate).toBe("2026-01-31");
+
+    if (completedAssignmentEndDate === null) {
+      throw new Error("Completed assignment fixture must have an authoritative end date.");
+    }
+
+    expect(screen.getByText(formatRegistrationDate(completedAssignmentEndDate))).toBeInTheDocument();
+    expect(screen.queryByText(completedAssignmentEndDate)).not.toBeInTheDocument();
     expect(screen.getByText("Primary training placement")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add Facility Assignment" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Set Primary" })).not.toBeInTheDocument();
