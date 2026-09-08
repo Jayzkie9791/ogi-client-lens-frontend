@@ -63,6 +63,7 @@ import {
   trainingProgramOptions,
   TrainingTrainee
 } from "./trainingApi";
+import { RegisterTrainingWizard, type RegisterTrainingWizardResult } from "./RegisterTrainingWizard";
 
 const permissions = {
   view: "view_training",
@@ -167,6 +168,7 @@ export function RegistrationTrainingPage() {
   const [sessionForm, setSessionForm] =
     useState<SessionFormState>(emptySessionForm);
   const [sessionIdempotencyKey, setSessionIdempotencyKey] = useState("");
+  const [isRegisteringTraining, setIsRegisteringTraining] = useState(false);
 
   const traineesQuery = useQuery({
     queryKey: ["training-trainees"],
@@ -463,6 +465,18 @@ export function RegistrationTrainingPage() {
           Register trainees, link known Personnel records when appropriate, and add governed training enrollments.
         </p>
         <div className="flex flex-wrap gap-2">
+          {canCreateEnrollment ? (
+            <Button
+              aria-expanded={isRegisteringTraining}
+              onClick={() => {
+                setMessage(null);
+                setIsRegisteringTraining(true);
+              }}
+              type="button"
+            >
+              Register Training
+            </Button>
+          ) : null}
           {canCreateSession ? (
             <Button
               aria-expanded={isCreatingSession}
@@ -494,6 +508,28 @@ export function RegistrationTrainingPage() {
         <Surface role="status">
           <p className="text-sm font-semibold text-text-primary">{message}</p>
         </Surface>
+      ) : null}
+
+      {isRegisteringTraining ? (
+        <RegisterTrainingWizard
+          canCreateSession={canCreateSession && canViewFacilities && canViewPersonnel && canViewCertifications}
+          canLinkPersonnel={canLinkPersonnel && canViewPersonnel}
+          canRegisterTrainee={canRegisterTrainee}
+          canViewClients={canViewClients}
+          canViewCertifications={canViewCertifications}
+          canViewFacilities={canViewFacilities}
+          canViewPersonnel={canViewPersonnel}
+          onCancel={() => setIsRegisteringTraining(false)}
+          onComplete={(result: RegisterTrainingWizardResult) => {
+            setIsRegisteringTraining(false);
+            setSelectedTraineeId(result.trainee.id);
+            setMessage(`Training registration completed. ${result.trainee.student_number ?? "Student Number allocated"} is assigned to ${result.session.training_title}.`);
+            queryClient.setQueryData(["training-trainee", result.trainee.id], result.trainee);
+            void queryClient.invalidateQueries({ queryKey: ["training-trainees"] });
+            void queryClient.invalidateQueries({ queryKey: ["training-enrollments", result.trainee.id] });
+            void queryClient.invalidateQueries({ queryKey: ["training-sessions"] });
+          }}
+        />
       ) : null}
 
       <TrainingErrorAlert

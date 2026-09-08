@@ -29,9 +29,11 @@ import {
 } from "./evidenceValidation";
 import { OetsRenderer } from "./OetsRenderer";
 import { getCurrentRuntimeTemplate } from "./runtimeTemplateApi";
+import { getOetsContextCandidates, getOetsContextRequirement, resolveOetsContext } from "./contextApi";
 import {
   OetsDefinition,
   OetsEvidencePayload,
+  OetsFieldValue,
   OetsTemplateRuntimeDefinition
 } from "./types";
 
@@ -60,6 +62,7 @@ export function RuntimeTemplatePage() {
     useState<OperationalEvidenceRecord | null>(null);
   const [editingSession, setEditingSession] =
     useState<EditingTemplateSession | null>(null);
+  const [selectedContextId, setSelectedContextId] = useState("");
   const submitLockedRef = useRef(false);
   const draftIdempotencyKeyRef = useRef(crypto.randomUUID());
 
@@ -161,6 +164,38 @@ export function RuntimeTemplatePage() {
   const facilityId = resolveFacilityId(availableFacilityIds, selectedFacilityId);
   const activeEditingSession =
     editingSession?.routeTemplateCode === templateCode ? editingSession : null;
+  const contextAuthority = activeEditingSession ? {
+    templateCode: activeEditingSession.runtimeTemplate.template_code,
+    templateVersionId: activeEditingSession.runtimeTemplate.template_version_id,
+    checksum: activeEditingSession.runtimeTemplate.checksum
+  } : null;
+  const contextRequirementQuery = useQuery({
+    enabled: !readOnly && Boolean(contextAuthority),
+    queryKey: ["oets-context-requirement", contextAuthority],
+    queryFn: () => {
+      if (!contextAuthority) throw new Error("OETS context authority is unavailable.");
+      return getOetsContextRequirement(contextAuthority);
+    }
+  });
+  const contextCandidatesQuery = useQuery({
+    enabled: !readOnly && contextRequirementQuery.data?.required === true && Boolean(contextAuthority && effectiveClientId),
+    queryKey: ["oets-context-candidates", contextAuthority, effectiveClientId, facilityId],
+    queryFn: () => {
+      if (!contextAuthority || !effectiveClientId) throw new Error("OETS context scope is unavailable.");
+      return getOetsContextCandidates({ ...contextAuthority, clientId: effectiveClientId, facilityId });
+    }
+  });
+  const resolvedContextQuery = useQuery({
+    enabled: Boolean(contextAuthority && effectiveClientId && selectedContextId),
+    queryKey: ["oets-context-resolved", contextAuthority, effectiveClientId, facilityId, selectedContextId],
+    queryFn: () => {
+      if (!contextAuthority || !effectiveClientId || !selectedContextId) throw new Error("OETS context selection is unavailable.");
+      return resolveOetsContext({ ...contextAuthority, clientId: effectiveClientId, facilityId, selectedId: selectedContextId });
+    }
+  });
+  useEffect(() => { setSelectedContextId(""); }, [templateCode, effectiveClientId, facilityId]);
+  const contextualDefinition = useMemo(() => applyContextFieldPolicy(activeEditingSession?.definition, resolvedContextQuery.data?.field_policy), [activeEditingSession?.definition, resolvedContextQuery.data?.field_policy]);
+  const contextualInitialPayload = useMemo(() => buildContextInitialPayload(contextualDefinition, resolvedContextQuery.data?.authoritative_values), [contextualDefinition, resolvedContextQuery.data?.authoritative_values]);
   const mutation = useMutation({
     mutationFn: createOperationalEvidenceRecord,
     onSuccess(record) {
@@ -291,9 +326,25 @@ export function RuntimeTemplatePage() {
           selectedFacilityId={selectedFacilityId}
         />
       ) : null}
+      {!readOnly && contextRequirementQuery.data?.required ? (
+        <Surface className="border-blue-200 bg-blue-50/60">
+          <label className="block text-sm font-semibold text-primary-navy">
+            Certification context
+            <select className="mt-2 min-h-10 w-full rounded-component border border-border bg-white px-3 py-2" onChange={(event) => setSelectedContextId(event.target.value)} value={selectedContextId}>
+              <option value="">Select a Certification deliberately…</option>
+              {(contextCandidatesQuery.data?.candidates ?? []).map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.primary_label} — {candidate.secondary_label}</option>)}
+            </select>
+          </label>
+          {contextCandidatesQuery.isLoading ? <p className="mt-2 text-sm text-text-muted">Loading eligible Certifications…</p> : null}
+          {!contextCandidatesQuery.isLoading && contextCandidatesQuery.data?.count === 0 ? <p className="mt-2 text-sm text-text-muted">No eligible Certification is available for this Client and Facility.</p> : null}
+          {resolvedContextQuery.data ? <p className="mt-2 text-sm text-text-muted">Using {resolvedContextQuery.data.summary.primary_label} for {resolvedContextQuery.data.summary.secondary_label}.</p> : null}
+        </Surface>
+      ) : null}
       <OetsRenderer
         backendValidation={backendValidation}
-        definition={activeEditingSession.definition}
+        definition={contextualDefinition ?? activeEditingSession.definition}
+        initialPayload={contextualInitialPayload}
+        key={`${activeEditingSession.runtimeTemplate.template_version_id}:${resolvedContextQuery.data?.selected_id ?? "unresolved-context"}`}
         formMessage={formMessage}
         isSubmitting={mutation.isPending || draftMutation.isPending}
         onSubmit={
@@ -312,7 +363,8 @@ export function RuntimeTemplatePage() {
                   setBackendValidation,
                   setFormMessage,
                   setSuccessRecord,
-                  submitLockedRef
+                  submitLockedRef,
+                  context: resolvedContextQuery.data ? { requirement_code: resolvedContextQuery.data.requirement_code, selected_id: resolvedContextQuery.data.selected_id } : undefined
                 })
         }
         readOnly={readOnly}
@@ -322,7 +374,8 @@ export function RuntimeTemplatePage() {
         submittingLabel={hasGovernedSignatureFields(activeEditingSession.definition) ? "Beginning..." : undefined}
         submitDisabledReason={readSubmissionDisabledReason(
           effectiveClientId,
-          successRecord
+          successRecord,
+          contextRequirementQuery.data?.required === true && !resolvedContextQuery.data
         )}
         submitSuccess={
           successRecord
@@ -349,6 +402,7 @@ interface SubmitInput {
   setSuccessRecord: (record: OperationalEvidenceRecord | null) => void;
   submitLockedRef: { current: boolean };
   idempotencyKey?: string;
+  context?: { requirement_code: string; selected_id: string };
 }
 
 function handleEvidenceSubmit({
@@ -360,8 +414,9 @@ function handleEvidenceSubmit({
   setBackendValidation,
   setFormMessage,
   setSuccessRecord,
-  submitLockedRef
-  ,idempotencyKey
+  submitLockedRef,
+  idempotencyKey,
+  context
 }: SubmitInput) {
   if (isPending || submitLockedRef.current) {
     return;
@@ -385,6 +440,7 @@ function handleEvidenceSubmit({
     client_id: clientId,
     ...(facilityId ? { facility_id: facilityId } : {}),
     ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
+    ...(context ? { context } : {}),
     payload: {
       sections: payload.sections
     }
@@ -438,13 +494,45 @@ function handleSubmissionError(
 
 function readSubmissionDisabledReason(
   clientId: string | null,
-  successRecord: OperationalEvidenceRecord | null
+  successRecord: OperationalEvidenceRecord | null,
+  contextRequiredButUnresolved = false
 ) {
   if (successRecord) {
     return "This audit draft has already been created.";
   }
 
+  if (contextRequiredButUnresolved) return "Select an eligible Certification before creating this evidence.";
+
   return clientId ? null : "You must first select a client before creating an audit draft.";
+}
+
+function applyContextFieldPolicy(definition: OetsDefinition | undefined, policy: Record<string, "OPERATOR_EDITABLE" | "READ_ONLY_DERIVED" | "UNAVAILABLE_POST_ISSUANCE"> | undefined) {
+  if (!definition || !policy) return definition;
+  return {
+    ...definition,
+    sections: definition.sections.map((section) => ({
+      ...section,
+      fields: section.fields.map((field) => ({
+        ...field,
+        readonly: field.readonly || policy[field.field_code] === "READ_ONLY_DERIVED" || policy[field.field_code] === "UNAVAILABLE_POST_ISSUANCE",
+        description: policy[field.field_code] === "UNAVAILABLE_POST_ISSUANCE" ? "Available only after governed Credential issuance." : field.description
+      }))
+    }))
+  };
+}
+
+function buildContextInitialPayload(definition: OetsDefinition | undefined, values: Record<string, string | number> | undefined): Pick<OetsEvidencePayload, "sections"> | undefined {
+  if (!definition || !values) return undefined;
+  const sections: OetsEvidencePayload["sections"] = {};
+  for (const section of definition.sections) {
+    const sectionValues: Record<string, OetsFieldValue> = {};
+    for (const field of section.fields) {
+      const value = values[field.field_code];
+      if (value !== undefined) sectionValues[field.field_code] = value;
+    }
+    sections[section.section_code] = sectionValues;
+  }
+  return { sections };
 }
 
 function resolveFacilityId(facilityIds: string[], selectedFacilityId: string) {

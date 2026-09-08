@@ -26,6 +26,7 @@ const newCertificationId = "00000000-0000-4000-8000-000000400002";
 const operationalAuthorizationId = "00000000-0000-4000-8000-000000500001";
 const renewedOperationalAuthorizationId = "00000000-0000-4000-8000-000000500002";
 const sourceEvidenceRecordId = "00000000-0000-4000-8000-000000800001";
+const secondSourceEvidenceRecordId = "00000000-0000-4000-8000-000000800002";
 const credentialIssuanceId = "00000000-0000-4000-8000-000000900001";
 const olderCredentialIssuanceId = "00000000-0000-4000-8000-000000900002";
 
@@ -61,7 +62,9 @@ const credentialIssuanceSession: AuthenticatedSession = {
   permissions: [
     ...certificationSession.permissions,
     "issue_certification",
-    "view_operational_authorization"
+    "view_operational_authorization",
+    "view_operational_evidence",
+    "request_credential_evidence_binding_review"
   ]
 };
 
@@ -294,6 +297,88 @@ const renewedOperationalAuthorization: CredentialsOperationalAuthorizationProjec
   previous_authorization_id: operationalAuthorizationId
 };
 
+const aureliaBaseCertification = anaDetailWithoutEndorsements.certifications.find(
+  (certification) => certification.id === certificationId
+);
+
+if (!aureliaBaseCertification?.program) {
+  throw new Error("Aurelia L1 regression fixture requires the source Certification program");
+}
+
+const aureliaBaseProgram = aureliaBaseCertification.program;
+
+const aureliaL1Detail: CredentialsPersonnelDetailProjection = {
+  ...anaDetailWithoutEndorsements,
+  full_name: "Aurelia L1 Candidate generation-008",
+  certifications: anaDetailWithoutEndorsements.certifications.map((certification) =>
+    certification.id === certificationId
+      ? {
+          ...certification,
+          certification_level: "L1",
+          certification_number: "AUR-generation-008-L1",
+          certification_status: "PENDING",
+          issue_date: "2026-09-07T00:00:00.000Z",
+          expiry_date: "2027-09-07T00:00:00.000Z",
+          program: {
+            ...aureliaBaseProgram,
+            program_code: "GUARDIAN_RESPONDER",
+            certification_level: "L1",
+            display_name: "Guardian Responder",
+            qualification_label: "Guardian Responder"
+          }
+        }
+      : certification
+  )
+};
+
+const aureliaActiveL1Detail: CredentialsPersonnelDetailProjection = {
+  ...aureliaL1Detail,
+  certifications: aureliaL1Detail.certifications.map((certification) =>
+    certification.id === certificationId
+      ? { ...certification, certification_status: "ACTIVE" }
+      : certification
+  )
+};
+
+function aureliaDetailWithAuthorizations(
+  authorizations: CredentialsOperationalAuthorizationProjection[]
+): CredentialsPersonnelDetailProjection {
+  return {
+    ...aureliaActiveL1Detail,
+    operational_authorizations: authorizations
+  };
+}
+
+function aureliaDetailWithPoolEndorsement(): CredentialsPersonnelDetailProjection {
+  return {
+    ...aureliaL1Detail,
+    certifications: aureliaL1Detail.certifications.map((certification) =>
+      certification.id === certificationId
+        ? {
+            ...certification,
+            endorsements: [
+              ...certification.endorsements,
+              {
+                endorsement: "POOL",
+                created_at: "2026-09-08T00:00:00.000Z"
+              }
+            ]
+          }
+        : certification
+    )
+  };
+}
+
+const generatedOperationalAuthorization: CredentialsOperationalAuthorizationProjection = {
+  ...activeOperationalAuthorization,
+  authorization_number: "OGI-OA-2026-000001"
+};
+
+const generatedRenewedOperationalAuthorization: CredentialsOperationalAuthorizationProjection = {
+  ...renewedOperationalAuthorization,
+  authorization_number: "OGI-OA-2026-000002"
+};
+
 function detailWithAuthorizations(
   authorizations: CredentialsOperationalAuthorizationProjection[]
 ): CredentialsPersonnelDetailProjection {
@@ -311,6 +396,7 @@ function authorizationCommandResponse(
     data: {
       id: authorization.id,
       authorization_number: authorization.authorization_number,
+      business_identifier: authorization.business_identifier,
       authorization_level: authorization.authorization_level,
       authorization_status: authorization.authorization_status,
       issue_date: authorization.issue_date,
@@ -393,8 +479,6 @@ const credentialIssuance: CredentialIssuanceResponse = {
   issued_at: "2026-01-05T00:00:00.000Z"
 };
 
-const secondSourceEvidenceRecordId = "00000000-0000-4000-8000-000000800002";
-
 function derivedPreparationField(value: string) {
   return {
     value,
@@ -443,6 +527,21 @@ const secondF048EvidenceCandidate = {
   payload_checksum: "sha256:evidence-two"
 } as const;
 
+const f048GovernanceCandidate = {
+  source_evidence_record_id: sourceEvidenceRecordId,
+  display_reference: "OGI F-048 · 2026-01-04",
+  template_code: "OGI_F048_DIGITAL_CREDENTIAL_ISSUANCE_FORM",
+  template_version: "3.0",
+  lifecycle_state: "GOVERNANCE_APPROVED",
+  review_status: "CURRENT_GOVERNANCE_APPROVED",
+  review_conclusion_id: "00000000-0000-4000-8000-000000810101",
+  client_business_reference: "CLIENT-001",
+  facility_business_reference: null,
+  completed_at: "2026-01-04T01:00:00.000Z",
+  already_bound: false,
+  consumed: false
+} as const;
+
 const issuancePreparation: CredentialIssuancePreparationResponse = {
   preparation_status: "REQUIRES_INPUT",
   certification: {
@@ -482,6 +581,7 @@ const issuancePreparation: CredentialIssuancePreparationResponse = {
     training_center: requiresInputPreparationField()
   },
   eligible_f048_evidence: [f048EvidenceCandidate],
+  evidence_binding_candidates: [],
   operational_authorization_options: [
     {
       id: operationalAuthorizationId,
@@ -501,6 +601,28 @@ const issuancePreparation: CredentialIssuancePreparationResponse = {
     "training_location",
     "instructor",
     "training_center"
+  ],
+  remediation_actions: [
+    {
+      blocker_code: "STUDENT_NUMBER_NOT_APPLICABLE",
+      authority_owner: "SYSTEM",
+      remediation_class: "NOT_APPLICABLE",
+      action_code: null,
+      action_available: false,
+      actor_can_act: false,
+      message: "Student Number is not applicable to a legacy StaffMember-bound Certification.",
+      business_reference: "CERT-001"
+    },
+    {
+      blocker_code: "OPERATIONAL_INPUT_COMPLETION_DATE",
+      authority_owner: "CREDENTIAL_OPERATOR",
+      remediation_class: "OPERATIONAL_INPUT_REQUIRED",
+      action_code: "SUPPLY_CREDENTIAL_EVALUATION_INPUT",
+      action_available: true,
+      actor_can_act: true,
+      message: "Completion Date requires operator input.",
+      business_reference: "CERT-001"
+    }
   ],
   limitations: []
 };
@@ -1061,7 +1183,7 @@ describe("Certification workspace frontend", () => {
         url: `/api/v1/credentials/personnel/${staffMemberId}`,
         responses: [
           { status: 200, body: anaDetail },
-          { status: 200, body: detailWithAuthorizations([activeOperationalAuthorization]) }
+          { status: 200, body: detailWithAuthorizations([generatedOperationalAuthorization]) }
         ]
       },
       {
@@ -1070,7 +1192,7 @@ describe("Certification workspace frontend", () => {
         responses: [
           {
             status: 201,
-            body: authorizationCommandResponse(activeOperationalAuthorization)
+            body: authorizationCommandResponse(generatedOperationalAuthorization)
           }
         ]
       }
@@ -1080,7 +1202,9 @@ describe("Certification workspace frontend", () => {
 
     await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
     await user.click(await screen.findByRole("button", { name: "Create Operational Authorization" }));
-    await user.type(screen.getByLabelText("Authorization number"), "AUTH-001");
+    expect(screen.getByText("Create an Operational Authorization for Ana Santos based on Open Water Guardian Certification CERT-001.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Authorization number")).not.toBeInTheDocument();
+    expect(screen.getByText("Authorization Number — Generated automatically when the authorization is created.")).toBeInTheDocument();
     await user.selectOptions(screen.getByLabelText("Authorization level"), "L3");
     await user.type(screen.getByLabelText("Issue date"), "2026-01-05");
     await user.type(screen.getByLabelText("Expiry date"), "2027-01-05");
@@ -1091,17 +1215,19 @@ describe("Certification workspace frontend", () => {
     await user.click(createButtons[createButtons.length - 1]);
 
     expect(
-      await screen.findByText("Operational Authorization created successfully.")
+      await screen.findByText("Operational Authorization OGI-OA-2026-000001 created successfully.")
     ).toBeInTheDocument();
-    expect(await screen.findByText("AUTH-001")).toBeInTheDocument();
+    expect(await screen.findByText("OGI-OA-2026-000001")).toBeInTheDocument();
+    expect(screen.getByText("Business Identifier (stable lineage): AUTHORIZATION-2026-000001")).toBeInTheDocument();
 
     const createCall = calls.find(
       (call) => call.url === "/api/v1/operational-authorizations"
     );
 
     expect(createCall?.init?.method).toBe("POST");
-    expect(JSON.parse(String(createCall?.init?.body))).toEqual({
-      authorization_number: "AUTH-001",
+    const createPayload = JSON.parse(String(createCall?.init?.body));
+    expect(createPayload).not.toHaveProperty("authorization_number");
+    expect(createPayload).toEqual({
       authorization_level: "L3",
       issue_date: "2026-01-05T00:00:00.000Z",
       expiry_date: "2027-01-05T00:00:00.000Z",
@@ -1238,7 +1364,7 @@ describe("Certification workspace frontend", () => {
         url: `/api/v1/credentials/personnel/${staffMemberId}`,
         responses: [
           { status: 200, body: detailWithAuthorizations([activeOperationalAuthorization]) },
-          { status: 200, body: detailWithAuthorizations([renewedOperationalAuthorization]) }
+          { status: 200, body: detailWithAuthorizations([generatedRenewedOperationalAuthorization]) }
         ]
       },
       {
@@ -1247,7 +1373,7 @@ describe("Certification workspace frontend", () => {
         responses: [
           {
             status: 201,
-            body: authorizationCommandResponse(renewedOperationalAuthorization)
+            body: authorizationCommandResponse(generatedRenewedOperationalAuthorization)
           }
         ]
       }
@@ -1257,15 +1383,22 @@ describe("Certification workspace frontend", () => {
 
     await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
     await user.click(await screen.findByRole("button", { name: "Renew" }));
-    await user.type(screen.getByLabelText("Authorization number"), "AUTH-002");
+    expect(screen.queryByLabelText("Authorization number")).not.toBeInTheDocument();
+    expect(screen.getByText("A new Authorization Number will be generated automatically for this renewal.")).toBeInTheDocument();
     await user.type(screen.getByLabelText("Issue date"), "2026-02-01");
     await user.type(screen.getByLabelText("Expiry date"), "2027-02-01");
     await user.click(screen.getByRole("button", { name: "Renew Authorization" }));
 
     expect(
-      await screen.findByText("Operational Authorization renewed successfully.")
+      await screen.findByText("Operational Authorization OGI-OA-2026-000002 renewed successfully.")
     ).toBeInTheDocument();
-    expect(await screen.findByText("AUTH-002")).toBeInTheDocument();
+    expect(await screen.findByText("OGI-OA-2026-000002")).toBeInTheDocument();
+    expect(generatedRenewedOperationalAuthorization.authorization_number).not.toBe(
+      generatedOperationalAuthorization.authorization_number
+    );
+    expect(generatedRenewedOperationalAuthorization.business_identifier).toBe(
+      generatedOperationalAuthorization.business_identifier
+    );
     expect(screen.getByText("Previous authorization retained as metadata.")).toBeInTheDocument();
 
     const renewCall = calls.find(
@@ -1274,8 +1407,9 @@ describe("Certification workspace frontend", () => {
     );
 
     expect(renewCall?.init?.method).toBe("POST");
-    expect(JSON.parse(String(renewCall?.init?.body))).toEqual({
-      authorization_number: "AUTH-002",
+    const renewalPayload = JSON.parse(String(renewCall?.init?.body));
+    expect(renewalPayload).not.toHaveProperty("authorization_number");
+    expect(renewalPayload).toEqual({
       issue_date: "2026-02-01T00:00:00.000Z",
       expiry_date: "2027-02-01T00:00:00.000Z"
     });
@@ -1387,13 +1521,19 @@ describe("Certification workspace frontend", () => {
       await user.click(screen.getByRole("button", { name: submitLabel }));
 
       expect(await screen.findByText(successMessage)).toBeInTheDocument();
+      expect(await screen.findByText(sourceAuthorization.authorization_number)).toBeInTheDocument();
+      expect(updatedAuthorization.authorization_number).toBe(
+        sourceAuthorization.authorization_number
+      );
 
       const commandCall = calls.find(
         (call) => call.url === `/api/v1/operational-authorizations/${operationalAuthorizationId}${suffix}`
       );
 
       expect(commandCall?.init?.method).toBe("POST");
-      expect(JSON.parse(String(commandCall?.init?.body))).toEqual({
+      const commandPayload = JSON.parse(String(commandCall?.init?.body));
+      expect(commandPayload).not.toHaveProperty("authorization_number");
+      expect(commandPayload).toEqual({
         reason: "Governed lifecycle update",
         notes: "Reviewed by OGI"
       });
@@ -1513,6 +1653,221 @@ describe("Certification workspace frontend", () => {
       "href",
       routes.credentialCertificatePath(credentialIssuanceId)
     );
+  });
+
+  it("submits an Aurelia-like L1 authorization with canonical identities and dates", async () => {
+    const user = userEvent.setup();
+    const l1Certification = aureliaActiveL1Detail.certifications.find(
+      (certification) => certification.id === certificationId
+    );
+    if (!l1Certification?.program) throw new Error("Aurelia L1 Certification fixture is incomplete");
+    const generatedL1Authorization: CredentialsOperationalAuthorizationProjection = {
+      ...generatedOperationalAuthorization,
+      authorization_level: "L1",
+      issue_date: "2026-09-07T00:00:00.000Z",
+      expiry_date: "2027-09-07T00:00:00.000Z",
+      program: l1Certification.program
+    };
+    const { calls } = mockFetchRoutes([
+      ...authRoutes(authorizationCreateSession),
+      {
+        url: "/api/v1/credentials",
+        responses: [
+          { status: 200, body: credentialsListResponse },
+          { status: 200, body: credentialsListResponse }
+        ]
+      },
+      {
+        url: `/api/v1/credentials/personnel/${staffMemberId}`,
+        responses: [
+          { status: 200, body: aureliaActiveL1Detail },
+          {
+            status: 200,
+            body: aureliaDetailWithAuthorizations([generatedL1Authorization])
+          }
+        ]
+      },
+      {
+        method: "POST",
+        url: "/api/v1/operational-authorizations",
+        responses: [{ status: 201, body: authorizationCommandResponse(generatedL1Authorization) }]
+      }
+    ]);
+
+    renderWithRoute(routes.certifications);
+    await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
+    await user.click(await screen.findByRole("button", { name: "Create Operational Authorization" }));
+    expect(screen.queryByLabelText("Authorization number")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Authorization level")).toHaveValue("L1");
+    await user.type(screen.getByLabelText("Issue date"), "2026-09-07");
+    await user.type(screen.getByLabelText("Expiry date"), "2027-09-07");
+    const createButtons = screen.getAllByRole("button", { name: "Create Operational Authorization" });
+    const submitButton = createButtons[createButtons.length - 1];
+    if (!submitButton) throw new Error("Operational Authorization submit button was not rendered");
+    await user.click(submitButton);
+
+    expect(await screen.findByText("Operational Authorization OGI-OA-2026-000001 created successfully.")).toBeInTheDocument();
+    const request = calls.find((call) => call.url === "/api/v1/operational-authorizations");
+    expect(JSON.parse(String(request?.init?.body))).toEqual({
+      authorization_level: "L1",
+      issue_date: "2026-09-07T00:00:00.000Z",
+      expiry_date: "2027-09-07T00:00:00.000Z",
+      certification_id: certificationId,
+      staff_member_id: staffMemberId
+    });
+    expect(calls.filter((call) => call.url === "/api/v1/operational-authorizations")).toHaveLength(1);
+    expect(
+      calls.filter((call) => call.url === `/api/v1/credentials/personnel/${staffMemberId}`)
+    ).toHaveLength(2);
+    expect(await screen.findByText("OGI-OA-2026-000001")).toBeInTheDocument();
+    expect(
+      screen.getByText("Business Identifier (stable lineage): AUTHORIZATION-2026-000001")
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Operational Authorization input is invalid.")).not.toBeInTheDocument();
+  });
+
+  it("keeps Operational Authorization creation fail closed for a pending Aurelia Certification", async () => {
+    const { calls } = mockFetchRoutes([
+      ...authRoutes(authorizationCreateSession),
+      { url: "/api/v1/credentials", responses: [{ status: 200, body: credentialsListResponse }] },
+      {
+        url: `/api/v1/credentials/personnel/${staffMemberId}`,
+        responses: [{ status: 200, body: aureliaL1Detail }]
+      }
+    ]);
+
+    renderWithRoute(routes.certifications);
+    await userEvent.setup().click(
+      await screen.findByRole("button", { name: "View Certificate Details" })
+    );
+
+    expect(screen.getByText("Pending")).toBeInTheDocument();
+    expect(screen.getByText("Certification not active")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Operational Authorization can be created only after this Certification becomes Active."
+      )
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Create Operational Authorization" })
+    ).not.toBeInTheDocument();
+    expect(
+      calls.some(
+        (call) =>
+          call.url === "/api/v1/operational-authorizations" &&
+          call.init?.method === "POST"
+      )
+    ).toBe(false);
+  });
+
+  it("maps a raced inactive-Certification rejection safely and refetches authority", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetchRoutes([
+      ...authRoutes(authorizationCreateSession),
+      { url: "/api/v1/credentials", responses: [{ status: 200, body: credentialsListResponse }] },
+      {
+        url: `/api/v1/credentials/personnel/${staffMemberId}`,
+        responses: [
+          { status: 200, body: aureliaActiveL1Detail },
+          { status: 200, body: aureliaL1Detail }
+        ]
+      },
+      {
+        method: "POST",
+        url: "/api/v1/operational-authorizations",
+        responses: [{
+          status: 400,
+          body: {
+            success: false,
+            code: "OPERATIONAL_AUTHORIZATION_VALIDATION_FAILED",
+            message: "Certification is not active",
+            status: 400
+          }
+        }]
+      }
+    ]);
+
+    renderWithRoute(routes.certifications);
+    await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
+    await user.click(await screen.findByRole("button", { name: "Create Operational Authorization" }));
+    await user.type(screen.getByLabelText("Issue date"), "2026-09-07");
+    await user.type(screen.getByLabelText("Expiry date"), "2027-09-07");
+    const createButtons = screen.getAllByRole("button", { name: "Create Operational Authorization" });
+    const submitButton = createButtons[createButtons.length - 1];
+    if (!submitButton) throw new Error("Operational Authorization submit button was not rendered");
+    await user.click(submitButton);
+
+    expect(
+      await screen.findByText(
+        "Certification must be Active before an Operational Authorization can be created."
+      )
+    ).toBeInTheDocument();
+    expect(
+      calls.filter((call) => call.url === "/api/v1/operational-authorizations")
+    ).toHaveLength(1);
+    expect(
+      calls.filter((call) => call.url === `/api/v1/credentials/personnel/${staffMemberId}`)
+    ).toHaveLength(2);
+  });
+
+  it("limits an Aurelia L1 Certification to its governed Pool endorsement", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetchRoutes([
+      ...authRoutes(endorsementSession),
+      {
+        url: "/api/v1/credentials",
+        responses: [
+          { status: 200, body: credentialsListResponse },
+          { status: 200, body: credentialsListResponse }
+        ]
+      },
+      {
+        url: `/api/v1/credentials/personnel/${staffMemberId}`,
+        responses: [
+          { status: 200, body: aureliaL1Detail },
+          { status: 200, body: aureliaDetailWithPoolEndorsement() }
+        ]
+      },
+      {
+        method: "POST",
+        url: `/api/v1/certifications/${certificationId}/endorsements`,
+        responses: [{
+          status: 201,
+          body: {
+            success: true,
+            data: {
+              certification_id: certificationId,
+              endorsement: "POOL",
+              created_at: "2026-09-08T00:00:00.000Z"
+            }
+          }
+        }]
+      }
+    ]);
+
+    renderWithRoute(routes.certifications);
+    await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
+    await user.click(await screen.findByRole("button", { name: "Add Endorsement" }));
+
+    const endorsement = screen.getByLabelText("Endorsement");
+    expect(endorsement).toHaveValue("POOL");
+    expect(screen.getByRole("option", { name: "Pool" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Waterfront" })).not.toBeInTheDocument();
+    const addButtons = screen.getAllByRole("button", { name: "Add Endorsement" });
+    const submitButton = addButtons[addButtons.length - 1];
+    if (!submitButton) throw new Error("Add Endorsement submit button was not rendered");
+    await user.click(submitButton);
+
+    expect(await screen.findByText("Pool endorsement added successfully.")).toBeInTheDocument();
+    expect(screen.getByText("Pending")).toBeInTheDocument();
+    const request = calls.find((call) => call.url.endsWith("/endorsements"));
+    expect(JSON.parse(String(request?.init?.body))).toEqual({ endorsement: "POOL" });
+    expect(calls.filter((call) => call.url.endsWith("/endorsements"))).toHaveLength(1);
+    expect(
+      calls.filter((call) => call.url === `/api/v1/credentials/personnel/${staffMemberId}`)
+    ).toHaveLength(2);
+    expect(await screen.findByText("Pool", { selector: "span" })).toBeInTheDocument();
+    expect(screen.queryByText("Certification endorsement input is invalid.")).not.toBeInTheDocument();
   });
 
   it("opens the authoritative digital certificate from the populated detail pane only", async () => {
@@ -1838,7 +2193,138 @@ describe("Certification workspace frontend", () => {
     expect(calls.some((call) => call.url === "/api/v1/credentials/issuances" && call.init?.method === "POST")).toBe(false);
   });
 
-  it("keeps new Credential issuance fail closed until authoritative evaluation is available", async () => {
+  it("requires deliberate F-048 selection and requests the existing governed review contract", async () => {
+    const user = userEvent.setup();
+    const governancePreparation: CredentialIssuancePreparationResponse = {
+      ...issuancePreparation,
+      eligible_f048_evidence: [],
+      evidence_binding_candidates: [f048GovernanceCandidate],
+      remediation_actions: [
+        ...issuancePreparation.remediation_actions,
+        {
+          blocker_code: "F048_GOVERNED_ASSOCIATION_REQUIRED",
+          authority_owner: "CREDENTIAL_GOVERNANCE",
+          remediation_class: "GOVERNANCE_REMEDIATION_REQUIRED",
+          action_code: "REQUEST_CREDENTIAL_EVIDENCE_BINDING_REVIEW",
+          action_available: true,
+          actor_can_act: true,
+          message: "Select eligible F-048 evidence for governed association.",
+          business_reference: "CERT-001"
+        }
+      ]
+    };
+    const { calls } = mockFetchRoutes([
+      ...certificationRoutes(anaDetail, credentialIssuanceSession),
+      issuancePreparationRoute([
+        { status: 200, body: governancePreparation },
+        { status: 200, body: governancePreparation }
+      ]),
+      {
+        method: "POST",
+        url: "/api/v1/credentials/issuances/evidence-bindings/reviews",
+        responses: [{
+          status: 201,
+          body: {
+            review: { id: "00000000-0000-4000-8000-000000810201" },
+            replayed: false
+          }
+        }]
+      }
+    ]);
+
+    renderWithRoute(routes.certifications);
+    await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
+    await user.click(await screen.findByRole("button", { name: "Issue Credential" }));
+
+    const candidate = await screen.findByRole("radio", { name: /OGI F-048 · 2026-01-04/ });
+    expect(candidate).not.toBeChecked();
+    expect(screen.getByRole("button", { name: "Request Governance Review" })).toBeDisabled();
+    await user.click(candidate);
+    expect(candidate).toBeChecked();
+    await user.click(screen.getByRole("button", { name: "Request Governance Review" }));
+
+    await screen.findByText(/Governed association review requested/);
+    const request = calls.find((call) => call.url.endsWith("/evidence-bindings/reviews"));
+    expect(JSON.parse(String(request?.init?.body))).toEqual({
+      source_evidence_record_id: sourceEvidenceRecordId,
+      certification_id: certificationId,
+      action: "ESTABLISH"
+    });
+    expect(new Headers(request?.init?.headers).get("idempotency-key")).toMatch(/^[0-9a-f-]{36}$/);
+    expect(calls.some((call) => call.url.includes("evidence-bindings") && call.url !== "/api/v1/credentials/issuances/evidence-bindings/reviews")).toBe(false);
+  });
+
+  it("handles zero governance candidates without fabricating selection authority", async () => {
+    const user = userEvent.setup();
+    const governanceAction = {
+      blocker_code: "F048_GOVERNED_ASSOCIATION_REQUIRED",
+      authority_owner: "CREDENTIAL_GOVERNANCE",
+      remediation_class: "GOVERNANCE_REMEDIATION_REQUIRED",
+      action_code: "REQUEST_CREDENTIAL_EVIDENCE_BINDING_REVIEW",
+      action_available: false,
+      actor_can_act: false,
+      message: "No eligible unbound F-048 evidence is currently available.",
+      business_reference: "CERT-001"
+    } as const;
+    const { calls } = mockFetchRoutes([
+      ...certificationRoutes(anaDetail, credentialIssuanceSession),
+      issuancePreparationRoute([
+        {
+          status: 200,
+          body: {
+            ...issuancePreparation,
+            evidence_binding_candidates: [],
+            remediation_actions: [...issuancePreparation.remediation_actions, governanceAction]
+          }
+        }
+      ])
+    ]);
+    renderWithRoute(routes.certifications);
+    await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
+    await user.click(await screen.findByRole("button", { name: "Issue Credential" }));
+    expect(await screen.findByText("No eligible F-048 evidence is currently available for binding review.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Request Governance Review" })).not.toBeInTheDocument();
+    expect(calls.some((call) => call.url.endsWith("/evidence-bindings/reviews"))).toBe(false);
+  });
+
+  it("displays every returned governance candidate without selecting by order", async () => {
+    const user = userEvent.setup();
+    const secondCandidate = {
+      ...f048GovernanceCandidate,
+      source_evidence_record_id: secondSourceEvidenceRecordId,
+      display_reference: "OGI F-048 · 2026-01-05",
+      review_conclusion_id: "00000000-0000-4000-8000-000000810102"
+    } as const;
+    mockFetchRoutes([
+      ...certificationRoutes(anaDetail, credentialIssuanceSession),
+      issuancePreparationRoute([{
+        status: 200,
+        body: {
+          ...issuancePreparation,
+          evidence_binding_candidates: [f048GovernanceCandidate, secondCandidate],
+          remediation_actions: [...issuancePreparation.remediation_actions, {
+            blocker_code: "F048_GOVERNED_ASSOCIATION_REQUIRED",
+            authority_owner: "CREDENTIAL_GOVERNANCE",
+            remediation_class: "GOVERNANCE_REMEDIATION_REQUIRED",
+            action_code: "REQUEST_CREDENTIAL_EVIDENCE_BINDING_REVIEW",
+            action_available: true,
+            actor_can_act: true,
+            message: "Select eligible F-048 evidence.",
+            business_reference: "CERT-001"
+          }]
+        }
+      }])
+    ]);
+    renderWithRoute(routes.certifications);
+    await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
+    await user.click(await screen.findByRole("button", { name: "Issue Credential" }));
+    const candidates = await screen.findAllByRole("radio", { name: /OGI F-048/ });
+    expect(candidates).toHaveLength(2);
+    expect(candidates.every((candidate) => !candidate.hasAttribute("checked"))).toBe(true);
+    expect(screen.getByRole("button", { name: "Request Governance Review" })).toBeDisabled();
+  });
+
+  it("keeps final Credential issuance fail closed until authoritative evaluation is available", async () => {
     const user = userEvent.setup();
     const { calls } = mockFetchRoutes([
       ...certificationRoutes(anaDetail, issueSession),
@@ -1849,7 +2335,8 @@ describe("Certification workspace frontend", () => {
     await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
     await user.click(await screen.findByRole("button", { name: "Issue Credential" }));
 
-    expect(await screen.findByText(/temporarily unavailable while authoritative issuance validation/i)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Preparation authority" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Evaluate Preparation" })).toBeDisabled();
     expect(screen.getByLabelText("F-048 evidence")).toHaveValue("");
     const authorizationSelector = screen
       .getAllByLabelText("Operational Authorization")
@@ -1909,6 +2396,26 @@ describe("Certification workspace frontend", () => {
       ]),
       {
         method: "POST",
+        url: "/api/v1/credentials/issuances/preparation/evaluations",
+        responses: [{
+          status: 201,
+          body: {
+            preparation_status: "READY_FOR_REVIEW",
+            evaluation_id: "00000000-0000-4000-8000-000000700101",
+            evaluation_checksum: "a".repeat(64),
+            evaluated_at: "2026-01-10T00:00:00.000Z",
+            evaluated_by: { id: "00000000-0000-4000-8000-000000700103", name: "Operator One" },
+            derived_facts: { holder_name: "Mika Reyes", program: {}, instructor_provenance: "TRAINING_SESSION", readiness_decision_id: null },
+            operator_inputs: { completion_date: "2025-12-31", training_location: "Subic Bay", instructor: "Braven Burrows", training_center: "OGI Training Center" },
+            selected_evidence: { binding_id: "00000000-0000-4000-8000-000000700102", evidence_record_id: sourceEvidenceRecordId, template_code: "OGI_F048_DIGITAL_CREDENTIAL_ISSUANCE_FORM" },
+            selected_authorization: null,
+            blockers: [],
+            warnings: []
+          }
+        }]
+      },
+      {
+        method: "POST",
         url: "/api/v1/credentials/issuances",
         responses: [
           {
@@ -1937,9 +2444,24 @@ describe("Certification workspace frontend", () => {
     expect(screen.queryByLabelText("Completion date")).not.toBeInTheDocument();
     expect(screen.getByText("Completion date")).toBeInTheDocument();
     expect(screen.getByText("Subic Bay")).toBeInTheDocument();
-
-    expect(screen.getByRole("button", { name: "Confirm Issue Credential" })).toBeDisabled();
-    expect(calls.some((call) => call.url === "/api/v1/credentials/issuances" && call.init?.method === "POST")).toBe(false);
+    await user.selectOptions(screen.getByLabelText("F-048 evidence"), sourceEvidenceRecordId);
+    await user.click(screen.getByRole("button", { name: "Evaluate Preparation" }));
+    expect(await screen.findByRole("heading", { name: "Authoritative evaluation" })).toBeInTheDocument();
+    expect(screen.getByText(/Ready for review/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Confirm Issue Credential" }));
+    await waitFor(() => expect(calls.some((call) => call.url === "/api/v1/credentials/issuances" && call.init?.method === "POST")).toBe(true));
+    const evaluationCall = calls.find((call) => call.url.endsWith("/preparation/evaluations"));
+    expect(JSON.parse(String(evaluationCall?.init?.body))).toEqual({
+      certification_id: certificationId,
+      source_evidence_record_id: sourceEvidenceRecordId,
+      completion_date: "2025-12-31",
+      training_location: "Subic Bay",
+      instructor: "Braven Burrows",
+      training_center: "OGI Training Center"
+    });
+    const confirmationCall = calls.find((call) => call.url === "/api/v1/credentials/issuances" && call.init?.method === "POST");
+    expect(JSON.parse(String(confirmationCall?.init?.body))).toEqual({ evaluation_id: "00000000-0000-4000-8000-000000700101", evaluation_checksum: "a".repeat(64) });
+    expect(new Headers(confirmationCall?.init?.headers).get("idempotency-key")).toMatch(/^[0-9a-f-]{36}$/);
   });
 
   it("does not let multiple F-048 choices authorize the superseded final command", async () => {

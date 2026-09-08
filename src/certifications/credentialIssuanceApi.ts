@@ -41,6 +41,21 @@ export interface CredentialIssuancePreparationF048EvidenceCandidate {
   readonly submitted_at: string | null;
 }
 
+export interface CredentialIssuancePreparationF048GovernanceCandidate {
+  readonly source_evidence_record_id: string;
+  readonly display_reference: string;
+  readonly template_code: "OGI_F048_DIGITAL_CREDENTIAL_ISSUANCE_FORM";
+  readonly template_version: string;
+  readonly lifecycle_state: "GOVERNANCE_APPROVED";
+  readonly review_status: "CURRENT_GOVERNANCE_APPROVED";
+  readonly review_conclusion_id: string;
+  readonly client_business_reference: string | null;
+  readonly facility_business_reference: string | null;
+  readonly completed_at: string;
+  readonly already_bound: false;
+  readonly consumed: false;
+}
+
 export interface CredentialIssuancePreparationAuthorizationOption {
   readonly id: string;
   readonly staff_member_id: string;
@@ -121,6 +136,8 @@ export interface CredentialIssuancePreparationResponse {
   };
   readonly eligible_f048_evidence:
     readonly CredentialIssuancePreparationF048EvidenceCandidate[];
+  readonly evidence_binding_candidates:
+    readonly CredentialIssuancePreparationF048GovernanceCandidate[];
   readonly operational_authorization_options:
     readonly CredentialIssuancePreparationAuthorizationOption[];
   readonly existing_issuance: {
@@ -130,10 +147,23 @@ export interface CredentialIssuancePreparationResponse {
     readonly certificate_template_code_snapshot: string;
   } | null;
   readonly missing_required_inputs: readonly string[];
+  readonly remediation_actions: readonly CredentialIssuanceRemediationAction[];
   readonly limitations: readonly string[];
 }
 
-export interface IssueCredentialRequest {
+export type CredentialIssuanceRemediationClass = "NOT_APPLICABLE" | "SYSTEM_REPAIR_AVAILABLE" | "SYSTEM_RECALCULATION_AVAILABLE" | "GOVERNANCE_REMEDIATION_REQUIRED" | "OPERATIONAL_INPUT_REQUIRED" | "IMMUTABLE_CORRECTION_REQUIRED" | "NOT_REMEDIABLE" | "ALREADY_RESOLVED";
+export interface CredentialIssuanceRemediationAction {
+  readonly blocker_code: string;
+  readonly authority_owner: "SYSTEM" | "TRAINING" | "CREDENTIAL_GOVERNANCE" | "CREDENTIAL_OPERATOR" | "CREDENTIAL_ISSUANCE";
+  readonly remediation_class: CredentialIssuanceRemediationClass;
+  readonly action_code: string | null;
+  readonly action_available: boolean;
+  readonly actor_can_act: boolean;
+  readonly message: string;
+  readonly business_reference: string | null;
+}
+
+export interface EvaluateCredentialIssuanceRequest {
   readonly certification_id: string;
   readonly source_evidence_record_id: string;
   readonly source_authorization_id?: string;
@@ -141,6 +171,20 @@ export interface IssueCredentialRequest {
   readonly training_location: string;
   readonly instructor: string;
   readonly training_center: string;
+}
+
+export interface CredentialIssuanceEvaluationResponse {
+  readonly preparation_status: "READY_FOR_REVIEW";
+  readonly evaluation_id: string;
+  readonly evaluation_checksum: string;
+  readonly evaluated_at: string;
+  readonly evaluated_by: { readonly id: string; readonly name: string };
+  readonly derived_facts: { readonly holder_name: string; readonly program: Record<string, unknown>; readonly instructor_provenance: "TRAINING_SESSION" | "OPERATOR_INPUT"; readonly readiness_decision_id: string | null };
+  readonly operator_inputs: { readonly completion_date: string; readonly training_location: string; readonly instructor: string; readonly training_center: string };
+  readonly selected_evidence: { readonly binding_id: string; readonly evidence_record_id: string; readonly template_code: "OGI_F048_DIGITAL_CREDENTIAL_ISSUANCE_FORM" };
+  readonly selected_authorization: { readonly id: string; readonly business_identifier: string | null } | null;
+  readonly blockers: readonly string[];
+  readonly warnings: readonly string[];
 }
 
 export function listCredentialIssuancesByCertification(certificationId: string) {
@@ -165,13 +209,46 @@ export function getCredentialIssuancePreparation(certificationId: string) {
   );
 }
 
-export function issueCredential(payload: IssueCredentialRequest) {
+export function evaluateCredentialIssuance(payload: EvaluateCredentialIssuanceRequest) {
+  return apiRequest<CredentialIssuanceEvaluationResponse>(
+    "/api/v1/credentials/issuances/preparation/evaluations",
+    { method: "POST", body: payload, validate: isCredentialIssuanceEvaluationResponse }
+  );
+}
+
+export function confirmCredentialIssuance(evaluation: Pick<CredentialIssuanceEvaluationResponse, "evaluation_id" | "evaluation_checksum">, idempotencyKey: string) {
   return apiRequest<CredentialIssuanceResponse>(
     "/api/v1/credentials/issuances",
     {
       method: "POST",
-      body: payload,
+      headers: { "idempotency-key": idempotencyKey },
+      body: evaluation,
       validate: isCredentialIssuanceResponse
+    }
+  );
+}
+
+export interface CredentialEvidenceBindingReviewResponse {
+  readonly review: { readonly id: string };
+  readonly replayed: boolean;
+}
+
+export function requestCredentialEvidenceBindingReview(
+  certificationId: string,
+  sourceEvidenceRecordId: string,
+  idempotencyKey: string
+) {
+  return apiRequest<CredentialEvidenceBindingReviewResponse>(
+    "/api/v1/credentials/issuances/evidence-bindings/reviews",
+    {
+      method: "POST",
+      headers: { "idempotency-key": idempotencyKey },
+      body: {
+        source_evidence_record_id: sourceEvidenceRecordId,
+        certification_id: certificationId,
+        action: "ESTABLISH"
+      },
+      validate: isCredentialEvidenceBindingReviewResponse
     }
   );
 }
@@ -206,14 +283,58 @@ function isCredentialIssuancePreparationResponse(
     isPreparationField(value.training.training_center) &&
     Array.isArray(value.eligible_f048_evidence) &&
     value.eligible_f048_evidence.every(isF048Candidate) &&
+    Array.isArray(value.evidence_binding_candidates) &&
+    value.evidence_binding_candidates.every(isF048GovernanceCandidate) &&
     Array.isArray(value.operational_authorization_options) &&
     value.operational_authorization_options.every(isAuthorizationOption) &&
     (value.existing_issuance === null || isRecord(value.existing_issuance)) &&
     Array.isArray(value.missing_required_inputs) &&
     value.missing_required_inputs.every((item) => typeof item === "string") &&
+    Array.isArray(value.remediation_actions) &&
+    value.remediation_actions.every(isRemediationAction) &&
     Array.isArray(value.limitations) &&
     value.limitations.every((item) => typeof item === "string")
   );
+}
+
+function isF048GovernanceCandidate(
+  value: unknown
+): value is CredentialIssuancePreparationF048GovernanceCandidate {
+  return (
+    isRecord(value) &&
+    isUuid(value.source_evidence_record_id) &&
+    typeof value.display_reference === "string" && value.display_reference.trim().length > 0 &&
+    value.template_code === "OGI_F048_DIGITAL_CREDENTIAL_ISSUANCE_FORM" &&
+    typeof value.template_version === "string" && value.template_version.trim().length > 0 &&
+    value.lifecycle_state === "GOVERNANCE_APPROVED" &&
+    value.review_status === "CURRENT_GOVERNANCE_APPROVED" &&
+    isUuid(value.review_conclusion_id) &&
+    (value.client_business_reference === null || typeof value.client_business_reference === "string") &&
+    (value.facility_business_reference === null || typeof value.facility_business_reference === "string") &&
+    typeof value.completed_at === "string" && !Number.isNaN(Date.parse(value.completed_at)) &&
+    value.already_bound === false &&
+    value.consumed === false
+  );
+}
+
+function isCredentialEvidenceBindingReviewResponse(
+  value: unknown
+): value is CredentialEvidenceBindingReviewResponse {
+  return isRecord(value) && isRecord(value.review) &&
+    isUuid(value.review.id) && typeof value.replayed === "boolean";
+}
+
+function isUuid(value: unknown): value is string {
+  return typeof value === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function isRemediationAction(value: unknown): value is CredentialIssuanceRemediationAction {
+  return isRecord(value) && typeof value.blocker_code === "string" && typeof value.authority_owner === "string" && typeof value.remediation_class === "string" && (value.action_code === null || typeof value.action_code === "string") && typeof value.action_available === "boolean" && typeof value.actor_can_act === "boolean" && typeof value.message === "string" && (value.business_reference === null || typeof value.business_reference === "string");
+}
+
+function isCredentialIssuanceEvaluationResponse(value: unknown): value is CredentialIssuanceEvaluationResponse {
+  return isRecord(value) && value.preparation_status === "READY_FOR_REVIEW" && typeof value.evaluation_id === "string" && typeof value.evaluation_checksum === "string" && /^[0-9a-f]{64}$/i.test(value.evaluation_checksum) && typeof value.evaluated_at === "string" && isRecord(value.evaluated_by) && typeof value.evaluated_by.id === "string" && typeof value.evaluated_by.name === "string" && isRecord(value.derived_facts) && isRecord(value.operator_inputs) && isRecord(value.selected_evidence) && (value.selected_authorization === null || isRecord(value.selected_authorization)) && Array.isArray(value.blockers) && value.blockers.every((item) => typeof item === "string") && Array.isArray(value.warnings) && value.warnings.every((item) => typeof item === "string");
 }
 
 function isPreparationStatus(value: unknown): value is CredentialIssuancePreparationStatus {

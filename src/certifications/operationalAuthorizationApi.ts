@@ -2,7 +2,6 @@ import { apiRequest } from "../api/client";
 import { CertificationLevel, CertificationStatus, certificationLevels, certificationStatuses } from "./certificationsApi";
 
 export interface CreateOperationalAuthorizationRequest {
-  readonly authorization_number: string;
   readonly authorization_level: CertificationLevel;
   readonly authorization_status?: CertificationStatus;
   readonly issue_date: string;
@@ -12,7 +11,6 @@ export interface CreateOperationalAuthorizationRequest {
 }
 
 export interface RenewOperationalAuthorizationRequest {
-  readonly authorization_number: string;
   readonly issue_date: string;
   readonly expiry_date: string;
 }
@@ -31,6 +29,7 @@ export type OperationalAuthorizationCommand =
 export interface OperationalAuthorizationCommandRecord {
   readonly id: string;
   readonly authorization_number: string;
+  readonly business_identifier: string | null;
   readonly authorization_level: CertificationLevel;
   readonly authorization_status: CertificationStatus;
   readonly issue_date: string;
@@ -137,6 +136,7 @@ function isOperationalAuthorizationCommandRecord(
     isRecord(value) &&
     typeof value.id === "string" &&
     typeof value.authorization_number === "string" &&
+    isNullableString(value.business_identifier) &&
     isCertificationLevel(value.authorization_level) &&
     isCertificationStatus(value.authorization_status) &&
     typeof value.issue_date === "string" &&

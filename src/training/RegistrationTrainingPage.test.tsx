@@ -793,6 +793,125 @@ afterEach(() => {
 });
 
 describe("Registration Training frontend", () => {
+  it("opens the guided Register Training dialog and guards dirty cancellation", async () => {
+    const user = userEvent.setup();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+    mockFetchRoutes([
+      ...authRoutes(),
+      { url: "/api/v1/training/trainees", responses: [{ status: 200, body: { trainees: [traineeA] } }, { status: 200, body: { trainees: [traineeA] } }] },
+      { url: `/api/v1/training/trainees/${traineeAId}`, responses: [{ status: 200, body: traineeA }] },
+      { url: `/api/v1/training/trainees/${traineeAId}/enrollments`, responses: [{ status: 200, body: { enrollments: [] } }] },
+      { url: "/api/v1/registration/clients", responses: [{ status: 200, body: { clients: [clientA] } }] },
+      { url: "/api/v1/registration/facilities", responses: [{ status: 200, body: { facilities: [trainingFacility] } }] },
+      { url: "/api/v1/registration/personnel", responses: [{ status: 200, body: { personnel: [staffA] } }] },
+      { url: "/api/v1/training/sessions", responses: [{ status: 200, body: { sessions: [] } }] }
+    ]);
+    renderWithRoute(routes.registrationTraining);
+
+    await user.click(await screen.findByRole("button", { name: "Register Training" }));
+    const dialog = screen.getByRole("dialog", { name: "Register Training" });
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    expect(within(dialog).getByText("Current step: Trainee")).toBeVisible();
+    await user.click(within(dialog).getByRole("radio", { name: "Register New Trainee" }));
+    await user.type(within(dialog).getByLabelText("Full name"), "Guided Trainee");
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(dialog).toBeVisible();
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(confirm).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("dialog", { name: "Register Training" })).not.toBeInTheDocument();
+  });
+
+  it("completes the existing-Trainee and qualified-existing-Session fast path without evaluation side effects", async () => {
+    const user = userEvent.setup();
+    const qualifiedSession: TrainingSession = {
+      ...trainingSessionA,
+      instructor_staff_member_id: staffAId,
+      instructor_qualification_certification_id: qualificationCertificationId,
+      instructor_staff_member: { id: staffAId, client_id: clientAId, full_name: staffA.full_name, email: staffA.email ?? null },
+      instructor_qualification_certification: { id: qualificationCertificationId, business_identifier: qualificationBusinessIdentifier, certification_level: "L6", certification_status: "ACTIVE", issue_date: "2020-01-01T00:00:00.000Z", expiry_date: "2099-01-01T00:00:00.000Z" }
+    };
+    const completedEnrollment: TrainingEnrollment = {
+      ...enrollmentA,
+      program_code: "GUARDIAN_RESPONDER",
+      program: { ...enrollmentA.program, program_code: "GUARDIAN_RESPONDER", certification_level: "L1", display_name: "Guardian Responder" },
+      training_session_id: qualifiedSession.id,
+      training_session: { id: qualifiedSession.id, training_title: qualifiedSession.training_title, training_start_date: qualifiedSession.training_start_date, training_end_date: qualifiedSession.training_end_date, facility_id: qualifiedSession.facility_id }
+    };
+    const { calls } = mockFetchRoutes([
+      ...authRoutes(),
+      { url: "/api/v1/training/trainees", responses: [{ status: 200, body: { trainees: [traineeA] } }, { status: 200, body: { trainees: [traineeA] } }, { status: 200, body: { trainees: [traineeA] } }, { status: 200, body: { trainees: [traineeA] } }] },
+      { url: `/api/v1/training/trainees/${traineeAId}`, responses: [{ status: 200, body: traineeA }, { status: 200, body: traineeA }] },
+      { url: `/api/v1/training/trainees/${traineeAId}/enrollments`, responses: [{ status: 200, body: { enrollments: [] } }, { status: 200, body: { enrollments: [] } }, { status: 200, body: { enrollments: [completedEnrollment] } }] },
+      { method: "POST", url: `/api/v1/training/trainees/${traineeAId}/enrollments`, responses: [{ status: 201, body: completedEnrollment }] },
+      { url: "/api/v1/registration/clients", responses: [{ status: 200, body: { clients: [clientA] } }] },
+      { url: "/api/v1/registration/facilities", responses: [{ status: 200, body: { facilities: [trainingFacility] } }] },
+      { url: "/api/v1/registration/personnel", responses: [{ status: 200, body: { personnel: [staffA] } }] },
+      { url: "/api/v1/training/sessions", responses: [{ status: 200, body: { sessions: [qualifiedSession] } }, { status: 200, body: { sessions: [qualifiedSession] } }] }
+    ]);
+    renderWithRoute(routes.registrationTraining);
+    await user.click(await screen.findByRole("button", { name: "Register Training" }));
+    const dialog = screen.getByRole("dialog", { name: "Register Training" });
+    await user.selectOptions(within(dialog).getByRole("combobox", { name: "Existing Trainee" }), traineeAId);
+    await user.click(within(dialog).getByRole("button", { name: "Next →" }));
+    await user.selectOptions(within(dialog).getByLabelText("Program"), "GUARDIAN_RESPONDER");
+    await user.click(within(dialog).getByRole("button", { name: "Next →" }));
+    await user.selectOptions(await within(dialog).findByLabelText("Eligible Training Session"), qualifiedSession.id);
+    await user.click(within(dialog).getByRole("button", { name: "Next →" }));
+    expect(within(dialog).getByText("Current step: Review")).toBeVisible();
+    await user.click(within(dialog).getByRole("button", { name: "Complete Training Registration" }));
+
+    expect(await screen.findByText(/Training registration completed/)).toBeVisible();
+    const enrollmentCreateCalls = calls.filter(
+      (call) =>
+        call.url === `/api/v1/training/trainees/${traineeAId}/enrollments` &&
+        call.init?.method === "POST"
+    );
+    expect(enrollmentCreateCalls).toHaveLength(1);
+    expect(JSON.parse(String(enrollmentCreateCalls[0]?.init?.body))).toMatchObject({
+      program_code: "GUARDIAN_RESPONDER",
+      client_id: null,
+      training_session_id: qualifiedSession.id
+    });
+    await waitFor(() => {
+      expect(
+        calls.some(
+          (call) =>
+            (call.init?.method ?? "GET") === "GET" &&
+            call.url ===
+              `/api/v1/training/enrollments/${completedEnrollment.id}/evidence-workspace`
+        )
+      ).toBe(true);
+    });
+
+    const prohibitedMutationCalls = calls.filter((call) => {
+      const method = call.init?.method ?? "GET";
+      const url = call.url.toLowerCase();
+      const isMutation = ["POST", "PATCH", "PUT", "DELETE"].includes(method);
+      const targetsExcludedWorkflow =
+        url.includes("commercial-evaluation") ||
+        url.includes("operational-evidence") ||
+        url.includes("attendance-evidence") ||
+        url.includes("evidence-draft") ||
+        url.includes("certification") ||
+        url.includes("credential") ||
+        url.includes("governance") ||
+        url.includes("f-048") ||
+        url.includes("f_048") ||
+        url.includes("f048");
+
+      return isMutation && targetsExcludedWorkflow;
+    });
+    expect(prohibitedMutationCalls).toEqual([]);
+    expect(
+      calls.some(
+        (call) =>
+          call.init?.method === "POST" &&
+          call.url.includes("session-assignment")
+      )
+    ).toBe(false);
+  });
+
   it("adds permission-gated Training navigation and loads the route", async () => {
     const user = userEvent.setup();
     const { calls } = mockFetchRoutes(standardRoutes());

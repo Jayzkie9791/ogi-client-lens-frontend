@@ -1,0 +1,13 @@
+import { apiRequest } from "../api/client";
+export const commercialClassifications=["PLATINUM","GOLD","SILVER","BRONZE","HIGH_RISK"] as const;
+export type CommercialClassification=typeof commercialClassifications[number];
+export interface CommercialEvaluationCandidate {certification_id:string;certification_number:string;certification_level:string;trainee_name:string;training_session_id:string;training_title:string;evaluator_staff_member_id:string;evaluator_name:string;qualification_certification_id:string;qualification_level:string}
+export interface CommercialEvaluationInput {current_cri_score_100:number;cri_classification:CommercialClassification;defensibility_score_100:number;defensibility_classification:CommercialClassification}
+export interface CommercialEvaluation extends CommercialEvaluationInput {id:string;certification_id:string;training_session_id:string;evaluator_staff_member_id:string;evaluator_user_id:string;qualification_certification_id:string;evaluated_at:string;result_checksum:string;created_at:string}
+const object=(v:unknown):v is Record<string,unknown>=>typeof v==="object"&&v!==null&&!Array.isArray(v);
+const candidate=(v:unknown):v is CommercialEvaluationCandidate=>object(v)&&["certification_id","certification_number","certification_level","trainee_name","training_session_id","training_title","evaluator_staff_member_id","evaluator_name","qualification_certification_id","qualification_level"].every(k=>typeof v[k]==="string");
+const candidates=(v:unknown):v is {candidates:CommercialEvaluationCandidate[]}=>object(v)&&Array.isArray(v.candidates)&&v.candidates.every(candidate);
+const classification=(v:unknown):v is CommercialClassification=>typeof v==="string"&&commercialClassifications.some(x=>x===v);
+const evaluation=(v:unknown):v is CommercialEvaluation=>object(v)&&["id","certification_id","training_session_id","evaluator_staff_member_id","evaluator_user_id","qualification_certification_id","evaluated_at","result_checksum","created_at"].every(k=>typeof v[k]==="string")&&typeof v.current_cri_score_100==="number"&&classification(v.cri_classification)&&typeof v.defensibility_score_100==="number"&&classification(v.defensibility_classification);
+export function listCommercialEvaluationCandidates(){return apiRequest("/api/v1/training/commercial-evaluation-candidates",{validate:candidates});}
+export function createCommercialEvaluation(certificationId:string,input:CommercialEvaluationInput,key:string){return apiRequest(`/api/v1/training/certifications/${encodeURIComponent(certificationId)}/commercial-evaluation`,{method:"POST",body:input,headers:{"idempotency-key":key},validate:evaluation});}

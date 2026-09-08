@@ -23,6 +23,7 @@ export const routes = {
   registrationFacilities: "/workbench/registration/facilities",
   registrationPersonnel: "/workbench/registration/personnel",
   registrationTraining: "/workbench/registration/training",
+  trainerCommercialEvaluations: "/workbench/registration/training/commercial-evaluations",
   certifications: "/workbench/certifications",
   credentials: "/workbench/credentials",
   credentialsPersonnel: "/workbench/credentials/personnel/:staffMemberId",

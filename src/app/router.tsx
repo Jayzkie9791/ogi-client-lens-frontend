@@ -29,6 +29,7 @@ const CredentialsListPage = lazy(() => import("../credentials/CredentialsPage").
 const CertificateDevPreviewPage = lazy(() => import("../credentials/CertificatePage").then((module) => ({ default: module.CertificateDevPreviewPage })));
 const CertificatePage = lazy(() => import("../credentials/CertificatePage").then((module) => ({ default: module.CertificatePage })));
 const RegistrationTrainingPage = lazy(() => import("../training/RegistrationTrainingPage").then((module) => ({ default: module.RegistrationTrainingPage })));
+const TrainerCommercialEvaluationPage = lazy(() => import("../training/TrainerCommercialEvaluationPage").then((module) => ({ default: module.TrainerCommercialEvaluationPage })));
 
 function lazyRoute(element: ReactNode) {
   return <Suspense fallback={<p role="status">Loading workspace.</p>}>{element}</Suspense>;
@@ -118,6 +119,10 @@ export const appRoutes: RouteObject[] = [
           {
             path: "workbench/registration/training",
             element: lazyRoute(<RegistrationTrainingPage />)
+          },
+          {
+            path: "workbench/registration/training/commercial-evaluations",
+            element: lazyRoute(<TrainerCommercialEvaluationPage />)
           },
           {
             path: "workbench/certifications",

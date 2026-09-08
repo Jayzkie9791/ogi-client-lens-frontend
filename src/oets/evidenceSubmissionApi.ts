@@ -11,6 +11,7 @@ export interface OperationalEvidenceCreateRequest {
     sections: OetsEvidencePayload["sections"];
   };
   correlation_id?: string;
+  context?: { requirement_code: string; selected_id: string };
 }
 
 export interface OperationalEvidenceDraftCreateRequest extends OperationalEvidenceCreateRequest {

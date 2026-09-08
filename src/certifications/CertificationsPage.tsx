@@ -21,17 +21,20 @@ import {
 import {
   addCertificationEndorsement,
   CertificationEndorsement,
-  certificationEndorsements,
+  certificationEndorsementsForLevel,
   CertificationLevel,
   certificationLevels,
   createCertification
 } from "./certificationsApi";
 import { CertificationWorkspaceTabs } from "./CertificationWorkspaceTabs";
 import {
+  confirmCredentialIssuance,
+  CredentialIssuanceEvaluationResponse,
   CredentialIssuancePreparationResponse,
+  evaluateCredentialIssuance,
   getCredentialIssuancePreparation,
-  issueCredential,
-  listCredentialIssuancesByCertification
+  listCredentialIssuancesByCertification,
+  requestCredentialEvidenceBindingReview
 } from "./credentialIssuanceApi";
 import {
   createOperationalAuthorization,
@@ -53,6 +56,7 @@ const renewOperationalAuthorizationPermission = "renew_operational_authorization
 const suspendOperationalAuthorizationPermission = "suspend_operational_authorization";
 const reinstateOperationalAuthorizationPermission = "reinstate_operational_authorization";
 const revokeOperationalAuthorizationPermission = "revoke_operational_authorization";
+const recordTrainingAssessmentPermission = "record_training_assessment";
 
 interface CertificationRegistryEntry {
   readonly certificationId: string;
@@ -85,7 +89,6 @@ interface EndorsementFormState {
 type AuthorizationMode = "create" | "renew" | "suspend" | "reinstate" | "revoke";
 
 interface CreateAuthorizationFormState {
-  authorizationNumber: string;
   authorizationLevel: CertificationLevel;
   issueDate: string;
   expiryDate: string;
@@ -123,7 +126,6 @@ const emptyEndorsementForm: EndorsementFormState = {
 };
 
 const emptyCreateAuthorizationForm: CreateAuthorizationFormState = {
-  authorizationNumber: "",
   authorizationLevel: "L1",
   issueDate: "",
   expiryDate: ""
@@ -167,6 +169,9 @@ export function CertificationsPage() {
   const canRevokeOperationalAuthorization = auth.canUsePermission(
     revokeOperationalAuthorizationPermission
   );
+  const canRecordTrainingAssessment = auth.canUsePermission(
+    recordTrainingAssessmentPermission
+  );
   const [selectedCertificationId, setSelectedCertificationId] = useState<string | null>(null);
   const [createMode, setCreateMode] = useState(false);
   const [endorsementMode, setEndorsementMode] = useState(false);
@@ -185,6 +190,10 @@ export function CertificationsPage() {
   const [credentialIssuanceForm, setCredentialIssuanceForm] =
     useState<CredentialIssuanceFormState>(emptyCredentialIssuanceForm);
   const [credentialIssuanceSuccess, setCredentialIssuanceSuccess] =
+    useState<string | null>(null);
+  const [credentialEvaluation, setCredentialEvaluation] =
+    useState<CredentialIssuanceEvaluationResponse | null>(null);
+  const [credentialConfirmationKey, setCredentialConfirmationKey] =
     useState<string | null>(null);
   const [recentIssuedCredentialId, setRecentIssuedCredentialId] =
     useState<string | null>(null);
@@ -300,17 +309,18 @@ export function CertificationsPage() {
   const createAuthorizationMutation = useMutation({
     mutationFn: () =>
       createOperationalAuthorization({
-        authorization_number: createAuthorizationForm.authorizationNumber.trim(),
         authorization_level: createAuthorizationForm.authorizationLevel,
         issue_date: toIsoDate(createAuthorizationForm.issueDate),
         expiry_date: toIsoDate(createAuthorizationForm.expiryDate),
         certification_id: selectedCertificationId ?? "",
         staff_member_id: selectedEntry?.staffMemberId ?? ""
       }),
-    onSuccess: async () => {
+    onSuccess: async (authorization) => {
       setAuthorizationMode(null);
       setCreateAuthorizationForm(emptyCreateAuthorizationForm);
-      setAuthorizationSuccess("Operational Authorization created successfully.");
+      setAuthorizationSuccess(
+        `Operational Authorization ${authorization.authorization_number} created successfully.`
+      );
       await invalidateAuthorizationQueries(queryClient, selectedDetailQueryKey);
     },
     onError: async () => {
@@ -327,7 +337,6 @@ export function CertificationsPage() {
     }) => {
       if (payload.mode === "renew") {
         return renewOperationalAuthorization(payload.authorizationId, {
-          authorization_number: createAuthorizationForm.authorizationNumber.trim(),
           issue_date: toIsoDate(createAuthorizationForm.issueDate),
           expiry_date: toIsoDate(createAuthorizationForm.expiryDate)
         });
@@ -345,11 +354,15 @@ export function CertificationsPage() {
 
       return revokeOperationalAuthorization(payload.authorizationId, governancePayload);
     },
-    onSuccess: async (_authorization, payload) => {
+    onSuccess: async (authorization, payload) => {
       setAuthorizationMode(null);
       setCreateAuthorizationForm(emptyCreateAuthorizationForm);
       setAuthorizationGovernanceForm(emptyAuthorizationGovernanceForm);
-      setAuthorizationSuccess(authorizationSuccessMessage(payload.mode));
+      setAuthorizationSuccess(
+        payload.mode === "renew"
+          ? `Operational Authorization ${authorization.authorization_number} renewed successfully.`
+          : authorizationSuccessMessage(payload.mode)
+      );
       await invalidateAuthorizationQueries(queryClient, selectedDetailQueryKey);
     },
     onError: async () => {
@@ -358,9 +371,9 @@ export function CertificationsPage() {
       }
     }
   });
-  const credentialIssuanceMutation = useMutation({
+  const credentialEvaluationMutation = useMutation({
     mutationFn: () =>
-      issueCredential({
+      evaluateCredentialIssuance({
         certification_id: selectedCertificationId ?? "",
         source_evidence_record_id:
           credentialIssuanceForm.selectedEvidenceRecordId,
@@ -388,11 +401,33 @@ export function CertificationsPage() {
           credentialIssuanceForm.trainingCenter
         ).trim()
       }),
+    onSuccess: (evaluation) => {
+      setCredentialEvaluation(evaluation);
+      setCredentialConfirmationKey(crypto.randomUUID());
+    },
+    onError: async () => {
+      setCredentialEvaluation(null);
+      setCredentialConfirmationKey(null);
+      await queryClient.invalidateQueries({ queryKey: selectedPreparationQueryKey });
+    }
+  });
+  const credentialIssuanceMutation = useMutation({
+    mutationFn: () => {
+      if (!credentialEvaluation || !credentialConfirmationKey) {
+        throw new Error("Authoritative Credential evaluation is required.");
+      }
+      return confirmCredentialIssuance({
+        evaluation_id: credentialEvaluation.evaluation_id,
+        evaluation_checksum: credentialEvaluation.evaluation_checksum
+      }, credentialConfirmationKey);
+    },
     onSuccess: async (issuance) => {
       setCredentialIssuanceMode(false);
       setCredentialIssuanceForm(emptyCredentialIssuanceForm);
       setRecentIssuedCredentialId(issuance.id);
       setCredentialIssuanceSuccess("Credential issued successfully.");
+      setCredentialEvaluation(null);
+      setCredentialConfirmationKey(null);
       await Promise.all([
         invalidateAuthorizationQueries(queryClient, selectedDetailQueryKey),
         queryClient.invalidateQueries({ queryKey: selectedIssuanceHistoryQueryKey }),
@@ -400,6 +435,8 @@ export function CertificationsPage() {
       ]);
     },
     onError: async () => {
+      setCredentialEvaluation(null);
+      setCredentialConfirmationKey(null);
       if (selectedEntry) {
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: selectedDetailQueryKey }),
@@ -515,13 +552,14 @@ export function CertificationsPage() {
                 canReinstateOperationalAuthorization={canReinstateOperationalAuthorization}
                 canRenewOperationalAuthorization={canRenewOperationalAuthorization}
                 canRevokeOperationalAuthorization={canRevokeOperationalAuthorization}
+                canRecordTrainingAssessment={canRecordTrainingAssessment}
                 canSuspendOperationalAuthorization={canSuspendOperationalAuthorization}
                 canViewOperationalAuthorization={canViewOperationalAuthorization}
                 certification={selectedCertification}
-                credentialIssuanceError={credentialIssuanceMutation.error}
+                credentialIssuanceError={credentialIssuanceMutation.error ?? credentialEvaluationMutation.error}
                 credentialIssuanceForm={credentialIssuanceForm}
                 credentialIssuanceMode={credentialIssuanceMode}
-                credentialIssuancePending={credentialIssuanceMutation.isPending}
+                credentialIssuancePending={credentialIssuanceMutation.isPending || credentialEvaluationMutation.isPending}
                 credentialIssuancePreparation={
                   credentialIssuancePreparationQuery.data ?? null
                 }
@@ -567,6 +605,16 @@ export function CertificationsPage() {
                   authorizationCommandMutation.reset();
                 }}
                 onStartEndorsement={() => {
+                  if (selectedCertification) {
+                    const firstAllowedEndorsement =
+                      certificationEndorsementsForLevel(
+                        selectedCertification.certification_level
+                      )[0];
+                    if (!firstAllowedEndorsement) return;
+                    setEndorsementForm({
+                      endorsement: firstAllowedEndorsement
+                    });
+                  }
                   setEndorsementMode(true);
                   setEndorsementSuccess(null);
                   endorsementMutation.reset();
@@ -575,16 +623,25 @@ export function CertificationsPage() {
                   setCredentialIssuanceMode(false);
                   setCredentialIssuanceForm(emptyCredentialIssuanceForm);
                   credentialIssuanceMutation.reset();
+                  credentialEvaluationMutation.reset();
+                  setCredentialEvaluation(null);
+                  setCredentialConfirmationKey(null);
                 }}
                 onStartCredentialIssuance={() => {
                   setCredentialIssuanceMode(true);
                   setCredentialIssuanceForm(emptyCredentialIssuanceForm);
                   setCredentialIssuanceSuccess(null);
                   credentialIssuanceMutation.reset();
+                  credentialEvaluationMutation.reset();
+                  setCredentialEvaluation(null);
+                  setCredentialConfirmationKey(null);
                 }}
                 onSubmitAuthorization={(event, authorization) => {
                   event.preventDefault();
                   if (authorizationMode === "create") {
+                    if (selectedCertification?.certification_status !== "ACTIVE") {
+                      return;
+                    }
                     createAuthorizationMutation.mutate();
                     return;
                   }
@@ -610,7 +667,14 @@ export function CertificationsPage() {
                 }}
                 onSubmitCredentialIssuance={(event) => {
                   event.preventDefault();
+                  if (credentialEvaluation) {
+                    credentialIssuanceMutation.mutate();
+                  } else {
+                    credentialEvaluationMutation.mutate();
+                  }
                 }}
+                credentialEvaluation={credentialEvaluation}
+                evaluating={credentialEvaluationMutation.isPending}
                 issuanceHistory={issuanceHistoryQuery.data?.issuances ?? []}
                 issuanceHistoryError={issuanceHistoryQuery.error}
                 issuanceHistoryLoading={issuanceHistoryQuery.isLoading}
@@ -749,10 +813,13 @@ function CertificationDetailPanel({
   canReinstateOperationalAuthorization,
   canRenewOperationalAuthorization,
   canRevokeOperationalAuthorization,
+  canRecordTrainingAssessment,
   canSuspendOperationalAuthorization,
   canViewOperationalAuthorization,
   certification,
   credentialIssuanceError,
+  credentialEvaluation,
+  evaluating,
   credentialIssuanceForm,
   credentialIssuanceMode,
   credentialIssuancePending,
@@ -801,10 +868,13 @@ function CertificationDetailPanel({
   canReinstateOperationalAuthorization: boolean;
   canRenewOperationalAuthorization: boolean;
   canRevokeOperationalAuthorization: boolean;
+  canRecordTrainingAssessment: boolean;
   canSuspendOperationalAuthorization: boolean;
   canViewOperationalAuthorization: boolean;
   certification: CredentialsCertificationProjection | null;
   credentialIssuanceError: Error | null;
+  credentialEvaluation: CredentialIssuanceEvaluationResponse | null;
+  evaluating: boolean;
   credentialIssuanceForm: CredentialIssuanceFormState;
   credentialIssuanceMode: boolean;
   credentialIssuancePending: boolean;
@@ -892,6 +962,7 @@ function CertificationDetailPanel({
               View Digital Certificate
             </Button>
           ) : null}
+          {canRecordTrainingAssessment ? <Button asChild variant="secondary"><Link to={routes.trainerCommercialEvaluations}>Trainer evaluations</Link></Button> : null}
         </div>
       </div>
       <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
@@ -953,6 +1024,8 @@ function CertificationDetailPanel({
         canIssueCredential={canIssueCertification}
         certification={certification}
         error={credentialIssuanceError}
+        evaluation={credentialEvaluation}
+        evaluating={evaluating}
         form={credentialIssuanceForm}
         issuanceHistory={issuanceHistory}
         issuanceHistoryError={issuanceHistoryError}
@@ -999,6 +1072,8 @@ function EndorsementsSection({
   submitting: boolean;
 }) {
   const existingEndorsements = endorsementsByMostRecent(certification.endorsements);
+  const allowedEndorsements =
+    certificationEndorsementsForLevel(certification.certification_level);
 
   return (
     <section
@@ -1017,7 +1092,7 @@ function EndorsementsSection({
             Endorsements extend the existing Certification record without issuing credentials.
           </p>
         </div>
-        {canEndorseCertification && !endorsementMode ? (
+        {canEndorseCertification && allowedEndorsements.length > 0 && !endorsementMode ? (
           <Button onClick={onStart} variant="secondary">
             Add Endorsement
           </Button>
@@ -1072,7 +1147,7 @@ function EndorsementsSection({
               }
               value={endorsementForm.endorsement}
             >
-              {certificationEndorsements.map((endorsement) => (
+              {allowedEndorsements.map((endorsement) => (
                 <option key={endorsement} value={endorsement}>
                   {displayCode(endorsement)}
                 </option>
@@ -1097,6 +1172,8 @@ function CredentialIssuanceSection({
   canIssueCredential,
   certification,
   error,
+  evaluation,
+  evaluating,
   form,
   issuanceHistory,
   issuanceHistoryError,
@@ -1116,6 +1193,8 @@ function CredentialIssuanceSection({
   canIssueCredential: boolean;
   certification: CredentialsCertificationProjection;
   error: Error | null;
+  evaluation: CredentialIssuanceEvaluationResponse | null;
+  evaluating: boolean;
   form: CredentialIssuanceFormState;
   issuanceHistory: readonly CredentialIssuanceResponse[];
   issuanceHistoryError: Error | null;
@@ -1132,11 +1211,54 @@ function CredentialIssuanceSection({
   successMessage: string | null;
   submitting: boolean;
 }) {
+  const queryClient = useQueryClient();
+  const [selectedBindingCandidateId, setSelectedBindingCandidateId] = useState("");
+  const [bindingReviewSuccess, setBindingReviewSuccess] = useState<string | null>(null);
+  const bindingReviewAction = preparation?.remediation_actions.find(
+    (action) => action.action_code === "REQUEST_CREDENTIAL_EVIDENCE_BINDING_REVIEW"
+  ) ?? null;
+  const selectedBindingCandidate = preparation?.evidence_binding_candidates.find(
+    (candidate) => candidate.source_evidence_record_id === selectedBindingCandidateId
+  ) ?? null;
+  const bindingReviewMutation = useMutation({
+    mutationFn: () => {
+      if (!selectedBindingCandidate) {
+        throw new Error("Select an eligible F-048 evidence record before requesting review.");
+      }
+      return requestCredentialEvidenceBindingReview(
+        preparation?.certification.id ?? certification.id,
+        selectedBindingCandidate.source_evidence_record_id,
+        crypto.randomUUID()
+      );
+    },
+    onSuccess: async () => {
+      setSelectedBindingCandidateId("");
+      setBindingReviewSuccess("Governed association review requested. Approval remains required before binding is established.");
+      await queryClient.invalidateQueries({
+        queryKey: ["credential-issuance-preparation", certification.id]
+      });
+    },
+    onError: async () => {
+      setSelectedBindingCandidateId("");
+      setBindingReviewSuccess(null);
+      await queryClient.invalidateQueries({
+        queryKey: ["credential-issuance-preparation", certification.id]
+      });
+    }
+  });
   const selectedEvidence = preparation?.eligible_f048_evidence.find(
     (candidate) =>
       candidate.operational_evidence_record_id === form.selectedEvidenceRecordId
   );
-  const canSubmitPreparation = false;
+  const canSubmitPreparation = Boolean(
+    preparation &&
+    (preparation.preparation_status === "READY_FOR_REVIEW" || preparation.preparation_status === "REQUIRES_INPUT") &&
+    form.selectedEvidenceRecordId &&
+    resolveIssueFieldValue(preparation.training.completion_date, form.completionDate, { dateOnly: true }) &&
+    resolveIssueFieldValue(preparation.training.training_location, form.trainingLocation).trim() &&
+    resolveIssueFieldValue(preparation.training.instructor, form.instructor).trim() &&
+    resolveIssueFieldValue(preparation.training.training_center, form.trainingCenter).trim()
+  );
   const showIssuanceControls =
     preparation?.preparation_status === "READY_FOR_REVIEW" ||
     preparation?.preparation_status === "REQUIRES_INPUT";
@@ -1263,6 +1385,52 @@ function CredentialIssuanceSection({
           {preparation ? (
             <>
               <CredentialPreparationSummary preparation={preparation} />
+              <CredentialRemediationActions actions={preparation.remediation_actions} />
+              {bindingReviewAction ? (
+                <section aria-labelledby="credential-governance-evidence-heading" className="rounded-component border border-border bg-surface px-3 py-3">
+                  <h4 className="text-sm font-semibold text-text-primary" id="credential-governance-evidence-heading">Governance Evidence</h4>
+                  <p className="mt-1 text-sm text-text-muted">Select the exact governed F-048 evidence to submit for association with this Certification. A request does not establish or approve the binding.</p>
+                  {preparation.evidence_binding_candidates.length === 0 ? (
+                    <p className="mt-3 rounded-component border border-border bg-elevated px-3 py-2 text-sm text-text-primary">No eligible F-048 evidence is currently available for binding review.</p>
+                  ) : (
+                    <fieldset className="mt-3 space-y-2">
+                      <legend className="text-sm font-semibold text-text-primary">Eligible F-048 evidence</legend>
+                      {preparation.evidence_binding_candidates.map((candidate) => (
+                        <label className="flex min-h-11 cursor-pointer items-start gap-3 rounded-component border border-border bg-elevated px-3 py-3 text-sm outline-none transition-colors hover:border-primary-blue focus-within:ring-2 focus-within:ring-focus" key={candidate.source_evidence_record_id}>
+                          <input
+                            checked={selectedBindingCandidateId === candidate.source_evidence_record_id}
+                            className="mt-1 h-4 w-4 shrink-0 accent-primary-blue"
+                            name="credential-evidence-binding-candidate"
+                            onChange={() => setSelectedBindingCandidateId(candidate.source_evidence_record_id)}
+                            type="radio"
+                          />
+                          <span className="min-w-0">
+                            <span className="block font-semibold text-text-primary">{candidate.display_reference}</span>
+                            <span className="mt-1 block break-words text-text-muted">Version {candidate.template_version} · {displayCode(candidate.lifecycle_state)} · {displayCode(candidate.review_status)}</span>
+                            {candidate.client_business_reference || candidate.facility_business_reference ? (
+                              <span className="mt-1 block break-words text-text-muted">{[candidate.client_business_reference, candidate.facility_business_reference].filter(Boolean).join(" · ")}</span>
+                            ) : null}
+                            <span className="mt-1 block text-text-muted">Completed {formatDate(candidate.completed_at)}</span>
+                          </span>
+                        </label>
+                      ))}
+                    </fieldset>
+                  )}
+                  {bindingReviewSuccess ? <p className="mt-3 text-sm text-text-primary" role="status">{bindingReviewSuccess}</p> : null}
+                  {bindingReviewMutation.error ? <div className="mt-3"><CertificationErrorState compact error={bindingReviewMutation.error} operation="issuance" /></div> : null}
+                  {bindingReviewAction.action_available && bindingReviewAction.actor_can_act && preparation.evidence_binding_candidates.length > 0 ? (
+                    <Button
+                      disabled={!selectedBindingCandidate || bindingReviewMutation.isPending}
+                      onClick={() => bindingReviewMutation.mutate()}
+                      type="button"
+                    >
+                      {bindingReviewMutation.isPending ? "Requesting Governance Review" : "Request Governance Review"}
+                    </Button>
+                  ) : (
+                    <p className="mt-3 text-sm font-semibold text-text-primary">Governance review required.</p>
+                  )}
+                </section>
+              ) : null}
               {preparation.preparation_status === "ALREADY_ISSUED" &&
               preparation.existing_issuance ? (
                 <div className="rounded-component border border-border bg-elevated px-3 py-3">
@@ -1389,11 +1557,26 @@ function CredentialIssuanceSection({
               ) : null}
             </>
           ) : null}
-          <p className="rounded-component border border-blue-200 bg-blue-50/60 px-3 py-3 text-sm text-primary-navy" role="status">
-            Credential issuance preparation is temporarily unavailable while authoritative issuance validation is being completed.
-          </p>
+          {evaluation ? (
+            <section aria-labelledby="credential-evaluation-heading" className="rounded-component border border-blue-200 bg-blue-50/60 px-3 py-3">
+              <h4 className="text-sm font-semibold text-primary-navy" id="credential-evaluation-heading">Authoritative evaluation</h4>
+              <p className="mt-1 text-sm text-text-primary"><strong>Ready for review.</strong> Evaluated by {evaluation.evaluated_by.name}.</p>
+              <dl className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
+                <MetadataItem label="Evaluation reference" value={evaluation.evaluation_id} />
+                <MetadataItem label="Evidence" value={evaluation.selected_evidence.template_code} />
+                <MetadataItem label="Instructor authority" value={displayCode(evaluation.derived_facts.instructor_provenance)} />
+                <MetadataItem label="Authorization" value={evaluation.selected_authorization?.business_identifier ?? "Not selected"} />
+              </dl>
+              {evaluation.warnings.length > 0 ? <ul className="mt-2 list-disc pl-5 text-sm text-text-muted">{evaluation.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul> : null}
+            </section>
+          ) : null}
           <div className="flex flex-wrap gap-2">
-            <Button disabled={submitting || !canSubmitPreparation} type="submit">
+            {!evaluation ? (
+              <Button disabled={submitting || evaluating || !canSubmitPreparation} type="submit">
+                {evaluating ? "Evaluating Preparation" : "Evaluate Preparation"}
+              </Button>
+            ) : null}
+            <Button disabled={submitting || evaluating || !evaluation} type={evaluation ? "submit" : "button"}>
               {submitting ? "Issuing Credential" : "Confirm Issue Credential"}
             </Button>
             <Button disabled={submitting} onClick={onCancel} type="button" variant="secondary">
@@ -1402,6 +1585,33 @@ function CredentialIssuanceSection({
           </div>
         </form>
       ) : null}
+    </section>
+  );
+}
+
+function CredentialRemediationActions({ actions }: { actions: CredentialIssuancePreparationResponse["remediation_actions"] }) {
+  if (actions.length === 0) return null;
+  const groups = new Map<string, typeof actions>();
+  for (const action of actions) groups.set(action.authority_owner, [...(groups.get(action.authority_owner) ?? []), action]);
+  return (
+    <section aria-labelledby="credential-remediation-heading" className="rounded-component border border-border bg-surface px-3 py-3">
+      <h4 className="text-sm font-semibold text-text-primary" id="credential-remediation-heading">Preparation authority</h4>
+      <div className="mt-3 space-y-3">
+        {[...groups].map(([owner, entries]) => (
+          <div key={owner}>
+            <h5 className="text-xs font-semibold uppercase tracking-wide text-primary-blue">{displayCode(owner)}</h5>
+            <ul className="mt-1 space-y-2">
+              {entries.map((action) => (
+                <li className="rounded-component border border-border bg-elevated px-3 py-2 text-sm" key={action.blocker_code}>
+                  <p className="font-semibold text-text-primary">{displayCode(action.remediation_class)}</p>
+                  <p className="mt-1 text-text-muted">{action.message}</p>
+                  {action.action_available ? <p className="mt-1 text-xs font-semibold text-primary-navy">{action.actor_can_act ? `Available action: ${displayCode(action.action_code ?? "")}` : "Additional authority is required for this action."}</p> : null}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
     </section>
   );
 }
@@ -1593,6 +1803,7 @@ function OperationalAuthorizationSection({
   ) => void;
 }) {
   const currentAuthorization = currentOperationalAuthorization(authorizations);
+  const certificationIsActive = certification.certification_status === "ACTIVE";
 
   return (
     <section aria-labelledby="operational-authorization-heading" className="mt-5 border-t border-border pt-4">
@@ -1608,7 +1819,7 @@ function OperationalAuthorizationSection({
             Authorization state is linked to the selected Personnel and Certification context.
           </p>
         </div>
-        {authorizations.length === 0 && canCreate && authorizationMode !== "create" ? (
+        {authorizations.length === 0 && canCreate && certificationIsActive && authorizationMode !== "create" ? (
           <Button onClick={() => onStart("create")} variant="secondary">
             Create Operational Authorization
           </Button>
@@ -1635,6 +1846,14 @@ function OperationalAuthorizationSection({
                   <p className="text-sm font-semibold text-text-primary">
                     {authorization.authorization_number}
                   </p>
+                  <p className="mt-1 text-xs text-text-muted">
+                    Authorization Number (this issuance)
+                  </p>
+                  {authorization.business_identifier ? (
+                    <p className="mt-1 text-xs text-text-muted">
+                      Business Identifier (stable lineage): {authorization.business_identifier}
+                    </p>
+                  ) : null}
                   <p className="mt-1 text-xs text-text-muted">
                     {displayCode(authorization.authorization_level)} / {formatDate(authorization.issue_date)} to {formatDate(authorization.expiry_date)}
                   </p>
@@ -1682,7 +1901,21 @@ function OperationalAuthorizationSection({
         </ul>
       )}
 
-      {authorizationMode === "create" ? (
+      {authorizations.length === 0 && canCreate && !certificationIsActive ? (
+        <>
+          {createAuthorizationError && authorizationMode === "create" ? (
+            <CertificationErrorState compact error={createAuthorizationError} operation="authorization" />
+          ) : null}
+          <div className="mt-3 rounded-component border border-border bg-elevated px-3 py-2 text-sm text-text-primary" role="status">
+            <p className="font-semibold">Certification not active</p>
+            <p className="mt-1 text-text-muted">
+              Operational Authorization can be created only after this Certification becomes Active.
+            </p>
+          </div>
+        </>
+      ) : null}
+
+      {authorizationMode === "create" && certificationIsActive ? (
         <AuthorizationLifecycleForm
           authorization={null}
           certification={certification}
@@ -1795,7 +2028,7 @@ function AuthorizationLifecycleForm({
         </h4>
         <p className="mt-1 text-sm text-text-muted">
           {mode === "create" && certification && detail
-            ? `Authorizing ${detail.full_name} from ${programLabel(certification)} certificate ${certification.certification_number}.`
+            ? `Create an Operational Authorization for ${detail.full_name} based on ${programLabel(certification)} Certification ${certification.certification_number}.`
             : authorization
             ? `Updating authorization ${authorization.authorization_number}.`
             : "Updating Operational Authorization."}
@@ -1804,20 +2037,11 @@ function AuthorizationLifecycleForm({
       {error ? <CertificationErrorState compact error={error} operation="authorization" /> : null}
       {isDateForm ? (
         <>
-          <label className="block text-sm font-semibold text-text-primary">
-            Authorization number
-            <input
-              className={inputClassName}
-              onChange={(event) =>
-                onChangeCreate({
-                  ...createAuthorizationForm,
-                  authorizationNumber: event.currentTarget.value
-                })
-              }
-              required
-              value={createAuthorizationForm.authorizationNumber}
-            />
-          </label>
+          <p className="rounded-component border border-border bg-elevated px-3 py-2 text-sm text-text-muted">
+            {mode === "renew"
+              ? "A new Authorization Number will be generated automatically for this renewal."
+              : "Authorization Number — Generated automatically when the authorization is created."}
+          </p>
           {mode === "create" ? (
             <label className="block text-sm font-semibold text-text-primary">
               Authorization level
@@ -2175,6 +2399,12 @@ function certificationErrorTitle(
     }
 
     if (operation === "authorization") {
+      if (
+        error.code === "OPERATIONAL_AUTHORIZATION_VALIDATION_FAILED" &&
+        error.message === "Certification is not active"
+      ) {
+        return "Certification must be Active before an Operational Authorization can be created.";
+      }
       return "Operational Authorization input is invalid.";
     }
 

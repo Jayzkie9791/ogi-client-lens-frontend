@@ -95,6 +95,55 @@ function Invoke-NativeCapture {
     }
 }
 
+function Invoke-NativeProcessCapture {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [Parameter(Mandatory = $true)][string[]]$Arguments
+    )
+
+    $displayArguments = @($Arguments | ForEach-Object { Convert-ToDisplayArgument $_ })
+    Write-Log ("> {0} {1}" -f $FilePath, ($displayArguments -join " "))
+
+    # Windows PowerShell 5 promotes redirected native stderr to ErrorRecord.
+    # Process capture keeps advisory stderr as output and makes the actual
+    # process exit code authoritative for Git diff checks.
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = $FilePath
+    $startInfo.Arguments = $displayArguments -join " "
+    $startInfo.WorkingDirectory = (Get-Location).Path
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $startInfo
+    [void]$process.Start()
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+    $process.WaitForExit()
+    $stdout = $stdoutTask.Result
+    $stderr = $stderrTask.Result
+    $nativeExitCode = $process.ExitCode
+    $process.Dispose()
+
+    $captured = New-Object System.Collections.Generic.List[string]
+    foreach ($stream in @($stdout, $stderr)) {
+        foreach ($line in @($stream -split '\r?\n')) {
+            if ($line.Length -eq 0) {
+                continue
+            }
+            [void]$captured.Add($line)
+            Write-Log $line
+        }
+    }
+
+    return [pscustomobject]@{
+        ExitCode = $nativeExitCode
+        Output = ($captured -join [Environment]::NewLine)
+    }
+}
+
 function Invoke-RequiredNativeGate {
     param(
         [Parameter(Mandatory = $true)][string]$FilePath,
@@ -241,20 +290,16 @@ function Invoke-RequiredGitDiffCheck {
         $arguments += "--cached"
     }
     $arguments += "--check"
-    Write-Log ("> git {0}" -f ($arguments -join " "))
-
-    $capturedOutput = @(& git @arguments 2>&1)
-    $gitExitCode = $LASTEXITCODE
+    $result = Invoke-NativeProcessCapture -FilePath "git" -Arguments $arguments
     $autocrlfAdvisory = "^warning: in the working copy of '.+', LF will be replaced by CRLF the next time Git touches it$"
-    foreach ($item in $capturedOutput) {
-        $line = $item.ToString()
+    foreach ($line in @($result.Output -split '\r?\n')) {
         if ($line -cnotmatch $autocrlfAdvisory) {
             Write-Log $line
         }
     }
 
-    if ($gitExitCode -ne 0) {
-        throw "Native command exited with code $gitExitCode."
+    if ($result.ExitCode -ne 0) {
+        throw "Native command exited with code $($result.ExitCode)."
     }
 }
 

@@ -22,6 +22,35 @@ export type CertificationLevel = (typeof certificationLevels)[number];
 export type CertificationStatus = (typeof certificationStatuses)[number];
 export type CertificationEndorsement = (typeof certificationEndorsements)[number];
 
+export const certificationEndorsementsByLevel: Readonly<
+  Record<CertificationLevel, readonly CertificationEndorsement[]>
+> = {
+  L1: ["POOL"],
+  L2: ["POOL", "WATERFRONT"],
+  L3: ["POOL", "WATERFRONT", "OPEN_WATER"],
+  L4: ["POOL", "WATERFRONT", "OPEN_WATER", "WATERPARK"],
+  L5: ["POOL", "WATERFRONT", "OPEN_WATER", "WATERPARK"],
+  L6: ["POOL", "WATERFRONT", "OPEN_WATER", "WATERPARK", "INSTRUCTOR"],
+  L7: ["POOL", "WATERFRONT", "OPEN_WATER", "WATERPARK", "INSTRUCTOR"]
+};
+
+export function certificationEndorsementsForLevel(
+  level: string
+): readonly CertificationEndorsement[] {
+  switch (level) {
+    case "L1":
+    case "L2":
+    case "L3":
+    case "L4":
+    case "L5":
+    case "L6":
+    case "L7":
+      return certificationEndorsementsByLevel[level];
+    default:
+      return [];
+  }
+}
+
 export interface CreateCertificationRequest {
   readonly certification_level: CertificationLevel;
   readonly certification_number: string;

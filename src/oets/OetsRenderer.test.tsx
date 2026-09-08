@@ -131,12 +131,22 @@ function authContextValue(currentSession: typeof session): AuthContextValue {
 function mockFetchQueue(responses: MockResponse[]) {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    const next = responses.shift();
+    const url = readRequestPath(input);
 
     calls.push({
-      url: readRequestPath(input),
+      url,
       init
     });
+
+    if (url.includes("/context-requirement?")) {
+      return jsonResponse(200, {
+        required: false,
+        requirement_code: null,
+        selection_mode: null
+      });
+    }
+
+    const next = responses.shift();
 
     if (!next) {
       throw new Error(`Unexpected fetch call: ${String(input)}`);
@@ -157,6 +167,22 @@ function mockFetchQueue(responses: MockResponse[]) {
   vi.stubGlobal("fetch", fetchMock);
 
   return { calls };
+}
+
+function findRequest(
+  calls: Array<{ url: string; init?: RequestInit }>,
+  method: string,
+  url: string
+) {
+  const request = calls.find(
+    (call) => call.url === url && (call.init?.method ?? "GET") === method
+  );
+
+  if (!request) {
+    throw new Error(`Expected ${method} ${url} request.`);
+  }
+
+  return request;
 }
 
 function readRequestPath(input: RequestInfo | URL) {
@@ -546,7 +572,8 @@ describe("Generic OETS renderer", () => {
     expect(calls.map(({ url }) => url)).toEqual([
       "/api/v1/auth/refresh",
       "/api/v1/auth/me",
-      "/api/v1/operational-evidence/templates/ARBITRARY_RUNTIME_TEMPLATE/current"
+      "/api/v1/operational-evidence/templates/ARBITRARY_RUNTIME_TEMPLATE/current",
+      "/api/v1/operational-evidence/templates/ARBITRARY_RUNTIME_TEMPLATE/context-requirement?template_version_id=version-1&checksum=checksum-1"
     ]);
   });
 
@@ -2072,10 +2099,12 @@ describe("Generic OETS renderer", () => {
       "/workbench/evidence/evidence-record-1"
     );
 
-    const requestBody = JSON.parse(String(calls[3].init?.body));
-
-    expect(calls[3].url).toBe("/api/v1/operational-evidence/records");
-    expect(calls[3].init?.method).toBe("POST");
+    const submitRequest = findRequest(
+      calls,
+      "POST",
+      "/api/v1/operational-evidence/records"
+    );
+    const requestBody = JSON.parse(String(submitRequest.init?.body));
     expect(requestBody).toMatchObject({
       template_code: runtimeTemplate.template_code,
       template_version_id: runtimeTemplate.template_version_id,
@@ -2132,7 +2161,11 @@ describe("Generic OETS renderer", () => {
 
     await user.click(screen.getByRole("button", { name: "Create Audit Draft" }));
 
-    const requestBody = JSON.parse(String(calls[0].init?.body));
+    const requestBody = JSON.parse(String(findRequest(
+      calls,
+      "POST",
+      "/api/v1/operational-evidence/records"
+    ).init?.body));
 
     expect(requestBody.template_version_id).toBe(runtimeTemplate.template_version_id);
     expect(requestBody.checksum).toBe(runtimeTemplate.checksum);
@@ -2163,7 +2196,11 @@ describe("Generic OETS renderer", () => {
 
     await user.click(await screen.findByRole("button", { name: "Create Audit Draft" }));
 
-    const requestBody = JSON.parse(String(calls[3].init?.body));
+    const requestBody = JSON.parse(String(findRequest(
+      calls,
+      "POST",
+      "/api/v1/operational-evidence/records"
+    ).init?.body));
 
     expect(requestBody.facility_id).toBeUndefined();
   });
@@ -2193,7 +2230,11 @@ describe("Generic OETS renderer", () => {
     );
     await user.click(screen.getByRole("button", { name: "Create Audit Draft" }));
 
-    const requestBody = JSON.parse(String(calls[3].init?.body));
+    const requestBody = JSON.parse(String(findRequest(
+      calls,
+      "POST",
+      "/api/v1/operational-evidence/records"
+    ).init?.body));
 
     expect(requestBody.facility_id).toBe(multiFacilitySession.facilityIds[1]);
   });
@@ -2213,7 +2254,13 @@ describe("Generic OETS renderer", () => {
       await screen.findAllByText("You must first select a client before creating an audit draft.")
     ).toHaveLength(2);
     expect(screen.getByRole("button", { name: "Create Audit Draft" })).toBeDisabled();
-    expect(calls).toHaveLength(4);
+    expect(calls.some((call) =>
+      call.url.includes("/context-requirement?")
+    )).toBe(true);
+    expect(calls.some((call) =>
+      call.url === "/api/v1/operational-evidence/records" &&
+      call.init?.method === "POST"
+    )).toBe(false);
   });
 
   it("submits OGI bootstrap evidence using explicitly selected client context", async () => {
@@ -2243,9 +2290,11 @@ describe("Generic OETS renderer", () => {
       await screen.findByText("Draft audit created successfully.")
     ).toBeInTheDocument();
 
-    const requestBody = JSON.parse(String(calls[5].init?.body));
-
-    expect(calls[5].url).toBe("/api/v1/operational-evidence/records");
+    const requestBody = JSON.parse(String(findRequest(
+      calls,
+      "POST",
+      "/api/v1/operational-evidence/records"
+    ).init?.body));
     expect(requestBody).toMatchObject({
       client_id: session.clientId,
       payload: {
@@ -2274,7 +2323,16 @@ describe("Generic OETS renderer", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        calls.push({ url: readRequestPath(input), init });
+        const url = readRequestPath(input);
+        calls.push({ url, init });
+
+        if (url.includes("/context-requirement?")) {
+          return jsonResponse(200, {
+            required: false,
+            requirement_code: null,
+            selection_mode: null
+          });
+        }
 
         if (calls.length === 1) {
           return jsonResponse(200, { accessToken: "access-token" });
@@ -2316,7 +2374,16 @@ describe("Generic OETS renderer", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        calls.push({ url: readRequestPath(input), init });
+        const url = readRequestPath(input);
+        calls.push({ url, init });
+
+        if (url.includes("/context-requirement?")) {
+          return jsonResponse(200, {
+            required: false,
+            requirement_code: null,
+            selection_mode: null
+          });
+        }
 
         if (calls.length === 1) {
           return jsonResponse(200, { accessToken: "access-token" });
@@ -2577,7 +2644,11 @@ describe("Generic OETS renderer", () => {
 
     await user.click(screen.getByRole("button", { name: "Create Audit Draft" }));
 
-    const requestBody = JSON.parse(String(calls[0].init?.body));
+    const requestBody = JSON.parse(String(findRequest(
+      calls,
+      "POST",
+      "/api/v1/operational-evidence/records"
+    ).init?.body));
 
     expect(requestBody.facility_id).toBe(changedFacilitySession.facilityIds[0]);
   });
@@ -3487,6 +3558,170 @@ function optionField(
     expect(screen.queryByRole("button", { name: "Claim Review" })).not.toBeInTheDocument();
   });
 
+  it("projects deliberately resolved Certification authority into read-only F-048 fields", async () => {
+    const queryClient = createTestQueryClient();
+    const f048Runtime = {
+      ...runtimeTemplate,
+      template_code: "OGI_F048_DIGITAL_CREDENTIAL_ISSUANCE_FORM",
+      template_version: "3.0",
+      checksum: "4fca44a7f984e685a058b2653222afae9c79078d325e583673f7a1767805b116"
+    };
+    const f048Definition: OetsDefinition = {
+      ...definition,
+      template_metadata: {
+        ...definition.template_metadata,
+        template_code: f048Runtime.template_code,
+        template_name: "Digital Credential & Verification Management Form",
+        version: "3.0"
+      },
+      sections: [{
+        section_id: "credential-identification",
+        section_code: "CREDENTIAL_IDENTIFICATION",
+        title: "Credential Identification",
+        sequence: 1,
+        repeatable: false,
+        visible: true,
+        fields: [
+          textField("CREDENTIAL_NUMBER", "Credential Number", "TEXT", 1),
+          textField("CERTIFICATION_NUMBER", "Certification Number", "TEXT", 2),
+          textField("STUDENT_NUMBER", "Student Number", "TEXT", 3),
+          textField("CREDENTIAL_ISSUE_DATE", "Credential Issue Date", "DATE", 4),
+          textField("CREDENTIAL_EXPIRATION_DATE", "Credential Expiration Date", "DATE", 5),
+          {
+            ...textField("CERTIFICATION_LEVEL", "Certification Level", "RADIO", 6),
+            options: [
+              { label: "OGI-L1 Pool Lifeguard", value: "OGI_L1_POOL_LIFEGUARD", sequence: 1 },
+              { label: "OGI-L2 Beach Lifeguard", value: "OGI_L2_BEACH_LIFEGUARD", sequence: 2 }
+            ]
+          },
+          textField("CURRENT_CRI_SCORE_100", "Current CRI Score", "DECIMAL", 7),
+          textField("CRI_CLASSIFICATION", "CRI Classification", "TEXT", 8),
+          textField("DEFENSIBILITY_SCORE_100", "Defensibility Score", "DECIMAL", 9),
+          textField("DEFENSIBILITY_CLASSIFICATION", "Defensibility Classification", "TEXT", 10)
+        ]
+      }]
+    };
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = readRequestPath(input);
+      calls.push({ url, init });
+      if (url.includes("/context-requirement?")) return jsonResponse(200, {
+        required: true,
+        requirement_code: "CERTIFICATION_CONTEXT",
+        selection_mode: "EXPLICIT"
+      });
+      if (url.includes("/context-candidates?") && !url.includes("/certification-1?")) return jsonResponse(200, {
+        candidates: [{
+          id: "certification-1",
+          primary_label: "MBC-generation-009-L1",
+          secondary_label: "Marvin Beach Club L1 Trainee generation-009 · L1",
+          holder_kind: "TRAINEE"
+        }],
+        count: 1,
+        selection_mode: "EXPLICIT"
+      });
+      if (url.includes("/context-candidates/certification-1?")) return jsonResponse(200, {
+        requirement_code: "CERTIFICATION_CONTEXT",
+        selected_id: "certification-1",
+        summary: {
+          id: "certification-1",
+          primary_label: "MBC-generation-009-L1",
+          secondary_label: "Marvin Beach Club L1 Trainee generation-009 · L1",
+          holder_kind: "TRAINEE"
+        },
+        field_policy: {
+          CREDENTIAL_NUMBER: "UNAVAILABLE_POST_ISSUANCE",
+          CERTIFICATION_NUMBER: "READ_ONLY_DERIVED",
+          STUDENT_NUMBER: "READ_ONLY_DERIVED",
+          CREDENTIAL_ISSUE_DATE: "UNAVAILABLE_POST_ISSUANCE",
+          CREDENTIAL_EXPIRATION_DATE: "UNAVAILABLE_POST_ISSUANCE",
+          CERTIFICATION_LEVEL: "READ_ONLY_DERIVED",
+          CURRENT_CRI_SCORE_100: "READ_ONLY_DERIVED",
+          CRI_CLASSIFICATION: "READ_ONLY_DERIVED",
+          DEFENSIBILITY_SCORE_100: "READ_ONLY_DERIVED",
+          DEFENSIBILITY_CLASSIFICATION: "READ_ONLY_DERIVED"
+        },
+        authoritative_values: {
+          CERTIFICATION_NUMBER: "MBC-generation-009-L1",
+          STUDENT_NUMBER: "OGI-STU-2026-0033",
+          CERTIFICATION_LEVEL: "OGI_L1_POOL_LIFEGUARD",
+          CURRENT_CRI_SCORE_100: 87.5,
+          CRI_CLASSIFICATION: "GOLD",
+          DEFENSIBILITY_SCORE_100: 92,
+          DEFENSIBILITY_CLASSIFICATION: "PLATINUM"
+        }
+      });
+      if (url === "/api/v1/operational-evidence/records" && init?.method === "POST") {
+        return jsonResponse(201, evidenceRecord());
+      }
+      throw new Error(`Unexpected F-048 request: ${url}`);
+    }));
+    queryClient.setQueryData(
+      ["oets-runtime-template", f048Runtime.template_code],
+      { ...f048Runtime, definition_jsonb: f048Definition }
+    );
+    const user = userEvent.setup();
+    renderRuntimeTemplatePageWithSession({
+      initialPath: `/workbench/oets/${f048Runtime.template_code}`,
+      queryClient,
+      currentSession: session
+    });
+
+    const selector = await screen.findByLabelText("Certification context");
+    const candidateOption = await screen.findByRole("option", {
+      name: "MBC-generation-009-L1 — Marvin Beach Club L1 Trainee generation-009 · L1"
+    });
+    expect(candidateOption).toHaveValue("certification-1");
+    expect(selector).toHaveValue("");
+    await user.selectOptions(selector, "certification-1");
+
+    const certificationNumber = await screen.findByDisplayValue("MBC-generation-009-L1");
+    const studentNumber = await screen.findByDisplayValue("OGI-STU-2026-0033");
+    expect(certificationNumber).toBeDisabled();
+    expect(studentNumber).toBeDisabled();
+    expect(screen.getByRole("radio", { name: "OGI-L1 Pool Lifeguard" })).toBeChecked();
+    expect(screen.getByRole("radio", { name: "OGI-L1 Pool Lifeguard" })).toBeDisabled();
+    expect(screen.getByLabelText("Credential Number")).toBeDisabled();
+    expect(screen.getByLabelText("Credential Number")).toHaveValue("");
+    expect(screen.getByLabelText("Credential Issue Date")).toBeDisabled();
+    expect(screen.getByLabelText("Credential Issue Date")).toHaveValue("");
+    expect(screen.getByLabelText("Credential Expiration Date")).toBeDisabled();
+    expect(screen.getByLabelText("Credential Expiration Date")).toHaveValue("");
+    expect(screen.getByLabelText("Current CRI Score")).toHaveValue(87.5);
+    expect(screen.getByLabelText("Current CRI Score")).toBeDisabled();
+    expect(screen.getByLabelText("CRI Classification")).toHaveValue("GOLD");
+    expect(screen.getByLabelText("CRI Classification")).toBeDisabled();
+    expect(screen.getByLabelText("Defensibility Score")).toHaveValue(92);
+    expect(screen.getByLabelText("Defensibility Score")).toBeDisabled();
+    expect(screen.getByLabelText("Defensibility Classification")).toHaveValue("PLATINUM");
+    expect(screen.getByLabelText("Defensibility Classification")).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "Create Audit Draft" }));
+    const requestBody = JSON.parse(String(findRequest(
+      calls,
+      "POST",
+      "/api/v1/operational-evidence/records"
+    ).init?.body));
+    expect(requestBody.context).toEqual({
+      requirement_code: "CERTIFICATION_CONTEXT",
+      selected_id: "certification-1"
+    });
+    expect(requestBody.payload.sections.CREDENTIAL_IDENTIFICATION).toMatchObject({
+      CERTIFICATION_NUMBER: "MBC-generation-009-L1",
+      STUDENT_NUMBER: "OGI-STU-2026-0033",
+      CERTIFICATION_LEVEL: "OGI_L1_POOL_LIFEGUARD",
+      CURRENT_CRI_SCORE_100: 87.5,
+      CRI_CLASSIFICATION: "GOLD",
+      DEFENSIBILITY_SCORE_100: 92,
+      DEFENSIBILITY_CLASSIFICATION: "PLATINUM"
+    });
+    expect(requestBody.payload.sections.CREDENTIAL_IDENTIFICATION).toMatchObject({
+      CREDENTIAL_NUMBER: null,
+      CREDENTIAL_ISSUE_DATE: null,
+      CREDENTIAL_EXPIRATION_DATE: null
+    });
+  });
+
   it("creates a governed-template draft only after deliberate Begin Evidence and uses the draft endpoint", async () => {
     const queryClient = createTestQueryClient();
     queryClient.setQueryData(
@@ -3501,12 +3736,21 @@ function optionField(
       currentSession: session
     });
 
-    expect(calls).toHaveLength(0);
     const begin = await screen.findByRole("button", { name: "Begin Evidence" });
+    await waitFor(() => expect(calls.some((call) =>
+      call.url.includes("/context-requirement?")
+    )).toBe(true));
+    expect(calls.some((call) => call.init?.method === "POST")).toBe(false);
     await user.dblClick(begin);
-    await waitFor(() => expect(calls).toHaveLength(1));
-    expect(calls[0].url).toBe("/api/v1/operational-evidence/records/drafts");
-    expect(JSON.parse(String(calls[0].init?.body)).idempotency_key).toEqual(expect.any(String));
+    await waitFor(() => expect(calls.filter((call) =>
+      call.url === "/api/v1/operational-evidence/records/drafts"
+    )).toHaveLength(1));
+    const draftRequest = findRequest(
+      calls,
+      "POST",
+      "/api/v1/operational-evidence/records/drafts"
+    );
+    expect(JSON.parse(String(draftRequest.init?.body)).idempotency_key).toEqual(expect.any(String));
     expect(await screen.findByText("Persisted evidence record route")).toBeVisible();
   });
 
@@ -3525,8 +3769,12 @@ function optionField(
     expect(screen.queryByText("Persisted evidence record route")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Begin Evidence" }));
     expect(await screen.findByText("Persisted evidence record route")).toBeVisible();
-    expect(calls).toHaveLength(2);
-    expect(JSON.parse(String(calls[0].init?.body)).idempotency_key).toBe(JSON.parse(String(calls[1].init?.body)).idempotency_key);
+    const draftRequests = calls.filter((call) =>
+      call.url === "/api/v1/operational-evidence/records/drafts" &&
+      call.init?.method === "POST"
+    );
+    expect(draftRequests).toHaveLength(2);
+    expect(JSON.parse(String(draftRequests[0].init?.body)).idempotency_key).toBe(JSON.parse(String(draftRequests[1].init?.body)).idempotency_key);
   });
 
   it("applies the shared section visual hierarchy across unrelated template fixtures", () => {
