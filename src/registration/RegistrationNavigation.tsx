@@ -8,7 +8,6 @@ export function RegistrationNavigation() {
   const canViewClients = auth.canUsePermission("view_client");
   const canViewFacilities = auth.canUsePermission("view_facility");
   const canViewPersonnel = auth.canUsePermission("view_staff_member");
-  const canViewTraining = auth.canUsePermission("view_training");
 
   return (
     <nav aria-label="Registration resource tabs">
@@ -34,13 +33,6 @@ export function RegistrationNavigation() {
             </NavLink>
           </li>
         ) : null}
-        {canViewTraining ? (
-          <li>
-            <NavLink className={childNavigationClassName} end to={routes.registrationTraining}>
-              Training
-            </NavLink>
-          </li>
-        ) : null}
       </ul>
     </nav>
   );
@@ -48,9 +40,7 @@ export function RegistrationNavigation() {
 
 function childNavigationClassName({ isActive }: { isActive: boolean }) {
   return [
-    "inline-flex min-h-10 items-center rounded-component border px-3 text-sm font-semibold outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-canvas",
-    isActive
-      ? "border-primary-navy bg-primary-navy text-text-inverse shadow-sm"
-      : "border border-border bg-surface text-text-primary hover:bg-elevated"
-  ].join(" ");
+    "cl-workspace-navigation-link",
+    isActive ? "cl-workspace-navigation-link-active" : ""
+  ].filter(Boolean).join(" ");
 }

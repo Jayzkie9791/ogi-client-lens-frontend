@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 
 import { routes } from "../../app/routePaths";
@@ -30,8 +30,14 @@ const navigationItems = [
   },
   {
     label: "Registration",
-    permissions: ["view_client", "view_facility", "view_staff_member", "view_training"],
+    permissions: ["view_client", "view_facility", "view_staff_member"],
     to: routes.registrationClients,
+    implemented: true
+  },
+  {
+    label: "Training",
+    permissions: ["view_training", "create_training_enrollment", "record_training_assessment"],
+    to: routes.training,
     implemented: true
   },
   {
@@ -94,6 +100,10 @@ export function AppShell() {
                     )
                   ) {
                     return null;
+                  }
+
+                  if (item.label === "Training") {
+                    return <TrainingNavigation key={item.label} />;
                   }
 
                   const navigationItem =
@@ -168,7 +178,29 @@ function registrationLandingPath(auth: ReturnType<typeof useAuth>) {
     return routes.registrationPersonnel;
   }
 
-  return routes.registrationTraining;
+  return routes.registrationPersonnel;
+}
+
+function TrainingNavigation() {
+  const auth = useAuth();
+  const detailsRef = useRef<HTMLDetailsElement>(null);
+  const items = [
+    { label: "Trainees", permission: "view_training", to: routes.trainingTrainees },
+    { label: "Training Sessions", permission: "view_training", to: routes.trainingSessions },
+    { label: "Register Training", permission: "create_training_enrollment", to: routes.trainingRegister },
+    { label: "Trainer Evaluations", permission: "record_training_assessment", to: routes.trainerCommercialEvaluations }
+  ].filter((item) => auth.canUsePermission(item.permission));
+
+  return <li className="relative">
+    <details ref={detailsRef}>
+      <summary className="inline-flex min-h-10 cursor-pointer list-none items-center gap-1 rounded-component px-3 text-sm font-semibold text-text-muted outline-none hover:bg-elevated hover:text-text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 [&::-webkit-details-marker]:hidden">
+        Training <span aria-hidden="true" className="text-xs">▾</span>
+      </summary>
+      <ul aria-label="Training navigation" className="z-20 mt-1 min-w-52 space-y-1 rounded-component border border-border bg-surface p-2 shadow-lg lg:absolute lg:left-0 lg:top-full">
+        {items.map((item) => <li key={item.to}><NavLink className={({ isActive }) => ["block rounded-component px-3 py-2 text-sm font-semibold outline-none focus-visible:ring-2 focus-visible:ring-focus", isActive ? "bg-primary-navy text-text-inverse" : "text-text-primary hover:bg-elevated"].join(" ")} onClick={() => detailsRef.current?.removeAttribute("open")} to={item.to}>{item.label}</NavLink></li>)}
+      </ul>
+    </details>
+  </li>;
 }
 
 function auditRiskLandingPath(auth: ReturnType<typeof useAuth>) {

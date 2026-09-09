@@ -806,10 +806,9 @@ describe("Registration Training frontend", () => {
       { url: "/api/v1/registration/personnel", responses: [{ status: 200, body: { personnel: [staffA] } }] },
       { url: "/api/v1/training/sessions", responses: [{ status: 200, body: { sessions: [] } }] }
     ]);
-    renderWithRoute(routes.registrationTraining);
+    renderWithRoute(routes.trainingRegister);
 
-    await user.click(await screen.findByRole("button", { name: "Register Training" }));
-    const dialog = screen.getByRole("dialog", { name: "Register Training" });
+    const dialog = await screen.findByRole("dialog", { name: "Register Training" }, { timeout: 5_000 });
     expect(dialog).toHaveAttribute("aria-modal", "true");
     expect(within(dialog).getByText("Current step: Trainee")).toBeVisible();
     await user.click(within(dialog).getByRole("radio", { name: "Register New Trainee" }));
@@ -849,9 +848,9 @@ describe("Registration Training frontend", () => {
       { url: "/api/v1/registration/personnel", responses: [{ status: 200, body: { personnel: [staffA] } }] },
       { url: "/api/v1/training/sessions", responses: [{ status: 200, body: { sessions: [qualifiedSession] } }, { status: 200, body: { sessions: [qualifiedSession] } }] }
     ]);
-    renderWithRoute(routes.registrationTraining);
-    await user.click(await screen.findByRole("button", { name: "Register Training" }));
-    const dialog = screen.getByRole("dialog", { name: "Register Training" });
+    renderWithRoute(routes.trainingRegister);
+    const dialog = await screen.findByRole("dialog", { name: "Register Training" }, { timeout: 5_000 });
+    await within(dialog).findByRole("option", { name: new RegExp(traineeA.full_name) });
     await user.selectOptions(within(dialog).getByRole("combobox", { name: "Existing Trainee" }), traineeAId);
     await user.click(within(dialog).getByRole("button", { name: "Next →" }));
     await user.selectOptions(within(dialog).getByLabelText("Program"), "GUARDIAN_RESPONDER");
@@ -912,35 +911,28 @@ describe("Registration Training frontend", () => {
     ).toBe(false);
   });
 
-  it("adds permission-gated Training navigation and loads the route", async () => {
+  it("exposes permission-gated Training workspaces outside Registration", async () => {
     const user = userEvent.setup();
     const { calls } = mockFetchRoutes(standardRoutes());
 
     renderWithRoute(routes.workbench);
 
     await user.click(await screen.findByRole("button", { name: "Menu" }));
-    await user.click(screen.getByRole("link", { name: "Registration" }));
-    await user.click(await screen.findByRole("link", { name: "Training" }));
+    await user.click(screen.getByText("Training", { selector: "summary" }));
+    await user.click(await screen.findByRole("link", { name: "Trainees" }));
 
     expect(
-      await screen.findByRole("heading", { name: "Training" })
+      await screen.findByRole("heading", { name: "Trainees" })
     ).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Training" })).toHaveAttribute(
+    const workspaceNavigation = screen.getByRole("navigation", { name: "Training workspaces" });
+    expect(within(workspaceNavigation).getByRole("link", { name: "Trainees" })).toHaveAttribute(
       "aria-current",
       "page"
     );
-    expect(screen.getByRole("link", { name: "Clients" })).toHaveAttribute(
-      "href",
-      routes.registrationClients
-    );
-    expect(screen.getByRole("link", { name: "Facilities" })).toHaveAttribute(
-      "href",
-      routes.registrationFacilities
-    );
-    expect(screen.getByRole("link", { name: "Personnel" })).toHaveAttribute(
-      "href",
-      routes.registrationPersonnel
-    );
+    expect(screen.queryByRole("link", { name: "Training" })).not.toBeInTheDocument();
+    expect(within(workspaceNavigation).getByRole("link", { name: "Training Sessions" })).toHaveAttribute("href", routes.trainingSessions);
+    expect(within(workspaceNavigation).getByRole("link", { name: "Register Training" })).toHaveAttribute("href", routes.trainingRegister);
+    expect(screen.queryByRole("navigation", { name: "Registration resource tabs" })).not.toBeInTheDocument();
     expect(calls.map(({ url }) => url)).toContain("/api/v1/auth/refresh");
     expect(calls.map(({ url }) => url)).toContain("/api/v1/auth/me");
     await waitFor(() => {
@@ -1034,11 +1026,8 @@ describe("Registration Training frontend", () => {
       ])
     );
 
-    renderWithRoute(routes.registrationTraining);
-    await user.click(
-      await screen.findByRole("button", { name: "Create Training Session" })
-    );
-    await user.type(screen.getByLabelText("Session title"), "Qualified cohort");
+    renderWithRoute(routes.trainingSessions);
+    await user.type(await screen.findByLabelText("Session title", {}, { timeout: 5_000 }), "Qualified cohort");
     await user.type(screen.getByLabelText("Starts"), "2026-09-01T08:00");
     await user.selectOptions(screen.getByLabelText("Facility"), trainingFacility.id);
     await user.selectOptions(screen.getByLabelText("Primary instructor"), staffAId);

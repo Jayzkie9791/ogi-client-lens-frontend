@@ -1,5 +1,6 @@
 import { ReactNode } from "react";
 
+import { WorkspaceShell } from "../ui/components/WorkspaceShell";
 import { RegistrationNavigation } from "./RegistrationNavigation";
 
 interface RegistrationWorkspaceShellProps {
@@ -15,36 +16,14 @@ export function RegistrationWorkspaceShell({
   headingId,
   title
 }: RegistrationWorkspaceShellProps) {
-  return (
-    <section aria-labelledby="registration-workspace-heading" className="space-y-5">
-      <div className="space-y-4 border-b border-border pb-4">
-        <div>
-          <h1
-            className="text-2xl font-semibold text-text-primary"
-            id="registration-workspace-heading"
-          >
-            Registration
-          </h1>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-text-muted">
-            Manage organizations, facilities, personnel, and training identities registered with Client Lens.
-          </p>
-        </div>
-
-        <RegistrationNavigation />
-      </div>
-
-      <section aria-labelledby={headingId} className="space-y-4">
-        <div>
-          <h2 className="text-xl font-semibold text-text-primary" id={headingId}>
-            {title}
-          </h2>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-text-muted">
-            {description}
-          </p>
-        </div>
-
-        {children}
-      </section>
-    </section>
-  );
+  return <WorkspaceShell
+    description="Manage organizations, facilities, and personnel registered with Client Lens."
+    headingId={headingId}
+    navigation={<RegistrationNavigation />}
+    sectionDescription={description}
+    sectionTitle={title}
+    title="Registration"
+  >
+    {children}
+  </WorkspaceShell>;
 }

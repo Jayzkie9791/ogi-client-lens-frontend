@@ -4,6 +4,138 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer components {
+  .cl-workflow-overlay {
+    background: var(--cl-workflow-overlay);
+  }
+
+  .cl-workflow-dialog {
+    max-width: var(--cl-workflow-width);
+  }
+
+  .cl-workflow-header {
+    background: var(--cl-workflow-header);
+    border-color: var(--cl-workflow-border);
+  }
+
+  .cl-workflow-canvas {
+    background: var(--cl-workflow-canvas);
+  }
+
+  .cl-workflow-card {
+    border-color: var(--cl-workflow-card-border);
+    box-shadow: var(--cl-workflow-shadow);
+  }
+
+  .cl-workflow-divider {
+    border-color: var(--cl-workflow-divider);
+  }
+
+  .cl-workflow-footer {
+    background: var(--cl-workflow-footer);
+    border-color: var(--cl-workflow-border);
+    box-shadow: var(--cl-workflow-footer-shadow);
+  }
+
+  .cl-workflow-choice-selected {
+    background: var(--cl-workflow-selected);
+  }
+
+  .cl-workflow-progress-track {
+    background: var(--cl-workflow-progress-track);
+  }
+
+  .cl-workspace-page {
+    display: grid;
+    gap: 1.25rem;
+  }
+
+  .cl-workspace-header {
+    overflow: hidden;
+    border: 1px solid var(--cl-workspace-border);
+    border-left: 5px solid var(--cl-color-accent-red);
+    border-radius: var(--cl-radius-panel);
+    background: var(--cl-workspace-header);
+    box-shadow: var(--cl-workspace-shadow);
+  }
+
+  .cl-workspace-header-copy {
+    padding: 1.25rem 1.5rem 1rem;
+  }
+
+  .cl-workspace-navigation {
+    border-top: 1px solid var(--cl-workspace-divider);
+    background: rgb(255 255 255 / 0.72);
+    padding: 0.75rem 1.5rem;
+  }
+
+  .cl-workspace-navigation-link {
+    display: inline-flex;
+    min-height: 2.5rem;
+    align-items: center;
+    border: 1px solid var(--cl-workspace-border);
+    border-radius: var(--cl-radius-component);
+    background: var(--cl-workspace-panel);
+    padding-inline: 0.875rem;
+    color: var(--cl-color-text-primary);
+    font-size: 0.875rem;
+    font-weight: 600;
+    outline: none;
+    transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease;
+  }
+
+  .cl-workspace-navigation-link:hover {
+    border-color: var(--cl-color-primary-blue);
+    background: var(--cl-workspace-selected);
+  }
+
+  .cl-workspace-navigation-link:focus-visible {
+    box-shadow: 0 0 0 2px var(--cl-color-focus), 0 0 0 4px var(--cl-workspace-header);
+  }
+
+  .cl-workspace-navigation-link-active {
+    border-color: var(--cl-color-primary-navy);
+    background: var(--cl-color-primary-navy);
+    color: var(--cl-color-text-inverse);
+    box-shadow: var(--cl-shadow-panel);
+  }
+
+  .cl-workspace-content {
+    display: grid;
+    gap: 1.25rem;
+    border: 1px solid var(--cl-workspace-border);
+    border-radius: var(--cl-radius-panel);
+    background: var(--cl-workspace-canvas);
+    padding: 1rem;
+    box-shadow: var(--cl-workspace-shadow);
+  }
+
+  .cl-workspace-content-heading {
+    border-left: 4px solid var(--cl-color-accent-red);
+    border-radius: var(--cl-radius-component);
+    background: var(--cl-workspace-panel);
+    padding: 1rem 1.25rem;
+  }
+
+  .cl-workspace-frame {
+    border-color: var(--cl-workspace-border);
+    background: var(--cl-workspace-panel);
+    box-shadow: var(--cl-workspace-shadow);
+  }
+
+  @media (min-width: 640px) {
+    .cl-workspace-content {
+      padding: 1.25rem;
+    }
+  }
+
+  @media (min-width: 640px) {
+    .cl-workflow-dialog {
+      height: var(--cl-workflow-height);
+    }
+  }
+}
+
 * {
   box-sizing: border-box;
 }

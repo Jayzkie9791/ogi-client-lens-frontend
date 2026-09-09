@@ -118,10 +118,30 @@ export const appRoutes: RouteObject[] = [
           },
           {
             path: "workbench/registration/training",
-            element: lazyRoute(<RegistrationTrainingPage />)
+            element: <Navigate replace to={routes.trainingTrainees} />
           },
           {
             path: "workbench/registration/training/commercial-evaluations",
+            element: <Navigate replace to={routes.trainerCommercialEvaluations} />
+          },
+          {
+            path: "workbench/training",
+            element: <Navigate replace to={routes.trainingTrainees} />
+          },
+          {
+            path: "workbench/training/trainees",
+            element: lazyRoute(<RegistrationTrainingPage workspace="trainees" />)
+          },
+          {
+            path: "workbench/training/sessions",
+            element: lazyRoute(<RegistrationTrainingPage workspace="sessions" />)
+          },
+          {
+            path: "workbench/training/register",
+            element: lazyRoute(<RegistrationTrainingPage workspace="register" />)
+          },
+          {
+            path: "workbench/training/trainer-evaluations",
             element: lazyRoute(<TrainerCommercialEvaluationPage />)
           },
           {

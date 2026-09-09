@@ -21,7 +21,6 @@ import {
   listRegistrationPersonnel,
   RegistrationPersonnel
 } from "../registration/registrationPersonnelApi";
-import { RegistrationWorkspaceShell } from "../registration/RegistrationWorkspaceShell";
 import { formatRegistrationDateTime } from "../registration/registrationPresentation";
 import {
   RegistrationDirectoryItem,
@@ -64,6 +63,7 @@ import {
   TrainingTrainee
 } from "./trainingApi";
 import { RegisterTrainingWizard, type RegisterTrainingWizardResult } from "./RegisterTrainingWizard";
+import { TrainingWorkspaceShell } from "./TrainingWorkspaceShell";
 
 const permissions = {
   view: "view_training",
@@ -130,7 +130,7 @@ const emptySessionForm: SessionFormState = {
   notes: ""
 };
 
-export function RegistrationTrainingPage() {
+export function RegistrationTrainingPage({ workspace = "trainees" }: { readonly workspace?: "trainees" | "sessions" | "register" }) {
   const auth = useAuth();
   const queryClient = useQueryClient();
   const canView = auth.canUsePermission(permissions.view);
@@ -164,11 +164,11 @@ export function RegistrationTrainingPage() {
   const [enrollmentForm, setEnrollmentForm] =
     useState<EnrollmentFormState>(emptyEnrollmentForm);
   const [message, setMessage] = useState<string | null>(null);
-  const [isCreatingSession, setIsCreatingSession] = useState(false);
+  const [isCreatingSession, setIsCreatingSession] = useState(workspace === "sessions");
   const [sessionForm, setSessionForm] =
     useState<SessionFormState>(emptySessionForm);
-  const [sessionIdempotencyKey, setSessionIdempotencyKey] = useState("");
-  const [isRegisteringTraining, setIsRegisteringTraining] = useState(false);
+  const [sessionIdempotencyKey, setSessionIdempotencyKey] = useState(() => workspace === "sessions" ? crypto.randomUUID() : "");
+  const [isRegisteringTraining, setIsRegisteringTraining] = useState(workspace === "register");
 
   const traineesQuery = useQuery({
     queryKey: ["training-trainees"],
@@ -455,44 +455,15 @@ export function RegistrationTrainingPage() {
   }
 
   return (
-    <RegistrationWorkspaceShell
-      description="Manage Trainee identities, optional Personnel links, and Training Enrollments without implying completion or certification."
+    <TrainingWorkspaceShell
+      description={workspace === "sessions" ? "Create governed Training Sessions with an eligible Instructor and qualification." : workspace === "register" ? "Guide a Trainee through program enrollment and assignment to an eligible Training Session." : "Manage Trainee identities, optional Personnel links, and Training Enrollments without implying completion or certification."}
       headingId="registration-training-heading"
-      title="Training"
+      title={workspace === "sessions" ? "Training Sessions" : workspace === "register" ? "Register Training" : "Trainees"}
     >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <p className="text-sm leading-6 text-text-muted">
-          Register trainees, link known Personnel records when appropriate, and add governed training enrollments.
-        </p>
+        <p className="text-sm leading-6 text-text-muted">{workspace === "sessions" ? "Create a Session using exact Facility, Instructor, and active L6/L7 qualification authority." : workspace === "register" ? "Select or create a Trainee, choose the program, and assign an eligible Session through the guided workflow." : "Register trainees, link known Personnel records when appropriate, and review governed training enrollments."}</p>
         <div className="flex flex-wrap gap-2">
-          {canCreateEnrollment ? (
-            <Button
-              aria-expanded={isRegisteringTraining}
-              onClick={() => {
-                setMessage(null);
-                setIsRegisteringTraining(true);
-              }}
-              type="button"
-            >
-              Register Training
-            </Button>
-          ) : null}
-          {canCreateSession ? (
-            <Button
-              aria-expanded={isCreatingSession}
-              onClick={() => {
-                setMessage(null);
-                setSessionForm(emptySessionForm);
-                setSessionIdempotencyKey(crypto.randomUUID());
-                setIsCreatingSession(true);
-              }}
-              type="button"
-              variant="secondary"
-            >
-              Create Training Session
-            </Button>
-          ) : null}
-          {canRegisterTrainee ? (
+          {workspace === "trainees" && canRegisterTrainee ? (
             <Button
               aria-expanded={isCreatingTrainee}
               onClick={startRegisterTrainee}
@@ -653,7 +624,7 @@ export function RegistrationTrainingPage() {
           )}
         />
       )}
-    </RegistrationWorkspaceShell>
+    </TrainingWorkspaceShell>
   );
 }
 

@@ -12,7 +12,7 @@ export function RegistrationWorkspaceFrame({
 }) {
   return (
     <div
-      className="grid items-start gap-5 rounded-panel border border-border bg-elevated p-3 sm:p-4 lg:grid-cols-[minmax(17rem,0.8fr)_1px_minmax(0,1.2fr)]"
+      className="cl-workspace-frame grid items-start gap-5 rounded-panel border p-3 sm:p-4 lg:grid-cols-[minmax(17rem,0.8fr)_1px_minmax(0,1.2fr)]"
       data-testid="registration-workspace-frame"
     >
       {directory}
