@@ -24,6 +24,8 @@ import {
   updateRegistrationPersonnel
 } from "./registrationPersonnelApi";
 import { RegistrationFacilityAssignmentsPanel } from "./RegistrationFacilityAssignmentsPanel";
+import { OgiPersonnelCreatePanel } from "./OgiPersonnelCreatePanel";
+import { OgiOperationalAuthorityPanel } from "./OgiOperationalAuthorityPanel";
 import { RegistrationWorkspaceShell } from "./RegistrationWorkspaceShell";
 import { formatRegistrationDate, formatRegistrationDateTime } from "./registrationPresentation";
 import {
@@ -45,6 +47,8 @@ const permissions = {
   update: "update_staff_member",
   deactivate: "deactivate_staff_member",
   viewFacilityAssignments: "view_facility_assignment"
+  ,viewOperationalAuthority: "view_personnel_operational_authorization"
+  ,manageOperationalAuthority: "manage_personnel_operational_authorization"
 } as const;
 
 type PersonnelSecondaryTab = "overview" | "facilities";
@@ -81,6 +85,8 @@ export function RegistrationPersonnelPage() {
   const canViewFacilityAssignments = auth.canUsePermission(
     permissions.viewFacilityAssignments
   );
+  const canViewOperationalAuthority = auth.canUsePermission(permissions.viewOperationalAuthority) && auth.session?.clientId === null;
+  const canManageOperationalAuthority = auth.canUsePermission(permissions.manageOperationalAuthority) && auth.session?.clientId === null;
   const [clientFilter, setClientFilter] = useState("");
   const [facilityFilter, setFacilityFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<
@@ -89,6 +95,7 @@ export function RegistrationPersonnelPage() {
   const [selectedPersonnelId, setSelectedPersonnelId] = useState<string | null>(null);
   const [personnelIdBeforeCreate, setPersonnelIdBeforeCreate] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  const [isCreatingOgi, setIsCreatingOgi] = useState(false);
   const [selectedTab, setSelectedTab] = useState<PersonnelSecondaryTab>("overview");
   const [createForm, setCreateForm] = useState<PersonnelFormState>({
     ...emptyCreateForm,
@@ -251,6 +258,15 @@ export function RegistrationPersonnelPage() {
         ""
     });
     setIsCreating(true);
+    setIsCreatingOgi(false);
+    setSelectedTab("overview");
+  }
+
+  function startCreateOgiPersonnel() {
+    setMessage(null);
+    setPersonnelIdBeforeCreate(selectedPersonnelId);
+    setIsCreating(false);
+    setIsCreatingOgi(true);
     setSelectedTab("overview");
   }
 
@@ -263,11 +279,13 @@ export function RegistrationPersonnelPage() {
     setSelectedPersonnelId(personnelIdBeforeCreate);
     setPersonnelIdBeforeCreate(null);
     setIsCreating(false);
+    setIsCreatingOgi(false);
     setSelectedTab("overview");
   }
 
   function selectPersonnel(staffMemberId: string) {
     setIsCreating(false);
+    setIsCreatingOgi(false);
     setPersonnelIdBeforeCreate(null);
     setSelectedPersonnelId(staffMemberId);
     setSelectedTab("overview");
@@ -316,7 +334,7 @@ export function RegistrationPersonnelPage() {
             Find personnel, review profile details, and manage where each person works.
           </p>
         </div>
-        {canCreate ? (
+        <div className="flex flex-wrap gap-2">{canCreate ? (
           <Button
             aria-expanded={isCreating}
             onClick={startCreatePersonnel}
@@ -324,7 +342,7 @@ export function RegistrationPersonnelPage() {
           >
             Register Personnel
           </Button>
-        ) : null}
+        ) : null}{canManageOperationalAuthority ? <Button aria-expanded={isCreatingOgi} onClick={startCreateOgiPersonnel} type="button" variant="secondary">Register OGI Personnel</Button> : null}</div>
       </div>
 
       {message ? (
@@ -363,7 +381,14 @@ export function RegistrationPersonnelPage() {
             personnel={personnel}
             selectedPersonnelId={selectedPersonnelId}
           />}
-          workspace={isCreating ? (
+          workspace={isCreatingOgi ? <OgiPersonnelCreatePanel onCancel={cancelCreatePersonnel} onCreated={(staffMember) => {
+            setMessage("OGI Personnel record created successfully.");
+            setSelectedPersonnelId(staffMember.id);
+            setPersonnelIdBeforeCreate(null);
+            setIsCreatingOgi(false);
+            void queryClient.invalidateQueries({ queryKey: ["registration-personnel"] });
+            queryClient.setQueryData(["registration-personnel", staffMember.id], staffMember);
+          }} /> : isCreating ? (
             <PersonnelCreatePanel
               clients={clients}
               formState={createForm}
@@ -376,10 +401,10 @@ export function RegistrationPersonnelPage() {
           ) : personnel.length === 0 ? (
             <PersonnelEmptyDetailPanel canCreate={canCreate} />
           ) : (
-            <PersonnelDetailsPanel
+            <><PersonnelDetailsPanel
               canDeactivate={canDeactivate}
               canUpdate={canUpdate}
-              canViewFacilityAssignments={canViewFacilityAssignments}
+              canViewFacilityAssignments={canViewFacilityAssignments && (!selectedPersonnelQuery.data || personnelAffiliation(selectedPersonnelQuery.data) === "CLIENT")}
               clientNameById={clientNameById}
               editForm={editForm}
               isLoading={selectedPersonnelQuery.isLoading}
@@ -390,7 +415,7 @@ export function RegistrationPersonnelPage() {
               onTabChange={setSelectedTab}
               selectedTab={selectedTab}
               staffMember={selectedPersonnelQuery.data ?? null}
-            />
+            />{selectedPersonnelQuery.data && personnelAffiliation(selectedPersonnelQuery.data) === "OGI" && canViewOperationalAuthority ? <OgiOperationalAuthorityPanel canManage={canManageOperationalAuthority} personnelId={selectedPersonnelQuery.data.id} /> : null}</>
           )}
         />
       )}
@@ -529,7 +554,7 @@ function PersonnelList({
                     {staffMember.hire_date ? <span>Hired {formatRegistrationDate(staffMember.hire_date)}</span> : null}
                   </span>
                   <span className="mt-2 block break-words text-sm text-text-muted">
-                    {clientLabel(staffMember.client_id, clientNameById)}
+                    {personnelAffiliation(staffMember) === "OGI" ? "Ocean Guard International" : clientLabel(staffMember.client_id, clientNameById)}
                   </span>
                   {staffMember.email ? (
                     <span className="mt-2 block break-words text-sm text-text-muted">
@@ -597,7 +622,7 @@ function PersonnelDetailsPanel({
         <div className="space-y-4">
           <RegistrationEntityHeader
             identity={staffMember.full_name}
-            secondary={<>{clientLabel(staffMember.client_id, clientNameById)}{staffMember.email ? ` · ${staffMember.email}` : ""}</>}
+            secondary={<>{personnelAffiliation(staffMember) === "OGI" ? "Ocean Guard International" : clientLabel(staffMember.client_id, clientNameById)}{staffMember.email ? ` · ${staffMember.email}` : ""}</>}
             status={staffMember.employment_status}
           />
 
@@ -705,7 +730,8 @@ function PersonnelOverview({
     >
       <RegistrationMetadataGroup description="System relationships and record history remain secondary to the employment profile.">
         <RegistrationMetadataItem label="Administrative Personnel ID" value={staffMember.id} subtle />
-        <RegistrationMetadataItem label="Administrative Client ID" value={staffMember.client_id} subtle />
+        <RegistrationMetadataItem label="Affiliation" value={personnelAffiliation(staffMember)} />
+        <RegistrationMetadataItem label="Administrative Client ID" value={staffMember.client_id ?? "Not client-affiliated"} subtle />
         <RegistrationMetadataItem
           label="Platform user"
           value={staffMember.user_id ?? "No linked user account"}
@@ -717,7 +743,7 @@ function PersonnelOverview({
 
       {canUpdate ? (
         <RegistrationEditableSection
-          description={`Employment information for ${clientLabel(staffMember.client_id, clientNameById)}.`}
+          description={`Employment information for ${personnelAffiliation(staffMember) === "OGI" ? "Ocean Guard International" : clientLabel(staffMember.client_id, clientNameById)}.`}
           title="Employment profile"
         >
           <PersonnelForm
@@ -1056,7 +1082,7 @@ function formStateFromPersonnel(
   staffMember: RegistrationPersonnel
 ): PersonnelFormState {
   return {
-    clientId: staffMember.client_id,
+    clientId: staffMember.client_id ?? "",
     fullName: staffMember.full_name,
     email: staffMember.email ?? "",
     phoneNumber: staffMember.phone_number ?? "",
@@ -1070,10 +1096,15 @@ function buildClientNameMap(clients: RegistrationClient[]) {
   return new Map(clients.map((client) => [client.id, client.organization_name]));
 }
 
-function clientLabel(clientId: string, clientNameById: Map<string, string>) {
+function clientLabel(clientId: string | null, clientNameById: Map<string, string>) {
+  if (!clientId) return "Not client-affiliated";
   const name = clientNameById.get(clientId);
 
   return name ?? clientId;
+}
+
+function personnelAffiliation(staffMember: RegistrationPersonnel): "CLIENT" | "OGI" {
+  return staffMember.organizational_affiliation ?? (staffMember.client_id === null ? "OGI" : "CLIENT");
 }
 
 function displayCode(value: string) {

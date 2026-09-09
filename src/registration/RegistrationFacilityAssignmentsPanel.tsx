@@ -81,8 +81,8 @@ export function RegistrationFacilityAssignmentsPanel({
 
   const facilitiesQuery = useQuery({
     queryKey: ["registration-facilities", staffMember.client_id],
-    queryFn: () => listRegistrationFacilities({ clientId: staffMember.client_id }),
-    enabled: canView && canViewFacilities,
+    queryFn: () => listRegistrationFacilities({ clientId: staffMember.client_id ?? "" }),
+    enabled: canView && canViewFacilities && staffMember.client_id !== null,
     retry: false
   });
   const facilities = useMemo(

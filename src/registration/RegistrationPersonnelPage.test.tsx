@@ -246,6 +246,53 @@ afterEach(() => {
 });
 
 describe("Registration Personnel frontend", () => {
+  it("registers OGI Personnel by deliberately linking an active unlinked platform user", async () => {
+    const user = userEvent.setup();
+    const ogiSession = {
+      ...baseSession,
+      permissions: [...baseSession.permissions, "manage_personnel_operational_authorization", "view_users"]
+    };
+    const linkableUser = {
+      id: "00000000-0000-4000-8000-000000000077",
+      email: "braven@ogiofficial.com",
+      username: "braven.burrows",
+      full_name: "Braven Burrows",
+      status: "ACTIVE",
+      personnel_link_available: true
+    };
+    const ogiPersonnel: RegistrationPersonnel = {
+      ...staffA,
+      id: "00000000-0000-4000-8000-000000300077",
+      client_id: null,
+      organizational_affiliation: "OGI",
+      user_id: linkableUser.id,
+      full_name: linkableUser.full_name,
+      email: linkableUser.email
+    };
+    const { calls } = mockFetchRoutes([
+      ...authRoutes(ogiSession),
+      { url: "/api/v1/registration/clients", responses: [{ status: 200, body: { clients: [clientA] } }] },
+      { url: "/api/v1/registration/facilities", responses: [{ status: 200, body: { facilities: [facilityA] } }] },
+      { url: "/api/v1/registration/personnel", responses: [{ status: 200, body: { personnel: [staffA] } }, { status: 200, body: { personnel: [staffA, ogiPersonnel] } }] },
+      { url: `/api/v1/registration/personnel/${staffA.id}`, responses: [{ status: 200, body: staffA }] },
+      { url: "/api/v1/registration/personnel/linkable-users", responses: [{ status: 200, body: { users: [linkableUser] } }] },
+      { method: "POST", url: "/api/v1/registration/personnel/ogi", responses: [{ status: 201, body: { personnel: ogiPersonnel, replayed: false } }] }
+    ]);
+
+    renderWithRoute(routes.registrationPersonnel);
+    await user.click(await screen.findByRole("button", { name: "Register OGI Personnel" }));
+    const form = await screen.findByRole("form", { name: "Register OGI Personnel" });
+    await user.selectOptions(within(form).getByLabelText("Platform user"), linkableUser.id);
+    expect(within(form).getByLabelText("Full name")).toHaveValue("Braven Burrows");
+    await user.click(within(form).getByRole("button", { name: "Create OGI Personnel" }));
+
+    expect(await screen.findByText("OGI Personnel record created successfully.")).toBeVisible();
+    const createCall = calls.find((call) => call.url === "/api/v1/registration/personnel/ogi" && call.init?.method === "POST");
+    const requestHeaders = new Headers(createCall?.init?.headers);
+    expect(requestHeaders.get("idempotency-key")).toEqual(expect.any(String));
+    expect(JSON.parse(String(createCall?.init?.body))).toMatchObject({ user_id: linkableUser.id, full_name: "Braven Burrows" });
+  });
+
   it("renders the Personnel route and exposes all implemented Registration routes", async () => {
     const user = userEvent.setup();
     const { calls } = mockFetchRoutes(standardRoutes());

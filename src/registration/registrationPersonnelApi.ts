@@ -13,7 +13,8 @@ export type RegistrationPersonnelEmploymentStatus =
 
 export interface RegistrationPersonnel {
   id: string;
-  client_id: string;
+  client_id: string | null;
+  organizational_affiliation?: "CLIENT" | "OGI";
   user_id: string | null;
   full_name: string;
   email?: string | null;
@@ -130,11 +131,12 @@ function isRegistrationPersonnelListResponse(
   );
 }
 
-function isRegistrationPersonnel(value: unknown): value is RegistrationPersonnel {
+export function isRegistrationPersonnel(value: unknown): value is RegistrationPersonnel {
   return (
     isRecord(value) &&
     typeof value.id === "string" &&
-    typeof value.client_id === "string" &&
+    (typeof value.client_id === "string" || value.client_id === null) &&
+    (value.organizational_affiliation === undefined || value.organizational_affiliation === "CLIENT" || value.organizational_affiliation === "OGI") &&
     isNullableString(value.user_id) &&
     typeof value.full_name === "string" &&
     isNullableString(value.email) &&
