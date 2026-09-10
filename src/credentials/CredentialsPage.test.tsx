@@ -298,17 +298,19 @@ describe("Credentials V1 frontend", () => {
     renderWithRoute(routes.workbench);
 
     await user.click(await screen.findByRole("button", { name: "Menu" }));
+    await user.click(screen.getByRole("button", { name: "Credentials" }));
 
-    expect(screen.getByRole("link", { name: "Credentials & Certifications" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Credentials" })).toHaveAttribute(
       "href",
       routes.credentials
     );
-    expect(screen.getByRole("link", { name: "Registration" })).toHaveAttribute(
+    await user.click(screen.getByRole("button", { name: "Registration" }));
+    expect(screen.getByRole("link", { name: "Clients" })).toHaveAttribute(
       "href",
       routes.registrationClients
     );
 
-    await user.click(screen.getByRole("link", { name: "Registration" }));
+    await user.click(screen.getByRole("link", { name: "Clients" }));
 
     expect(
       await screen.findByRole("heading", { name: "Clients / Organizations" })
@@ -328,7 +330,7 @@ describe("Credentials V1 frontend", () => {
 
     await userEvent.click(await screen.findByRole("button", { name: "Menu" }));
 
-    expect(screen.queryByRole("link", { name: "Credentials & Certifications" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Credentials" })).not.toBeInTheDocument();
   });
 
   it("renders loading, success, empty, and error states for the personnel-centered list", async () => {

@@ -54,8 +54,9 @@ describe("authoritative Audit execution workspace", () => {
   });
 
   it("loads safely through loading, concealed, server, and malformed states", async () => {
-    let resolveExecution: (response: Response) => void = () => undefined;
-    mockRoutes([...authRoutes(), { url: executionPath(), response: () => new Promise<Response>((resolve) => { resolveExecution = resolve; }) }]);
+    let resolveExecution: (response: Response) => void = () => { throw new Error("Execution resolver was not initialized."); };
+    const pendingExecution = new Promise<Response>((resolve) => { resolveExecution = resolve; });
+    mockRoutes([...authRoutes(), { url: executionPath(), response: () => pendingExecution }]);
     renderExecution();
     expect(await screen.findByRole("heading", { name: "Loading Audit execution." })).toBeInTheDocument();
     resolveExecution(jsonResponse(execution()));

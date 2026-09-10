@@ -814,14 +814,14 @@ describe("Certification workspace frontend", () => {
     renderWithRoute(routes.workbench);
 
     await user.click(await screen.findByRole("button", { name: "Menu" }));
+    await user.click(screen.getByRole("button", { name: "Credentials" }));
 
     expect(
-      screen.getByRole("link", { name: "Credentials & Certifications" })
+      screen.getByRole("link", { name: "Certifications" })
     ).toHaveAttribute("href", routes.certifications);
-    expect(screen.queryByRole("link", { name: "Certifications" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Certificates" })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("link", { name: "Credentials & Certifications" }));
+    await user.click(screen.getByRole("link", { name: "Certifications" }));
 
     expect(
       await screen.findByRole("heading", { name: "Certification Registry" })
@@ -2855,7 +2855,7 @@ describe("Certification workspace frontend", () => {
     await user.selectOptions(screen.getByLabelText("Personnel"), staffMemberId);
     await user.selectOptions(screen.getByLabelText("Certification level"), "L3");
     await user.selectOptions(screen.getByLabelText("Status"), "ACTIVE");
-    await user.type(screen.getByLabelText("Certification number"), "CERT-002");
+    expect(screen.getByText(/Assigned automatically after this Certification is saved/)).toBeVisible();
     await user.type(screen.getByLabelText("Issue date"), "2026-02-01");
     await user.type(screen.getByLabelText("Expiry date"), "2027-02-01");
     await user.click(screen.getByLabelText("Medical clearance provided"));
@@ -2878,7 +2878,6 @@ describe("Certification workspace frontend", () => {
 
     expect(JSON.parse(String(createCall?.init?.body))).toEqual({
       certification_level: "L3",
-      certification_number: "CERT-002",
       issue_date: "2026-02-01T00:00:00.000Z",
       expiry_date: "2027-02-01T00:00:00.000Z",
       medical_clearance_provided: true,

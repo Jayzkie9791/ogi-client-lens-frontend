@@ -141,7 +141,13 @@ const recordsResponse = {
       submitted_by_user_id: "00000000-0000-4000-8000-000000000902",
       created_at: "2026-08-01T00:00:00.000Z",
       submitted_at: "2026-08-02T00:00:00.000Z",
-      updated_at: "2026-08-03T00:00:00.000Z"
+      updated_at: "2026-08-03T00:00:00.000Z",
+      presentation: {
+        template_name: "Weekly Safety Audit Checklist",
+        client_name: "Aurelia Grand Hospitality Group",
+        facility_name: "North Pool",
+        subject: null
+      }
     }
   ],
   pagination: {
@@ -367,6 +373,7 @@ describe("Client Lens authentication foundation", () => {
       await screen.findByRole("navigation", { name: "Primary navigation" })
     ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Overview" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Governance" }));
     expect(
       screen.getByRole("link", { name: "Reviews" })
     ).toHaveAttribute("href", routes.governanceQueue);
@@ -391,6 +398,7 @@ describe("Client Lens authentication foundation", () => {
     renderWithRoute(routes.workbench);
 
     await user.click(await screen.findByRole("button", { name: "Menu" }));
+    await user.click(screen.getByRole("button", { name: "System" }));
     await user.click(await screen.findByRole("link", { name: "Administration" }));
 
     expect(await screen.findByRole("heading", { name: "Administration" })).toBeInTheDocument();
@@ -440,6 +448,7 @@ describe("Client Lens authentication foundation", () => {
     renderWithRoute(routes.workbench);
 
     await userEvent.click(await screen.findByRole("button", { name: "Menu" }));
+    await userEvent.click(screen.getByRole("button", { name: "Governance" }));
 
     expect(screen.queryByRole("link", { name: "Administration" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Operations" })).toBeInTheDocument();
@@ -794,6 +803,7 @@ describe("Client Lens authentication foundation", () => {
     renderWithRoute(routes.workbench);
 
     await user.click(await screen.findByRole("button", { name: "Menu" }));
+    await user.click(screen.getByRole("button", { name: "Governance" }));
     await user.click(await screen.findByRole("link", { name: "Reviews" }));
 
     expect(
@@ -991,6 +1001,7 @@ describe("Client Lens authentication foundation", () => {
     renderWithRoute(routes.workbench);
 
     await user.click(await screen.findByRole("button", { name: "Menu" }));
+    await user.click(screen.getByRole("button", { name: "Governance" }));
     await user.click(await screen.findByRole("link", { name: "Operations" }));
 
     expect(
@@ -1014,7 +1025,7 @@ describe("Client Lens authentication foundation", () => {
     expect(screen.getByText("Capture weekly operational safety audit evidence.")).toBeInTheDocument();
     expect(screen.getAllByText("MODULE_A").length).toBeGreaterThan(0);
     expect(screen.queryByText("Risk Register")).not.toBeInTheDocument();
-    expect(screen.getByText("OGI_F001_WEEKLY_SAFETY_AUDIT_CHECKLIST")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Weekly Safety Audit Checklist" })).toBeInTheDocument();
     expect(screen.getByText("OGI-F001 / Rev A")).toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: "Open Form" })[0]).toHaveAttribute(
       "href",
@@ -1022,7 +1033,7 @@ describe("Client Lens authentication foundation", () => {
     );
     expect(screen.queryByText("checksum-a")).not.toBeInTheDocument();
     expect(screen.queryByText("00000000-0000-4000-8000-000000000301")).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Records" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Evidence Records" })).toHaveAttribute(
       "href",
       routes.records
     );
@@ -1139,6 +1150,7 @@ describe("Client Lens authentication foundation", () => {
     ]);
     renderWithRoute(routes.workbench);
 
+    await userEvent.click(await screen.findByRole("button", { name: "Governance" }));
     expect(await screen.findByRole("link", { name: "Audit & Risk" })).toHaveAttribute("href", routes.auditRisk);
     expect(screen.queryByRole("link", { name: "Operations" })).not.toBeInTheDocument();
   });
@@ -1151,6 +1163,7 @@ describe("Client Lens authentication foundation", () => {
     ]);
     renderWithRoute(routes.workbench);
 
+    await userEvent.click(await screen.findByRole("button", { name: "Governance" }));
     expect(await screen.findByRole("link", { name: "Audit & Risk" })).toHaveAttribute("href", routes.auditFindings);
   });
 
@@ -1196,7 +1209,7 @@ describe("Client Lens authentication foundation", () => {
     expect(screen.queryByRole("link", { name: "Administration" })).not.toBeInTheDocument();
   });
 
-  it("opens Records from Operations child navigation and calls the neutral records endpoint", async () => {
+  it("opens Records from Governance navigation and calls the neutral records endpoint", async () => {
     const user = userEvent.setup();
     const { calls } = mockFetchQueue([
       { status: 200, body: { accessToken: "access-token" } },
@@ -1207,7 +1220,8 @@ describe("Client Lens authentication foundation", () => {
     window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
     renderWithRoute(routes.operations);
 
-    await user.click(await screen.findByRole("link", { name: "Records" }));
+    await user.click(await screen.findByRole("button", { name: "Governance" }));
+    await user.click(await screen.findByRole("link", { name: "Evidence Records" }));
 
     expect(
       await screen.findByRole("heading", { name: "Records" })
@@ -1215,11 +1229,11 @@ describe("Client Lens authentication foundation", () => {
     expect(
       screen.getByText("Browse Operational Evidence records you are authorized to view.")
     ).toBeInTheDocument();
-    expect(screen.getByText("OGI_F001_WEEKLY_SAFETY_AUDIT_CHECKLIST")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Weekly Safety Audit Checklist" })).toBeInTheDocument();
     expect(screen.getByText("Awaiting Review")).toBeInTheDocument();
-    expect(screen.getByText("Record 00000000-0000-4000-8000-000000000501")).toBeInTheDocument();
-    expect(screen.getByText("00000000-0000-4000-8000-000000000101")).toBeInTheDocument();
-    expect(screen.getByText("00000000-0000-4000-8000-000000000201")).toBeInTheDocument();
+    expect(screen.getByText("Technical record details").parentElement).toHaveTextContent("OGI_F001_WEEKLY_SAFETY_AUDIT_CHECKLIST · Record 00000000-0000-4000-8000-000000000501");
+    expect(screen.getByText("Aurelia Grand Hospitality Group")).toBeInTheDocument();
+    expect(screen.getByText("North Pool")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "View Record" })).toHaveAttribute(
       "href",
       routes.evidenceRecordPath("00000000-0000-4000-8000-000000000501")
@@ -1256,7 +1270,56 @@ describe("Client Lens authentication foundation", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Menu" }));
 
     expect(screen.queryByRole("link", { name: "Operations" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Records" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Evidence Records" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "My Drafts" })).not.toBeInTheDocument();
+  });
+
+  it("lists only the authenticated operator's drafts and offers continuation", async () => {
+    const { calls } = mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: session },
+      {
+        status: 200,
+        body: {
+          records: [{
+            ...recordsResponse.records[0],
+            lifecycle_state: "DRAFT",
+            created_by_user_id: session.id,
+            submitted_by_user_id: null,
+            presentation: {
+              template_name: "Digital Credential & Verification Management Form",
+              client_name: "Sky Is The Limit",
+              facility_name: "Sky Ranch",
+              subject: {
+                kind: "CERTIFICATION_HOLDER",
+                display_name: "Maria Hannah Khrisna Depacaquivo",
+                reference_number: "OGI-GI-2026-000027",
+                secondary_reference: "L6"
+              }
+            }
+          }],
+          pagination: { limit: 25, offset: 0, count: 1, total_count: 1 }
+        }
+      }
+    ]);
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    renderWithRoute(routes.myDrafts);
+
+    expect(await screen.findByRole("heading", { name: "My Drafts" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Digital Credential & Verification Management Form" })).toBeInTheDocument();
+    expect(screen.getByText("Maria Hannah Khrisna Depacaquivo")).toBeInTheDocument();
+    expect(screen.getByText("L6 · OGI-GI-2026-000027")).toBeInTheDocument();
+    expect(screen.getByText("Sky Is The Limit")).toBeInTheDocument();
+    expect(screen.getByText("Sky Ranch")).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "Continue Draft" })).toHaveAttribute(
+      "href",
+      routes.evidenceRecordPath("00000000-0000-4000-8000-000000000501")
+    );
+    expect(calls.map(({ url }) => url)).toEqual([
+      "/api/v1/auth/refresh",
+      "/api/v1/auth/me",
+      "/api/v1/operational-evidence/records?lifecycle_state=DRAFT&created_by_user_id=user-1&sort_by=created_at&sort_direction=desc&limit=25&offset=0"
+    ]);
   });
 
   it("serializes Records filters to the canonical query parameters", async () => {

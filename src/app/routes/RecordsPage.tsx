@@ -1,17 +1,19 @@
 import { FormEvent, useMemo, useState } from "react";
-import { NavLink, Link } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 
 import { isApiError } from "../../api/errors";
 import { Button } from "../../ui/components/Button";
 import { Surface } from "../../ui/components/Surface";
 import { displayLifecycleStatus } from "../../oets/displayLabels";
+import { evidenceLifecycleStyle, formatEvidenceDateTime, humanizeEvidenceTemplateCode } from "../../oets/evidencePresentation";
 import {
   listOperationalEvidenceRecords,
   OperationalEvidenceRecordSummary,
   OperationalEvidenceRecordsFilters
 } from "../../oets/recordsApi";
 import { routes } from "../routePaths";
+import { useAuth } from "../../auth/useAuth";
 
 const recordsPageSize = 25;
 
@@ -68,8 +70,6 @@ export function RecordsPage() {
         </p>
       </div>
 
-      <OperationsChildNavigation />
-
       <RecordsFilters
         filterDraft={filterDraft}
         onApply={applyFilters}
@@ -108,29 +108,54 @@ export function RecordsPage() {
   );
 }
 
-export function OperationsChildNavigation() {
+export function MyDraftsPage() {
+  const auth = useAuth();
+  const [offset, setOffset] = useState(0);
+  const recordsQuery = useQuery({
+    enabled: Boolean(auth.session?.id),
+    queryKey: ["operational-evidence-records", "my-drafts", auth.session?.id, offset],
+    queryFn: () => listOperationalEvidenceRecords({
+      lifecycle_state: "DRAFT",
+      created_by_user_id: auth.session?.id,
+      sort_by: "created_at",
+      sort_direction: "desc",
+      limit: recordsPageSize,
+      offset
+    }),
+    retry: false
+  });
+  const records = recordsQuery.data?.records ?? [];
+  const pagination = recordsQuery.data?.pagination;
+
   return (
-    <nav aria-label="Operations navigation">
-      <ul className="flex flex-wrap gap-2">
-        <li>
-          <NavLink
-            className={childNavigationClassName}
-            end
-            to={routes.operations}
-          >
-            Forms & Audits
-          </NavLink>
-        </li>
-        <li>
-          <NavLink
-            className={childNavigationClassName}
-            to={routes.records}
-          >
-            Records
-          </NavLink>
-        </li>
-      </ul>
-    </nav>
+    <section aria-labelledby="my-drafts-heading" className="space-y-4">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-primary-blue">Governance workspace</p>
+        <h1 className="mt-2 text-2xl font-semibold text-text-primary" id="my-drafts-heading">My Drafts</h1>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-text-muted">
+          Continue Operational Evidence that you started but have not submitted.
+        </p>
+      </div>
+      {recordsQuery.isLoading ? (
+        <SafeState title="Loading your drafts." role="status">Please wait.</SafeState>
+      ) : recordsQuery.isError ? (
+        <RecordsErrorState error={recordsQuery.error} />
+      ) : records.length === 0 ? (
+        <Surface>
+          <h2 className="text-base font-semibold text-text-primary">You have no unfinished drafts.</h2>
+          <p className="mt-2 text-sm text-text-muted">New evidence appears here after Begin Evidence succeeds.</p>
+        </Surface>
+      ) : (
+        <RecordsList records={records} continueDraft />
+      )}
+      {pagination ? (
+        <RecordsPagination
+          onNext={() => setOffset(pagination.offset + pagination.limit)}
+          onPrevious={() => setOffset(Math.max(0, pagination.offset - pagination.limit))}
+          pagination={pagination}
+        />
+      ) : null}
+    </section>
   );
 }
 
@@ -211,55 +236,66 @@ function RecordsFilters({
 }
 
 function RecordsList({
-  records
+  records,
+  continueDraft = false
 }: {
   records: OperationalEvidenceRecordSummary[];
+  continueDraft?: boolean;
 }) {
   return (
     <ul aria-label="Operational Evidence records" className="space-y-3">
       {records.map((record) => (
         <li key={record.evidence_record_id}>
-          <Surface className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div className="min-w-0 space-y-3">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <Surface className={`overflow-hidden border-workspace-border border-l-4 shadow-workspace transition-shadow hover:shadow-lg ${evidenceLifecycleStyle(record.lifecycle_state).accent} ${evidenceLifecycleStyle(record.lifecycle_state).surface}`}>
+            <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0 flex-1 space-y-4">
+              <div className="flex flex-col gap-3 border-b border-workspace-divider pb-4 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <h2 className="break-words text-lg font-semibold text-text-primary">
-                    {record.template_code}
-                  </h2>
-                  <p className="mt-1 break-all text-sm text-text-muted">
-                    Record {record.evidence_record_id}
-                  </p>
+                  <p className="text-xs font-semibold uppercase tracking-label text-text-label">Operational evidence</p>
+                  {record.presentation?.subject ? <h2 className="mt-1 text-xl font-semibold tracking-heading text-primary-navy">{record.presentation.subject.display_name}</h2> : null}
+                  <h3 className={`${record.presentation?.subject ? "mt-2 text-base" : "mt-1 text-lg"} break-words font-semibold tracking-heading text-document-title`}>
+                    {record.presentation?.template_name ?? humanizeEvidenceTemplateCode(record.template_code)}
+                  </h3>
+                  {record.presentation?.subject ? <p className="mt-1 text-sm text-text-muted">{compactValues([record.presentation.subject.secondary_reference, record.presentation.subject.reference_number])}</p> : null}
                 </div>
-                <span className="inline-flex w-fit rounded-component border border-border px-3 py-1 text-xs font-semibold uppercase text-text-muted">
+                <span className={`inline-flex w-fit rounded-full border px-3 py-1 text-xs font-bold uppercase tracking-wide ${evidenceLifecycleStyle(record.lifecycle_state).badge}`}>
                   {displayLifecycleStatus(record.lifecycle_state)}
                 </span>
               </div>
-              <dl className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-5">
-                <MetadataItem label="Submitted at" value={record.submitted_at} />
-                <MetadataItem label="Client ID" value={record.client_id} />
+              <dl className="grid gap-3 rounded-component border border-workspace-divider bg-workspace-canvas p-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
                 <MetadataItem
-                  label="Facility ID"
-                  value={record.facility_id ?? "No facility context"}
+                  label={continueDraft ? "Last updated" : "Submitted at"}
+                  value={formatEvidenceDateTime(continueDraft ? record.updated_at : record.submitted_at)}
+                />
+                <MetadataItem label="Client" value={record.presentation?.client_name ?? "Client name unavailable"} />
+                <MetadataItem
+                  label="Facility"
+                  value={record.presentation?.facility_name ?? "No facility context"}
                 />
                 <MetadataItem
                   label="Template version"
                   value={record.template_version}
                 />
-                <MetadataItem label="Created at" value={record.created_at} />
               </dl>
+              <details className="text-xs text-text-subtle"><summary className="w-fit cursor-pointer font-semibold text-text-label">Technical record details</summary><p className="mt-2 break-all">{record.template_code} · Record {record.evidence_record_id}</p></details>
             </div>
             <div className="flex shrink-0 lg:pt-1">
               <Button asChild>
                 <Link to={routes.evidenceRecordPath(record.evidence_record_id)}>
-                  View Record
+                  {continueDraft ? "Continue Draft" : "View Record"}
                 </Link>
               </Button>
+            </div>
             </div>
           </Surface>
         </li>
       ))}
     </ul>
   );
+}
+
+function compactValues(values: Array<string | null>) {
+  return values.filter((value): value is string => Boolean(value)).join(" · ");
 }
 
 function RecordsPagination({
@@ -344,15 +380,6 @@ function buildRecordsQueryFilters(
 
 function toUtcDateTime(value: string) {
   return value.length === 16 ? `${value}:00.000Z` : value;
-}
-
-function childNavigationClassName({ isActive }: { isActive: boolean }) {
-  return [
-    "inline-flex min-h-10 items-center rounded-component px-3 text-sm font-semibold outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-canvas",
-    isActive
-      ? "bg-primary-navy text-text-inverse"
-      : "border border-border bg-surface text-text-primary hover:bg-elevated"
-  ].join(" ");
 }
 
 function SafeState({

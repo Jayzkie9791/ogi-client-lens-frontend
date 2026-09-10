@@ -48,7 +48,7 @@ export function RegistrationDirectoryPane({
           <h2 className="text-base font-semibold text-primary-navy" id={headingId}>
             {title}
           </h2>
-          <p className="mt-1 text-sm leading-5 text-text-muted">{description}</p>
+          <p className="cl-copy-muted mt-1 text-sm leading-5">{description}</p>
         </div>
         {children ? (
           <div
@@ -84,7 +84,7 @@ export function RegistrationDirectoryItem({
         "min-h-11 w-full rounded-component border py-3 pl-4 pr-3 text-left text-primary-navy outline-none transition",
         "focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface",
         isSelected
-          ? "border-primary-blue border-l-4 bg-elevated shadow-sm"
+          ? "border-primary-blue border-l-4 bg-[var(--cl-workspace-selected)] shadow-sm"
           : "border-border border-l-4 border-l-transparent bg-surface hover:border-l-primary-blue hover:bg-elevated"
       ].join(" ")}
       onClick={onSelect}
@@ -120,7 +120,7 @@ export function RegistrationEntityHeader({
         ) : (
           <h2 className="break-words text-lg font-semibold text-primary-navy">{identity}</h2>
         )}
-        {secondary ? <div className="mt-1 break-words text-sm text-text-muted">{secondary}</div> : null}
+        {secondary ? <div className="cl-copy-muted mt-1 break-words text-sm font-medium">{secondary}</div> : null}
       </div>
       {status ? <RegistrationStatusBadge value={status} /> : null}
     </div>
@@ -154,8 +154,8 @@ export function RegistrationMetadataItem({
 }) {
   return (
     <div className="min-w-0">
-      <dt className="text-xs font-semibold uppercase tracking-wider text-slate-500">{label}</dt>
-      <dd className={`mt-1.5 break-words leading-5 ${subtle ? "text-xs text-slate-500" : "text-sm font-medium text-primary-navy"}`}>
+      <dt className="cl-data-label">{label}</dt>
+      <dd className={`mt-1.5 break-words ${subtle ? "text-xs font-medium text-[color:var(--cl-color-text-subtle)]" : "cl-data-value"}`}>
         {value}
       </dd>
     </div>
@@ -173,12 +173,12 @@ export function RegistrationMetadataGroup({
 }) {
   return (
     <section
-      className="rounded-component border border-border bg-canvas p-4"
+      className="rounded-component border border-[var(--cl-workspace-border)] bg-[color:var(--cl-workspace-header)] p-4"
       data-registration-section="administrative"
     >
       <div className="mb-3">
         <h3 className="text-sm font-semibold text-primary-navy">{title}</h3>
-        {description ? <p className="mt-1 text-xs leading-5 text-text-muted">{description}</p> : null}
+        {description ? <p className="cl-copy-muted mt-1 text-xs leading-5">{description}</p> : null}
       </div>
       <dl className="grid gap-x-5 gap-y-4 text-sm sm:grid-cols-2">{children}</dl>
     </section>

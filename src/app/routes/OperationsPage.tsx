@@ -7,7 +7,6 @@ import { useAuth } from "../../auth/useAuth";
 import { Button } from "../../ui/components/Button";
 import { Surface } from "../../ui/components/Surface";
 import { routes } from "../routePaths";
-import { OperationsChildNavigation } from "./RecordsPage";
 import {
   listOetsTemplateCatalog,
   OetsTemplateCatalogItem
@@ -63,8 +62,6 @@ export function OperationsPage() {
           Choose an operational form or audit to open.
         </p>
       </div>
-
-      <OperationsChildNavigation />
 
       {modules.length > 0 ? (
         <Surface>

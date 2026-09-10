@@ -14,7 +14,6 @@ import {
   RegistrationFacility
 } from "./registrationFacilityApi";
 import {
-  createRegistrationPersonnel,
   getRegistrationPersonnel,
   listRegistrationPersonnel,
   RegistrationPersonnel,
@@ -24,8 +23,12 @@ import {
   updateRegistrationPersonnel
 } from "./registrationPersonnelApi";
 import { RegistrationFacilityAssignmentsPanel } from "./RegistrationFacilityAssignmentsPanel";
+import { listRegistrationFacilityAssignments } from "./registrationFacilityAssignmentApi";
 import { OgiPersonnelCreatePanel } from "./OgiPersonnelCreatePanel";
+import { ClientPersonnelRegistrationWizard } from "./ClientPersonnelRegistrationWizard";
+import { getCurrentPersonnelRegistrationIntent, getPersonnelRegistrationIntent } from "./personnelRegistrationJourneyApi";
 import { OgiOperationalAuthorityPanel } from "./OgiOperationalAuthorityPanel";
+import { OgiInstructorQualificationPanel } from "./OgiInstructorQualificationPanel";
 import { RegistrationWorkspaceShell } from "./RegistrationWorkspaceShell";
 import { formatRegistrationDate, formatRegistrationDateTime } from "./registrationPresentation";
 import {
@@ -49,6 +52,9 @@ const permissions = {
   viewFacilityAssignments: "view_facility_assignment"
   ,viewOperationalAuthority: "view_personnel_operational_authorization"
   ,manageOperationalAuthority: "manage_personnel_operational_authorization"
+  ,viewCertification: "view_certification"
+  ,createCertification: "create_certification_draft"
+  ,issueCertification: "issue_certification"
 } as const;
 
 type PersonnelSecondaryTab = "overview" | "facilities";
@@ -87,6 +93,9 @@ export function RegistrationPersonnelPage() {
   );
   const canViewOperationalAuthority = auth.canUsePermission(permissions.viewOperationalAuthority) && auth.session?.clientId === null;
   const canManageOperationalAuthority = auth.canUsePermission(permissions.manageOperationalAuthority) && auth.session?.clientId === null;
+  const canViewCertification = auth.canUsePermission(permissions.viewCertification) && auth.session?.clientId === null;
+  const canCreateCertification = auth.canUsePermission(permissions.createCertification) && auth.session?.clientId === null;
+  const canIssueCertification = auth.canUsePermission(permissions.issueCertification) && auth.session?.clientId === null;
   const [clientFilter, setClientFilter] = useState("");
   const [facilityFilter, setFacilityFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<
@@ -103,6 +112,7 @@ export function RegistrationPersonnelPage() {
   });
   const [editForm, setEditForm] = useState<PersonnelFormState | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const currentJourneyQuery = useQuery({queryKey:["personnel-registration-intent","current"],queryFn:getCurrentPersonnelRegistrationIntent,enabled:canCreate,retry:false});
 
   const clientsQuery = useQuery({
     queryKey: ["registration-clients"],
@@ -188,23 +198,6 @@ export function RegistrationPersonnelPage() {
     }
   }, [selectedPersonnelQuery.data]);
 
-  const createMutation = useMutation({
-    mutationFn: () => createRegistrationPersonnel(buildCreateRequest(createForm)),
-    onSuccess: (staffMember) => {
-      setMessage("Personnel record created successfully.");
-      setCreateForm({ ...emptyCreateForm, clientId: createForm.clientId });
-      setSelectedPersonnelId(staffMember.id);
-      setPersonnelIdBeforeCreate(null);
-      setIsCreating(false);
-      setSelectedTab("overview");
-      void queryClient.invalidateQueries({ queryKey: ["registration-personnel"] });
-      queryClient.setQueryData(
-        ["registration-personnel", staffMember.id],
-        staffMember
-      );
-    }
-  });
-
   const updateMutation = useMutation({
     mutationFn: (request: RegistrationPersonnelMutationRequest) => {
       if (!selectedPersonnelId) {
@@ -222,12 +215,6 @@ export function RegistrationPersonnelPage() {
       );
     }
   });
-
-  function submitCreateForm(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setMessage(null);
-    createMutation.mutate();
-  }
 
   function submitEditForm(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -340,7 +327,7 @@ export function RegistrationPersonnelPage() {
             onClick={startCreatePersonnel}
             type="button"
           >
-            Register Personnel
+            {currentJourneyQuery.data?.intent ? "Continue Registration" : "Register Personnel"}
           </Button>
         ) : null}{canManageOperationalAuthority ? <Button aria-expanded={isCreatingOgi} onClick={startCreateOgiPersonnel} type="button" variant="secondary">Register OGI Personnel</Button> : null}</div>
       </div>
@@ -351,7 +338,7 @@ export function RegistrationPersonnelPage() {
         </Surface>
       ) : null}
 
-      <RegistrationErrorAlert error={createMutation.error ?? updateMutation.error} />
+      <RegistrationErrorAlert error={updateMutation.error} />
 
       <PersonnelFilters
         canViewClients={canViewClients}
@@ -389,33 +376,58 @@ export function RegistrationPersonnelPage() {
             void queryClient.invalidateQueries({ queryKey: ["registration-personnel"] });
             queryClient.setQueryData(["registration-personnel", staffMember.id], staffMember);
           }} /> : isCreating ? (
-            <PersonnelCreatePanel
+            <ClientPersonnelRegistrationWizard
               clients={clients}
-              formState={createForm}
-              isSubmitting={createMutation.isPending}
-              lockClientSelection={!canViewClients}
+              initialClientId={createForm.clientId}
               onCancel={cancelCreatePersonnel}
-              onChange={setCreateForm}
-              onSubmit={submitCreateForm}
+              onComplete={(staffMember) => {
+                setMessage("Registration completed successfully.");
+                setSelectedPersonnelId(staffMember.id);
+                setPersonnelIdBeforeCreate(null);
+                setIsCreating(false);
+                setSelectedTab("overview");
+                void queryClient.invalidateQueries({ queryKey: ["registration-personnel"] });
+                void queryClient.invalidateQueries({ queryKey: ["personnel-registration-intent"] });
+                queryClient.setQueryData(["registration-personnel", staffMember.id], staffMember);
+              }}
             />
           ) : personnel.length === 0 ? (
             <PersonnelEmptyDetailPanel canCreate={canCreate} />
           ) : (
-            <><PersonnelDetailsPanel
+            <div className="space-y-4"><PersonnelDetailsPanel
               canDeactivate={canDeactivate}
               canUpdate={canUpdate}
               canViewFacilityAssignments={canViewFacilityAssignments && (!selectedPersonnelQuery.data || personnelAffiliation(selectedPersonnelQuery.data) === "CLIENT")}
               clientNameById={clientNameById}
+              clients={clients}
               editForm={editForm}
               isLoading={selectedPersonnelQuery.isLoading}
               isSubmitting={updateMutation.isPending}
+              mutationError={updateMutation.error}
+              mutationMessage={message === "Personnel record updated successfully." ? message : null}
               onDeactivate={deactivateSelectedPersonnel}
               onEditChange={setEditForm}
               onSubmit={submitEditForm}
               onTabChange={setSelectedTab}
               selectedTab={selectedTab}
               staffMember={selectedPersonnelQuery.data ?? null}
-            />{selectedPersonnelQuery.data && personnelAffiliation(selectedPersonnelQuery.data) === "OGI" && canViewOperationalAuthority ? <OgiOperationalAuthorityPanel canManage={canManageOperationalAuthority} personnelId={selectedPersonnelQuery.data.id} /> : null}</>
+            />
+            {selectedPersonnelQuery.data && personnelAffiliation(selectedPersonnelQuery.data) === "OGI" ? (
+              <>
+                {canViewOperationalAuthority ? (
+                  <OgiOperationalAuthorityPanel
+                    canManage={canManageOperationalAuthority}
+                    personnelId={selectedPersonnelQuery.data.id}
+                  />
+                ) : null}
+                <OgiInstructorQualificationPanel
+                  canCreate={canCreateCertification}
+                  canIssue={canIssueCertification}
+                  canView={canViewCertification}
+                  personnelId={selectedPersonnelQuery.data.id}
+                />
+              </>
+            ) : null}</div>
           )}
         />
       )}
@@ -576,9 +588,12 @@ function PersonnelDetailsPanel({
   canUpdate,
   canViewFacilityAssignments,
   clientNameById,
+  clients,
   editForm,
   isLoading,
   isSubmitting,
+  mutationError,
+  mutationMessage,
   onDeactivate,
   onEditChange,
   onSubmit,
@@ -590,9 +605,12 @@ function PersonnelDetailsPanel({
   canUpdate: boolean;
   canViewFacilityAssignments: boolean;
   clientNameById: Map<string, string>;
+  clients: RegistrationClient[];
   editForm: PersonnelFormState | null;
   isLoading: boolean;
   isSubmitting: boolean;
+  mutationError: Error | null;
+  mutationMessage: string | null;
   onDeactivate: () => void;
   onEditChange: (formState: PersonnelFormState) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
@@ -600,6 +618,17 @@ function PersonnelDetailsPanel({
   selectedTab: PersonnelSecondaryTab;
   staffMember: RegistrationPersonnel | null;
 }) {
+  const queryClient = useQueryClient();
+  const [isContinuingRegistration, setIsContinuingRegistration] = useState(false);
+  const staffMemberId = staffMember?.id;
+  const staffMemberClientId = staffMember?.client_id;
+  const isClientPersonnel = staffMember ? personnelAffiliation(staffMember) === "CLIENT" : false;
+  const assignmentsQuery = useQuery({queryKey:["registration-facility-assignments",staffMemberId],queryFn:()=>staffMemberId?listRegistrationFacilityAssignments(staffMemberId):Promise.reject(new Error("No Personnel record is selected.")),enabled:canViewFacilityAssignments&&Boolean(staffMemberId),retry:false});
+  const journeyQuery = useQuery({queryKey:["personnel-registration-intent",staffMemberId],queryFn:()=>staffMemberId?getPersonnelRegistrationIntent(staffMemberId):Promise.reject(new Error("No Personnel record is selected.")),enabled:Boolean(staffMemberId)&&isClientPersonnel,retry:false});
+  const registrationFacilitiesQuery = useQuery({queryKey:["registration-facilities","personnel-summary",staffMemberClientId],queryFn:()=>staffMemberClientId?listRegistrationFacilities({clientId:staffMemberClientId}):Promise.reject(new Error("No Client is assigned to this Personnel record.")),enabled:canViewFacilityAssignments&&Boolean(staffMemberClientId),retry:false});
+  const activeFacilityAssignment=(assignmentsQuery.data?.assignments??[]).find(assignment=>assignment.assignment_status==="ACTIVE"&&assignment.is_primary_assignment)??(assignmentsQuery.data?.assignments??[]).find(assignment=>assignment.assignment_status==="ACTIVE");
+  const journeyComplete=journeyQuery.data?.intent?.status==="COMPLETED";
+  useEffect(()=>setIsContinuingRegistration(false),[staffMember?.id]);
   if (isLoading) {
     return (
       <SafeState title="Loading Personnel details." role="status">
@@ -633,17 +662,26 @@ function PersonnelDetailsPanel({
           />
 
           {selectedTab === "overview" ? (
-            <PersonnelOverview
+            <><PersonnelRegistrationSummary
+              assignments={assignmentsQuery.data?.assignments ?? []}
+              clientName={clientLabel(staffMember.client_id, clientNameById)}
+              facilities={registrationFacilitiesQuery.data?.facilities ?? []}
+              intent={journeyQuery.data?.intent ?? null}
+              loading={assignmentsQuery.isLoading || journeyQuery.isLoading || registrationFacilitiesQuery.isLoading}
+              staffMember={staffMember}
+            /><PersonnelOverview
               canDeactivate={canDeactivate}
               canUpdate={canUpdate}
               clientNameById={clientNameById}
               editForm={editForm}
               isSubmitting={isSubmitting}
+              mutationError={mutationError}
+              mutationMessage={mutationMessage}
               onDeactivate={onDeactivate}
               onEditChange={onEditChange}
               onSubmit={onSubmit}
               staffMember={staffMember}
-            />
+            /></>
           ) : null}
         </div>
       </Surface>
@@ -657,8 +695,43 @@ function PersonnelDetailsPanel({
           <RegistrationFacilityAssignmentsPanel staffMember={staffMember} />
         </div>
       ) : null}
+
+      {personnelAffiliation(staffMember) === "CLIENT" ? <Surface className={journeyComplete?"border-green-200 bg-green-50/60":"border-amber-200 bg-amber-50/70"}><p className={`text-xs font-bold uppercase tracking-wide ${journeyComplete?"text-green-800":"text-amber-800"}`}>{journeyComplete?"Registration complete":"Incomplete registration"}</p><h3 className="mt-1 text-lg font-semibold text-primary-navy">{journeyComplete?"Personnel Registration completed":"Continue Personnel Registration"}</h3><p className="mt-2 text-sm text-text-muted">{journeyComplete?"Client, profile, Facility assignment, access decision, and review were completed.":`Resume ${staffMember.full_name} at the first saved incomplete step.`}</p>{!journeyComplete?<Button className="mt-4" disabled={assignmentsQuery.isLoading||journeyQuery.isLoading} onClick={()=>setIsContinuingRegistration(true)} type="button">Continue Registration</Button>:null}</Surface>:null}
+      {isContinuingRegistration ? <ClientPersonnelRegistrationWizard clients={clients} existingFacilityId={activeFacilityAssignment?.facility_id} existingPersonnel={staffMember} initialClientId={staffMember.client_id??""} onCancel={()=>setIsContinuingRegistration(false)} onComplete={(personnel)=>{setIsContinuingRegistration(false);void queryClient.invalidateQueries({queryKey:["registration-facility-assignments",personnel.id]});void queryClient.invalidateQueries({queryKey:["personnel-registration-intent",personnel.id]});void queryClient.invalidateQueries({queryKey:["registration-personnel"]});}}/>:null}
+
     </div>
   );
+}
+
+function PersonnelRegistrationSummary({assignments,clientName,facilities,intent,loading,staffMember}:{
+  assignments: Awaited<ReturnType<typeof listRegistrationFacilityAssignments>>["assignments"];
+  clientName:string;
+  facilities:RegistrationFacility[];
+  intent:Awaited<ReturnType<typeof getPersonnelRegistrationIntent>>["intent"];
+  loading:boolean;
+  staffMember:RegistrationPersonnel;
+}) {
+  if (personnelAffiliation(staffMember) !== "CLIENT") return null;
+  const active=assignments.filter(item=>item.assignment_status==="ACTIVE");
+  const nameById=new Map(facilities.map(item=>[item.id,item.facility_name]));
+  const primary=active.find(item=>item.is_primary_assignment);
+  const draft=intent?.draft && typeof intent.draft==="object" ? intent.draft as Record<string,unknown> : {};
+  const access=draft.platformAccess==="REQUESTED"?"Provisioning requested":draft.platformAccess==="LINKED"||staffMember.user_id?"Platform account linked":"No platform access requested";
+  return <section className="rounded-component border border-blue-200 bg-blue-50/60 p-5" aria-label="Personnel Registration summary">
+    <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-wide text-primary-blue">Personnel Registration</p><h3 className="mt-1 text-lg font-semibold text-primary-navy">Registration summary</h3></div><span className={`rounded-full border px-3 py-1 text-xs font-bold uppercase ${intent?.status==="COMPLETED"?"border-emerald-200 bg-emerald-50 text-emerald-800":"border-amber-200 bg-amber-50 text-amber-800"}`}>{intent?.status==="COMPLETED"?"Complete":"Incomplete"}</span></div>
+    {loading?<p className="mt-4 text-sm text-text-muted">Loading Registration details…</p>:<dl className="mt-4 grid gap-x-6 gap-y-4 sm:grid-cols-2">
+      <RegistrationSummaryItem label="Client" value={clientName}/>
+      <RegistrationSummaryItem label="Personnel type" value="Client Personnel"/>
+      <RegistrationSummaryItem label="Assigned Facilities" value={active.length?active.map(item=>nameById.get(item.facility_id)??item.facility_id).join(", "):"No active Facility assignment"}/>
+      <RegistrationSummaryItem label="Primary Facility" value={primary?(nameById.get(primary.facility_id)??primary.facility_id):"Not designated"}/>
+      <RegistrationSummaryItem label="Platform access" value={access}/>
+      <RegistrationSummaryItem label="Completed" value={intent?.completed_at?formatRegistrationDateTime(intent.completed_at):"Not completed"}/>
+    </dl>}
+  </section>;
+}
+
+function RegistrationSummaryItem({label,value}:{label:string;value:string}) {
+  return <div><dt className="text-xs font-bold uppercase tracking-wide text-primary-blue/80">{label}</dt><dd className="mt-1 text-sm font-semibold leading-6 text-primary-navy">{value}</dd></div>;
 }
 
 function PersonnelSecondaryNavigation({
@@ -706,6 +779,8 @@ function PersonnelOverview({
   clientNameById,
   editForm,
   isSubmitting,
+  mutationError,
+  mutationMessage,
   onDeactivate,
   onEditChange,
   onSubmit,
@@ -716,6 +791,8 @@ function PersonnelOverview({
   clientNameById: Map<string, string>;
   editForm: PersonnelFormState;
   isSubmitting: boolean;
+  mutationError: Error | null;
+  mutationMessage: string | null;
   onDeactivate: () => void;
   onEditChange: (formState: PersonnelFormState) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
@@ -753,9 +830,12 @@ function PersonnelOverview({
             formState={editForm}
             isSubmitting={isSubmitting}
             lockClientSelection
+            lockedClientDisplayValue={personnelAffiliation(staffMember) === "OGI" ? "Ocean Guard International" : clientLabel(staffMember.client_id, clientNameById)}
             onChange={onEditChange}
             onSubmit={onSubmit}
           />
+          {mutationMessage ? <p className="mt-3 rounded-component border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-800" role="status">{mutationMessage}</p> : null}
+          {mutationError ? <div className="mt-3"><RegistrationErrorAlert error={mutationError} /></div> : null}
         </RegistrationEditableSection>
       ) : (
         <PersonnelReadOnlyDetails staffMember={staffMember} />
@@ -767,47 +847,6 @@ function PersonnelOverview({
         </Button>
       ) : null}
     </div>
-  );
-}
-
-function PersonnelCreatePanel({
-  clients,
-  formState,
-  isSubmitting,
-  lockClientSelection,
-  onCancel,
-  onChange,
-  onSubmit
-}: {
-  clients: RegistrationClient[];
-  formState: PersonnelFormState;
-  isSubmitting: boolean;
-  lockClientSelection: boolean;
-  onCancel: () => void;
-  onChange: (formState: PersonnelFormState) => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-}) {
-  return (
-    <Surface>
-      <h2 className="text-lg font-semibold text-text-primary">Register Personnel</h2>
-      <p className="mt-1 text-sm text-text-muted">
-        Create a Personnel profile under the selected Client.
-      </p>
-      <div className="mt-4">
-        <PersonnelForm
-          actionLabel="Create Personnel"
-          cancelLabel="Cancel"
-          clients={clients}
-          formId="create-registration-personnel"
-          formState={formState}
-          isSubmitting={isSubmitting}
-          lockClientSelection={lockClientSelection}
-          onCancel={onCancel}
-          onChange={onChange}
-          onSubmit={onSubmit}
-        />
-      </div>
-    </Surface>
   );
 }
 
@@ -834,9 +873,11 @@ function PersonnelForm({
   formState,
   isSubmitting,
   lockClientSelection,
+  lockedClientDisplayValue,
   onCancel,
   onChange,
-  onSubmit
+  onSubmit,
+  showActions = true
 }: {
   actionLabel: string;
   cancelLabel?: string;
@@ -845,12 +886,15 @@ function PersonnelForm({
   formState: PersonnelFormState;
   isSubmitting: boolean;
   lockClientSelection: boolean;
+  lockedClientDisplayValue?: string;
   onCancel?: () => void;
   onChange: (formState: PersonnelFormState) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  showActions?: boolean;
 }) {
   const canSubmit =
-    formState.fullName.trim().length > 0 && formState.clientId.trim().length > 0;
+    formState.fullName.trim().length > 0 &&
+    (lockClientSelection || formState.clientId.trim().length > 0);
 
   return (
     <form aria-label={actionLabel} className="space-y-4" id={formId} onSubmit={onSubmit}>
@@ -858,7 +902,7 @@ function PersonnelForm({
         <label className="block text-sm font-semibold text-text-primary">
           Client
           {lockClientSelection ? (
-            <input className={inputClassName} readOnly value={formState.clientId} />
+            <input className={inputClassName} readOnly value={lockedClientDisplayValue ?? formState.clientId} />
           ) : (
             <select
               className={inputClassName}
@@ -931,7 +975,7 @@ function PersonnelForm({
           value={formState.notes}
         />
       </label>
-      <div className="flex flex-wrap gap-2">
+      {showActions ? <div className="flex flex-wrap gap-2">
         <Button disabled={isSubmitting || !canSubmit} type="submit">
           {actionLabel}
         </Button>
@@ -945,7 +989,7 @@ function PersonnelForm({
             {cancelLabel}
           </Button>
         ) : null}
-      </div>
+      </div> : null}
     </form>
   );
 }
@@ -1051,18 +1095,6 @@ function SafeState({
       <p className="mt-2 text-sm text-text-muted">{children}</p>
     </Surface>
   );
-}
-
-function buildCreateRequest(formState: PersonnelFormState) {
-  return {
-    client_id: formState.clientId,
-    full_name: formState.fullName.trim(),
-    email: nullableText(formState.email),
-    phone_number: nullableText(formState.phoneNumber),
-    employment_status: formState.employmentStatus,
-    hire_date: nullableText(formState.hireDate),
-    notes: nullableText(formState.notes)
-  };
 }
 
 function buildUpdateRequest(

@@ -53,7 +53,7 @@ export function certificationEndorsementsForLevel(
 
 export interface CreateCertificationRequest {
   readonly certification_level: CertificationLevel;
-  readonly certification_number: string;
+  readonly certification_number?: string;
   readonly issue_date: string;
   readonly expiry_date: string;
   readonly medical_clearance_provided?: boolean;
@@ -68,6 +68,15 @@ export interface CreateCertificationEndorsementRequest {
   readonly endorsement: CertificationEndorsement;
 }
 
+export interface CreateCertificationFromReadinessRequest {
+  readonly training_readiness_decision_id: string;
+  readonly certification_number?: string;
+  readonly certification_status?: "PENDING" | "ACTIVE";
+  readonly staff_member_id?: string;
+  readonly medical_clearance_provided?: boolean;
+  readonly fitness_standard_achieved?: boolean;
+}
+
 export interface CertificationCommandRecord {
   readonly id: string;
   readonly certification_level: CertificationLevel;
@@ -79,7 +88,7 @@ export interface CertificationCommandRecord {
   readonly training_hours_completed: number | null;
   readonly written_exam_score: number | null;
   readonly certification_status: CertificationStatus;
-  readonly staff_member_id: string;
+  readonly staff_member_id: string | null;
   readonly created_by_user_id: string | null;
 }
 
@@ -94,6 +103,10 @@ interface CertificationCommandResponse {
   readonly data: CertificationCommandRecord;
 }
 
+export interface PersonnelInstructorQualificationsResponse {
+  readonly certifications: readonly CertificationCommandRecord[];
+}
+
 interface CertificationEndorsementCommandResponse {
   readonly success: true;
   readonly data: CertificationEndorsementCommandRecord;
@@ -105,6 +118,22 @@ export function createCertification(payload: CreateCertificationRequest) {
     body: payload,
     validate: isCertificationCommandResponse
   }).then((response) => response.data);
+}
+
+export function listPersonnelInstructorQualifications(staffMemberId: string) {
+  return apiRequest<PersonnelInstructorQualificationsResponse>(
+    `/api/v1/certifications/personnel/${encodeURIComponent(staffMemberId)}/instructor-qualifications`,
+    { validate: isPersonnelInstructorQualificationsResponse }
+  );
+}
+
+export function createCertificationFromReadiness(
+  payload: CreateCertificationFromReadinessRequest
+) {
+  return apiRequest<CertificationCommandResponse>(
+    "/api/v1/certifications/from-training-readiness",
+    { method: "POST", body: payload, validate: isCertificationCommandResponse }
+  ).then((response) => response.data);
 }
 
 export function addCertificationEndorsement(
@@ -156,9 +185,19 @@ function isCertificationCommandRecord(
     isNullableNumber(value.training_hours_completed) &&
     isNullableNumber(value.written_exam_score) &&
     isCertificationStatus(value.certification_status) &&
-    typeof value.staff_member_id === "string" &&
+    (value.staff_member_id === null || typeof value.staff_member_id === "string") &&
     (value.created_by_user_id === null ||
       typeof value.created_by_user_id === "string")
+  );
+}
+
+function isPersonnelInstructorQualificationsResponse(
+  value: unknown
+): value is PersonnelInstructorQualificationsResponse {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.certifications) &&
+    value.certifications.every(isCertificationCommandRecord)
   );
 }
 

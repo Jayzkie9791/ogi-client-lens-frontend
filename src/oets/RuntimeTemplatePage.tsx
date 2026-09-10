@@ -336,6 +336,11 @@ export function RuntimeTemplatePage() {
             </select>
           </label>
           {contextCandidatesQuery.isLoading ? <p className="mt-2 text-sm text-text-muted">Loading eligible Certifications…</p> : null}
+          {contextCandidatesQuery.isError ? (
+            <p className="mt-2 rounded-component border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
+              Certification eligibility could not be loaded. {readQueryErrorMessage(contextCandidatesQuery.error)}
+            </p>
+          ) : null}
           {!contextCandidatesQuery.isLoading && contextCandidatesQuery.data?.count === 0 ? <p className="mt-2 text-sm text-text-muted">No eligible Certification is available for this Client and Facility.</p> : null}
           {resolvedContextQuery.data ? <p className="mt-2 text-sm text-text-muted">Using {resolvedContextQuery.data.summary.primary_label} for {resolvedContextQuery.data.summary.secondary_label}.</p> : null}
         </Surface>
@@ -650,6 +655,12 @@ function FacilityContextPanel({
 
 function readClientName(clients: ClientContextClient[], clientId: string) {
   return clients.find((client) => client.id === clientId)?.name ?? clientId;
+}
+
+function readQueryErrorMessage(error: unknown) {
+  return error instanceof Error && error.message.trim()
+    ? error.message
+    : "Review the backend response and try again.";
 }
 
 const clientContextStorageKey = "client-lens:selected-client-context";

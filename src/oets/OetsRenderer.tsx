@@ -104,6 +104,7 @@ export function OetsRenderer({
   onDirtyChange
 }: OetsRendererProps) {
   const diagnosticsEnabled = isOetsDeveloperDiagnosticsEnabled();
+  const [dismissedFormMessage, setDismissedFormMessage] = useState<string | null>(null);
   const [state, setState] = useState(() =>
     initialPayload
       ? createEvidenceStateFromPayload(definition, initialPayload)
@@ -121,6 +122,16 @@ export function OetsRenderer({
   const savedPayloadRef = useRef(JSON.stringify(payload.sections));
   const dirty = Boolean(initialPayload) && JSON.stringify(payload.sections) !== savedPayloadRef.current;
   useEffect(() => onDirtyChange?.(dirty), [dirty, onDirtyChange]);
+  useEffect(() => {
+    if (formMessage !== dismissedFormMessage) {
+      setDismissedFormMessage(null);
+    }
+  }, [dismissedFormMessage, formMessage]);
+  useEffect(() => {
+    if (isSubmitting) {
+      setDismissedFormMessage(null);
+    }
+  }, [isSubmitting]);
   // The server payload object changes only after a confirmed save; the current assembled
   // payload is intentionally captured at that boundary as the new visual signing baseline.
   useEffect(() => {
@@ -154,6 +165,41 @@ export function OetsRenderer({
 
   return (
     <div className="space-y-5">
+      {formMessage && dismissedFormMessage !== formMessage ? (
+        <div
+          aria-live="assertive"
+          className="fixed right-4 top-4 z-[70] w-[min(28rem,calc(100vw-2rem))] rounded-component border border-state-error bg-white p-4 shadow-xl"
+          role="alert"
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="font-semibold text-state-error">Draft could not be saved</p>
+              <p className="mt-1 text-sm leading-5 text-text-primary">{formMessage}</p>
+            </div>
+            <button
+              aria-label="Dismiss save error"
+              className="rounded-component px-2 py-1 text-lg leading-none text-text-muted hover:bg-elevated hover:text-text-primary"
+              onClick={() => setDismissedFormMessage(formMessage)}
+              type="button"
+            >
+              ×
+            </button>
+          </div>
+          {backendValidation && Object.keys(backendValidation.fieldMessages).length > 0 ? (
+            <button
+              className="mt-3 text-sm font-semibold text-primary-blue underline-offset-2 hover:underline"
+              onClick={() => {
+                const firstInvalidField = document.querySelector<HTMLElement>("[data-oets-invalid='true']");
+                firstInvalidField?.scrollIntoView({ behavior: "smooth", block: "center" });
+                firstInvalidField?.focus({ preventScroll: true });
+              }}
+              type="button"
+            >
+              Review first highlighted field
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       {/* AppShell's header is document-flow rather than sticky. This OETS-local
           strip therefore uses the viewport top after the shell header scrolls away. */}
       <Surface className="sticky top-0 z-20 flex flex-col gap-3 border-l-4 border-l-accent-red bg-gradient-to-r from-blue-50/95 to-white/95 p-3 shadow-[0_2px_8px_rgba(15,45,95,0.08)] backdrop-blur-sm lg:flex-row lg:items-center lg:justify-between" data-testid="oets-action-strip">
@@ -640,7 +686,7 @@ function OetsFieldControl({
 
   if (field.field_type === "BOOLEAN" || field.field_type === "CHECKBOX") {
     return (
-      <div className={errors?.length ? "rounded-component border-l-2 border-state-error pl-3 text-sm" : "text-sm"}>
+      <div data-oets-invalid={errors?.length ? "true" : undefined} tabIndex={errors?.length ? -1 : undefined} className={errors?.length ? "rounded-component border-l-2 border-state-error pl-3 text-sm" : "text-sm"}>
         <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-component border border-transparent bg-blue-50/30 px-3 py-2 text-primary-navy hover:border-blue-200 hover:bg-blue-50 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60" htmlFor={id}>
           {renderControl(field, id, value, readOnly, onChange)}
           <span className="font-semibold">
@@ -655,7 +701,7 @@ function OetsFieldControl({
   }
 
   return (
-    <div className={errors?.length ? "rounded-component border-l-2 border-state-error pl-3 text-sm" : "block text-sm"}>
+    <div data-oets-invalid={errors?.length ? "true" : undefined} tabIndex={errors?.length ? -1 : undefined} className={errors?.length ? "rounded-component border-l-2 border-state-error pl-3 text-sm" : "block text-sm"}>
       <label htmlFor={id}><FieldLabel field={field} /></label>
       {renderControl(field, id, value, readOnly, onChange)}
       {field.description ? (

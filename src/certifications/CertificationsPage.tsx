@@ -72,7 +72,6 @@ interface CertificationRegistryEntry {
 interface CreateCertificationFormState {
   staffMemberId: string;
   certificationLevel: CertificationLevel;
-  certificationNumber: string;
   issueDate: string;
   expiryDate: string;
   certificationStatus: "PENDING" | "ACTIVE";
@@ -111,7 +110,6 @@ interface CredentialIssuanceFormState {
 const emptyForm: CreateCertificationFormState = {
   staffMemberId: "",
   certificationLevel: "L1",
-  certificationNumber: "",
   issueDate: "",
   expiryDate: "",
   certificationStatus: "PENDING",
@@ -258,7 +256,6 @@ export function CertificationsPage() {
     mutationFn: () =>
       createCertification({
         certification_level: form.certificationLevel,
-        certification_number: form.certificationNumber.trim(),
         issue_date: toIsoDate(form.issueDate),
         expiry_date: toIsoDate(form.expiryDate),
         medical_clearance_provided: form.medicalClearanceProvided,
@@ -2220,17 +2217,10 @@ function CreateCertificationPanel({
             </select>
           </label>
         </div>
-        <label className="block text-sm font-semibold text-text-primary">
-          Certification number
-          <input
-            className={inputClassName}
-            onChange={(event) =>
-              onChange({ ...form, certificationNumber: event.currentTarget.value })
-            }
-            required
-            value={form.certificationNumber}
-          />
-        </label>
+        <div className="rounded-component border border-blue-200 bg-blue-50 p-3 text-sm text-text-muted">
+          <span className="font-semibold text-primary-navy">Certification number:</span>{" "}
+          Assigned automatically after this Certification is saved.
+        </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="block text-sm font-semibold text-text-primary">
             Issue date

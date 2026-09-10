@@ -158,6 +158,11 @@ export function GovernedAttestationControl({
             />
             <span>I have reviewed the exact evidence and deliberately accept the attestation statement above.</span>
           </label>
+          {!confirmed ? (
+            <p className="text-sm font-medium text-text-muted" role="status">
+              Confirm the attestation statement above to enable signing.
+            </p>
+          ) : null}
           {errorMessage ? <p className="text-sm font-semibold text-state-error" role="alert">{errorMessage}</p> : null}
           <Button
             disabled={pending || !confirmed || (mode === "RECORDED_EXTERNAL_ATTESTATION" && !externalName.trim())}
@@ -178,6 +183,19 @@ export function GovernedAttestationControl({
             }).catch(() => undefined)}
           >
             {pending ? "Signing…" : "Sign & Attest"}
+          </Button>
+        </div>
+      ) : null}
+
+      {!readOnly && !current && (!context || !onAttest) ? (
+        <div className="space-y-2 border-t border-border pt-3">
+          <p className="text-sm font-medium text-text-muted" role="status">
+            {!context
+              ? "Begin and persist this evidence draft before recording an attestation."
+              : "Save the current draft changes before signing. The attestation must bind to the exact persisted evidence checksum."}
+          </p>
+          <Button disabled type="button">
+            Sign &amp; Attest
           </Button>
         </div>
       ) : null}

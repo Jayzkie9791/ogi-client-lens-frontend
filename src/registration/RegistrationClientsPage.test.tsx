@@ -148,13 +148,14 @@ describe("Registration Clients frontend", () => {
     renderWithRoute(routes.workbench);
 
     await user.click(await screen.findByRole("button", { name: "Menu" }));
-    await user.click(screen.getByRole("link", { name: "Registration" }));
+    await user.click(screen.getByRole("button", { name: "Registration" }));
+    await user.click(screen.getByRole("link", { name: "Clients" }));
 
     expect(
       await screen.findByRole("heading", { name: "Clients / Organizations" })
     ).toBeInTheDocument();
-    expect(screen.getAllByRole("heading", { name: "Registration" })).toHaveLength(1);
-    expect(screen.getByRole("link", { name: "Clients" })).toHaveAttribute(
+    expect(within(screen.getByRole("main")).getByRole("heading", { name: "Registration" })).toBeInTheDocument();
+    expect(within(screen.getByRole("navigation", { name: "Registration resource tabs" })).getByRole("link", { name: "Clients" })).toHaveAttribute(
       "aria-current",
       "page"
     );
@@ -240,7 +241,7 @@ describe("Registration Clients frontend", () => {
     expect(
       await screen.findByRole("heading", { name: "Clients / Organizations" })
     ).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Clients" })).toHaveAttribute(
+    expect(within(screen.getByRole("navigation", { name: "Registration resource tabs" })).getByRole("link", { name: "Clients" })).toHaveAttribute(
       "aria-current",
       "page"
     );

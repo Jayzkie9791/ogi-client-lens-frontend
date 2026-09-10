@@ -17,6 +17,7 @@ export const routes = {
     `/workbench/audit-risk/findings/${encodeURIComponent(findingId)}`,
   operations: "/workbench/operations",
   records: "/workbench/operations/records",
+  myDrafts: "/workbench/operations/my-drafts",
   administration: "/workbench/administration",
   administrationClientPocs: "/workbench/administration/client-pocs",
   registrationClients: "/workbench/registration/clients",

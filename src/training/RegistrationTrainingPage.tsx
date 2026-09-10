@@ -5,10 +5,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { isApiError } from "../api/errors";
 import { routes } from "../app/routePaths";
 import { useAuth } from "../auth/useAuth";
-import {
-  getPersonnelCredentials,
-  CredentialsCertificationProjection
-} from "../credentials/credentialsApi";
+import { createCertificationFromReadiness } from "../certifications/certificationsApi";
 import {
   listRegistrationClients,
   RegistrationClient
@@ -43,22 +40,28 @@ import {
   getTrainingAttendanceEvidenceWorkspace,
   getTrainingEvidenceWorkspace,
   linkTrainingAttendanceEvidence,
+  linkTrainingEnrollmentEvidence,
   linkTrainingTraineeStaffMember,
+  listEligibleTrainingInstructors,
   getTrainingTrainee,
   listTrainingEnrollments,
+  listTrainingPrograms,
   listTrainingSessions,
   listTrainingTrainees,
+  recordTrainingAssessment,
+  recordTrainingReadiness,
   TrainingAttendanceEvidenceRecord,
   TrainingAttendanceEvidenceWorkspace,
   TrainingEnrollment,
   TrainingEnrollmentSessionSummary,
+  EligibleTrainingInstructor,
   TrainingEvidenceWorkspace,
   TrainingEvidenceWorkspaceRecord,
   TrainingEvidenceWorkspaceSlot,
   TrainingProgramCode,
+  TrainingProgramAuthority,
   TrainingOperationalSkill,
   TrainingSession,
-  trainingOperationalSkills,
   trainingProgramOptions,
   TrainingTrainee
 } from "./trainingApi";
@@ -75,7 +78,12 @@ const permissions = {
   viewClients: "view_client",
   viewPersonnel: "view_staff_member",
   viewFacilities: "view_facility",
-  viewCertifications: "view_certification"
+  viewCertifications: "view_certification",
+  createCertification: "create_certification_draft",
+  issueCertification: "issue_certification",
+  linkEvidence: "link_training_evidence",
+  recordAssessment: "record_training_assessment",
+  decideReadiness: "decide_training_readiness"
 } as const;
 
 interface TraineeFormState {
@@ -94,6 +102,7 @@ interface EnrollmentFormState {
 
 interface SessionFormState {
   title: string;
+  targetProgramCode: TrainingProgramCode | "";
   operationalSkill: TrainingOperationalSkill;
   startDate: string;
   endDate: string;
@@ -120,6 +129,7 @@ const emptyEnrollmentForm: EnrollmentFormState = {
 
 const emptySessionForm: SessionFormState = {
   title: "",
+  targetProgramCode: "",
   operationalSkill: "RESCUE_SKILLS",
   startDate: "",
   endDate: "",
@@ -169,6 +179,14 @@ export function RegistrationTrainingPage({ workspace = "trainees" }: { readonly 
     useState<SessionFormState>(emptySessionForm);
   const [sessionIdempotencyKey, setSessionIdempotencyKey] = useState(() => workspace === "sessions" ? crypto.randomUUID() : "");
   const [isRegisteringTraining, setIsRegisteringTraining] = useState(workspace === "register");
+
+  useEffect(() => {
+    setIsCreatingSession(workspace === "sessions");
+    setIsRegisteringTraining(workspace === "register");
+    if (workspace === "sessions") {
+      setSessionIdempotencyKey(crypto.randomUUID());
+    }
+  }, [workspace]);
 
   const traineesQuery = useQuery({
     queryKey: ["training-trainees"],
@@ -236,11 +254,18 @@ export function RegistrationTrainingPage({ workspace = "trainees" }: { readonly 
     () => sessionsQuery.data?.sessions ?? [],
     [sessionsQuery.data]
   );
+  const programsQuery = useQuery({
+    queryKey: ["training-programs"],
+    queryFn: listTrainingPrograms,
+    enabled: canView && isCreatingSession,
+    retry: false
+  });
+  const programs = programsQuery.data?.programs ?? [];
 
   const personnelQuery = useQuery({
     queryKey: ["registration-personnel"],
     queryFn: () => listRegistrationPersonnel(),
-    enabled: canViewPersonnel && (isLinkingPersonnel || isCreatingSession),
+    enabled: canViewPersonnel && isLinkingPersonnel,
     retry: false
   });
   const personnel = useMemo(
@@ -261,39 +286,26 @@ export function RegistrationTrainingPage({ workspace = "trainees" }: { readonly 
       ),
     [facilitiesQuery.data]
   );
-  const selectedFacility =
-    activeFacilities.find((facility) => facility.id === sessionForm.facilityId) ??
-    null;
-  const eligiblePersonnel = useMemo(
-    () =>
-      personnel.filter(
-        (staffMember) =>
-          staffMember.employment_status === "ACTIVE" &&
-          Boolean(staffMember.user_id) &&
-          staffMember.client_id === selectedFacility?.client_id
-      ),
-    [personnel, selectedFacility]
-  );
-  const instructorCredentialsQuery = useQuery({
+  const eligibleInstructorsQuery = useQuery({
     queryKey: [
-      "credentials-personnel",
-      sessionForm.instructorStaffMemberId,
-      "training-qualification-selector"
+      "training-eligible-instructors",
+      sessionForm.facilityId,
+      sessionForm.targetProgramCode,
+      sessionForm.startDate,
+      "session-create"
     ],
-    queryFn: () => getPersonnelCredentials(sessionForm.instructorStaffMemberId),
+    queryFn: () => listEligibleTrainingInstructors({
+      facilityId: sessionForm.facilityId,
+      targetProgramCodes: [requiredValue(sessionForm.targetProgramCode, "Target program is required.")],
+      at: new Date(sessionForm.startDate).toISOString()
+    }),
     enabled:
       canViewCertifications &&
       isCreatingSession &&
-      Boolean(sessionForm.instructorStaffMemberId),
+      Boolean(sessionForm.facilityId && sessionForm.targetProgramCode && sessionForm.startDate),
     retry: false
   });
-  const eligibleInstructorCertifications = useMemo(
-    () =>
-      (instructorCredentialsQuery.data?.certifications ?? []).filter(
-        isCurrentInstructorCertification
-      ),
-    [instructorCredentialsQuery.data]
-  );
+  const eligibleInstructors = eligibleInstructorsQuery.data?.instructors ?? [];
 
   const createTraineeMutation = useMutation({
     mutationFn: () => createTrainingTrainee(buildCreateTraineeRequest(traineeForm)),
@@ -472,6 +484,22 @@ export function RegistrationTrainingPage({ workspace = "trainees" }: { readonly 
               Register Trainee
             </Button>
           ) : null}
+          {workspace === "sessions" && canCreateSession && !isCreatingSession ? (
+            <Button
+              onClick={() => {
+                setSessionIdempotencyKey(crypto.randomUUID());
+                setIsCreatingSession(true);
+              }}
+              type="button"
+            >
+              Create Training Session
+            </Button>
+          ) : null}
+          {workspace === "register" && canCreateEnrollment && !isRegisteringTraining ? (
+            <Button onClick={() => setIsRegisteringTraining(true)} type="button">
+              Register Training
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -481,7 +509,7 @@ export function RegistrationTrainingPage({ workspace = "trainees" }: { readonly 
         </Surface>
       ) : null}
 
-      {isRegisteringTraining ? (
+      {workspace === "register" && isRegisteringTraining ? (
         <RegisterTrainingWizard
           canCreateSession={canCreateSession && canViewFacilities && canViewPersonnel && canViewCertifications}
           canLinkPersonnel={canLinkPersonnel && canViewPersonnel}
@@ -513,10 +541,12 @@ export function RegistrationTrainingPage({ workspace = "trainees" }: { readonly 
         }
       />
 
-      {isCreatingSession ? (
+      {workspace === "sessions" && isCreatingSession ? (
         <TrainingSessionCreatePanel
-          certifications={eligibleInstructorCertifications}
-          certificationsLoading={instructorCredentialsQuery.isLoading}
+          programs={programs}
+          programsLoading={programsQuery.isLoading}
+          instructors={eligibleInstructors}
+          instructorsLoading={eligibleInstructorsQuery.isLoading}
           facilities={activeFacilities}
           facilitiesLoading={facilitiesQuery.isLoading}
           formState={sessionForm}
@@ -528,12 +558,10 @@ export function RegistrationTrainingPage({ workspace = "trainees" }: { readonly 
           }}
           onChange={(next) => setSessionForm(next)}
           onSubmit={submitTrainingSession}
-          personnel={eligiblePersonnel}
-          personnelLoading={personnelQuery.isLoading}
         />
       ) : null}
 
-      {traineesQuery.isLoading ? (
+      {workspace !== "trainees" ? null : traineesQuery.isLoading ? (
         <SafeState title="Loading Trainee records." role="status">
           Please wait.
         </SafeState>
@@ -1688,9 +1716,11 @@ function TrainingEvidenceWorkspacePanel({
 }: {
   enrollment: TrainingEnrollment;
 }) {
+  const auth = useAuth();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [message, setMessage] = useState<string | null>(null);
+  const [createdCertificationId, setCreatedCertificationId] = useState<string | null>(null);
   const workspaceQueryKey = [
     "training",
     "enrollment",
@@ -1701,6 +1731,35 @@ function TrainingEvidenceWorkspacePanel({
     queryKey: workspaceQueryKey,
     queryFn: () => getTrainingEvidenceWorkspace(enrollment.id),
     retry: false
+  });
+  const traineeQuery = useQuery({
+    queryKey: ["training-trainee", enrollment.trainee_id],
+    queryFn: () => getTrainingTrainee(enrollment.trainee_id),
+    retry: false
+  });
+  const readinessDecision = workspaceQuery.data?.slots
+    .flatMap((slot) => slot.history)
+    .map((record) => record.readiness_decision)
+    .find((decision) => decision !== null &&
+      (decision.readiness_outcome === "OPERATIONALLY_READY" || decision.readiness_outcome === "OPERATIONALLY_READY_WITH_RESTRICTIONS") &&
+      decision.certification_review_required) ?? null;
+  const linkedStaffMemberId = traineeQuery.data?.staff_member_links.find(
+    (link) => link.ended_at === null
+  )?.staff_member_id;
+  const certificationMutation = useMutation({
+    mutationFn: () => createCertificationFromReadiness({
+      training_readiness_decision_id: requiredValue(readinessDecision?.id, "A current readiness decision is required."),
+      certification_status: auth.canUsePermission(permissions.issueCertification) ? "ACTIVE" : "PENDING",
+      ...(linkedStaffMemberId ? { staff_member_id: linkedStaffMemberId } : {})
+    }),
+    onSuccess(certification) {
+      setCreatedCertificationId(certification.id);
+      setMessage(`Certification ${certification.certification_number} created from Training readiness.`);
+      void queryClient.invalidateQueries({ queryKey: ["credentials"] });
+    },
+    onError(error) {
+      setMessage(trainingEvidenceErrorMessage(error));
+    }
   });
   const createDraftMutation = useMutation({
     mutationFn: (slot: TrainingEvidenceWorkspaceSlot) =>
@@ -1749,14 +1808,29 @@ function TrainingEvidenceWorkspacePanel({
           {trainingEvidenceErrorMessage(workspaceQuery.error)}
         </p>
       ) : workspaceQuery.data ? (
-        <TrainingEvidenceWorkspaceContent
-          isCreatingDraft={createDraftMutation.isPending}
-          onCreateDraft={(slot) => {
-            setMessage(null);
-            createDraftMutation.mutate(slot);
-          }}
-          workspace={workspaceQuery.data}
-        />
+        <>
+          <TrainingEvidenceWorkspaceContent
+            isCreatingDraft={createDraftMutation.isPending}
+            onCreateDraft={(slot) => {
+              setMessage(null);
+              createDraftMutation.mutate(slot);
+            }}
+            workspace={workspaceQuery.data}
+          />
+          {readinessDecision && auth.canUsePermission(permissions.createCertification) ? (
+            <form className="rounded-component border border-blue-200 bg-blue-50/60 p-4" onSubmit={(event) => { event.preventDefault(); setMessage(null); certificationMutation.mutate(); }}>
+              <p className="text-xs font-semibold uppercase tracking-wide text-primary-blue">Certification authority</p>
+              <h6 className="mt-1 text-sm font-semibold text-primary-navy">Create Certification from governed readiness</h6>
+              <p className="mt-1 text-sm text-text-muted">Program, validity, score, Trainee, Enrollment, and readiness provenance are derived by the backend.</p>
+              {!linkedStaffMemberId ? <p className="mt-2 text-sm font-semibold text-red-800" role="alert">Link this Trainee to an active Personnel record before Certification so the issued authority remains visible in the Certification Registry.</p> : null}
+              <p className="mt-3 rounded-component border border-blue-200 bg-white/70 p-3 text-sm text-text-muted"><span className="font-semibold text-primary-navy">Certification number:</span> Assigned automatically after this Certification is saved.</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button disabled={certificationMutation.isPending || !linkedStaffMemberId || Boolean(createdCertificationId)} type="submit">{certificationMutation.isPending ? "Creating Certification" : "Create from Readiness"}</Button>
+                {createdCertificationId ? <Link className={buttonLinkClassName} to={routes.certifications}>Open Certification Registry</Link> : null}
+              </div>
+            </form>
+          ) : null}
+        </>
       ) : null}
 
       {message ? (
@@ -1908,6 +1982,43 @@ function TrainingEvidenceHistoryItem({
 }: {
   record: TrainingEvidenceWorkspaceRecord;
 }) {
+  const auth = useAuth();
+  const queryClient = useQueryClient();
+  const [score, setScore] = useState("100");
+  const [resultStatus, setResultStatus] = useState<"PASS" | "CONDITIONAL_PASS" | "FAIL">("PASS");
+  const [readinessOutcome, setReadinessOutcome] = useState<"OPERATIONALLY_READY" | "OPERATIONALLY_READY_WITH_RESTRICTIONS" | "REMEDIATION_REQUIRED" | "NOT_OPERATIONALLY_READY">("OPERATIONALLY_READY");
+  const [actionError, setActionError] = useState<string | null>(null);
+  const workspaceKey = ["training", "enrollment", record.evidence.training_enrollment_id, "evidence-workspace"] as const;
+  const linkMutation = useMutation({
+    mutationFn: () => linkTrainingEnrollmentEvidence(record.evidence.training_enrollment_id, {
+      operational_evidence_record_id: record.evidence.evidence_record_id,
+      evidence_purpose: evidencePurposeForTemplate(record.evidence.template_code)
+    }),
+    onSuccess: () => { setActionError(null); void queryClient.invalidateQueries({ queryKey: workspaceKey }); },
+    onError: (error) => setActionError(trainingEvidenceErrorMessage(error))
+  });
+  const assessmentMutation = useMutation({
+    mutationFn: () => recordTrainingAssessment(record.evidence.training_enrollment_id, {
+      evidence_link_id: requiredValue(record.evidence_link?.id, "Linked Training evidence is required."),
+      result_status: resultStatus,
+      score: Number(score),
+      remediation_required: resultStatus !== "PASS",
+      reassessment_required: resultStatus === "FAIL"
+    }),
+    onSuccess: () => { setActionError(null); void queryClient.invalidateQueries({ queryKey: workspaceKey }); },
+    onError: (error) => setActionError(trainingEvidenceErrorMessage(error))
+  });
+  const readinessMutation = useMutation({
+    mutationFn: () => recordTrainingReadiness(record.evidence.training_enrollment_id, {
+      readiness_evidence_link_id: requiredValue(record.evidence_link?.id, "Linked readiness evidence is required."),
+      readiness_outcome: readinessOutcome,
+      remediation_required: readinessOutcome === "REMEDIATION_REQUIRED" || readinessOutcome === "NOT_OPERATIONALLY_READY",
+      certification_review_required: readinessOutcome === "OPERATIONALLY_READY" || readinessOutcome === "OPERATIONALLY_READY_WITH_RESTRICTIONS"
+    }),
+    onSuccess: () => { setActionError(null); void queryClient.invalidateQueries({ queryKey: workspaceKey }); },
+    onError: (error) => setActionError(trainingEvidenceErrorMessage(error))
+  });
+  const isAssessment = record.evidence.template_code === "OGI_F023_OPERATIONAL_SKILLS_ASSESSMENT" || record.evidence.template_code === "OGI_F024_OPERATIONAL_KNOWLEDGE_ASSESSMENT_RECORD";
   return (
     <li className="rounded-component border border-border bg-canvas p-3">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -1952,6 +2063,23 @@ function TrainingEvidenceHistoryItem({
         />
       </dl>
       <TrainingEvidenceResultSummary record={record} />
+      {!record.evidence_link && record.evidence.submitted_at && auth.canUsePermission(permissions.linkEvidence) ? (
+        <Button disabled={linkMutation.isPending} onClick={() => linkMutation.mutate()} type="button" variant="secondary">Link governed evidence</Button>
+      ) : null}
+      {record.evidence_link && isAssessment && !record.assessment_result && auth.canUsePermission(permissions.recordAssessment) ? (
+        <form className="mt-3 grid gap-3 rounded-component border border-border bg-surface p-3 sm:grid-cols-2" onSubmit={(event) => { event.preventDefault(); assessmentMutation.mutate(); }}>
+          <label className="text-sm font-semibold text-text-primary">Result<select className={inputClassName} onChange={(event) => setResultStatus(event.currentTarget.value as typeof resultStatus)} value={resultStatus}><option value="PASS">Pass</option><option value="CONDITIONAL_PASS">Conditional pass</option><option value="FAIL">Fail</option></select></label>
+          <label className="text-sm font-semibold text-text-primary">Score<input className={inputClassName} max="100" min="0" onChange={(event) => setScore(event.currentTarget.value)} required type="number" value={score}/></label>
+          <Button disabled={assessmentMutation.isPending || !score} type="submit">Record governed result</Button>
+        </form>
+      ) : null}
+      {record.evidence_link && record.evidence.template_code === "OGI_F025_OPERATIONAL_READINESS_EVALUATION" && !record.readiness_decision && auth.canUsePermission(permissions.decideReadiness) ? (
+        <form className="mt-3 space-y-3 rounded-component border border-border bg-surface p-3" onSubmit={(event) => { event.preventDefault(); readinessMutation.mutate(); }}>
+          <label className="text-sm font-semibold text-text-primary">Readiness decision<select className={inputClassName} onChange={(event) => setReadinessOutcome(event.currentTarget.value as typeof readinessOutcome)} value={readinessOutcome}><option value="OPERATIONALLY_READY">Operationally ready</option><option value="OPERATIONALLY_READY_WITH_RESTRICTIONS">Ready with restrictions</option><option value="REMEDIATION_REQUIRED">Remediation required</option><option value="NOT_OPERATIONALLY_READY">Not operationally ready</option></select></label>
+          <Button disabled={readinessMutation.isPending} type="submit">Record readiness decision</Button>
+        </form>
+      ) : null}
+      {actionError ? <p className="mt-2 text-sm font-semibold text-red-800" role="alert">{actionError}</p> : null}
     </li>
   );
 }
@@ -2145,8 +2273,10 @@ function MetadataItem({
 }
 
 function TrainingSessionCreatePanel({
-  certifications,
-  certificationsLoading,
+  programs,
+  programsLoading,
+  instructors,
+  instructorsLoading,
   facilities,
   facilitiesLoading,
   formState,
@@ -2154,11 +2284,11 @@ function TrainingSessionCreatePanel({
   onCancel,
   onChange,
   onSubmit,
-  personnel,
-  personnelLoading
 }: {
-  certifications: readonly CredentialsCertificationProjection[];
-  certificationsLoading: boolean;
+  programs: readonly TrainingProgramAuthority[];
+  programsLoading: boolean;
+  instructors: readonly EligibleTrainingInstructor[];
+  instructorsLoading: boolean;
   facilities: readonly RegistrationFacility[];
   facilitiesLoading: boolean;
   formState: SessionFormState;
@@ -2166,13 +2296,15 @@ function TrainingSessionCreatePanel({
   onCancel: () => void;
   onChange: (state: SessionFormState) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-  personnel: readonly RegistrationPersonnel[];
-  personnelLoading: boolean;
 }) {
   const setField = <K extends keyof SessionFormState,>(
     field: K,
     value: SessionFormState[K]
   ) => onChange({ ...formState, [field]: value });
+  const selectedProgram = programs.find(
+    (program) => program.program_code === formState.targetProgramCode
+  );
+  const allowedFocuses = selectedProgram?.allowed_session_focuses ?? [];
 
   return (
     <Surface>
@@ -2182,9 +2314,9 @@ function TrainingSessionCreatePanel({
             Create qualified Training Session
           </h2>
           <p className="mt-1 text-sm text-text-muted">
-            Select the Facility, exact StaffMember, and exact current L6/L7
-            Certification. Permission to create does not establish instructor
-            qualification.
+            Select the program, Facility, and Session date first. Client Lens
+            then resolves exact instructor qualification and operational scope
+            from backend authority.
           </p>
         </div>
         <div className="grid gap-4 md:grid-cols-2">
@@ -2199,9 +2331,35 @@ function TrainingSessionCreatePanel({
             />
           </label>
           <label className="block text-sm font-semibold text-text-primary">
-            Operational skill
+            Target training program
             <select
               className={inputClassName}
+              disabled={programsLoading}
+              onChange={(event) => {
+                const targetProgramCode = event.currentTarget.value as TrainingProgramCode | "";
+                const program = programs.find((candidate) => candidate.program_code === targetProgramCode);
+                onChange({
+                  ...formState,
+                  targetProgramCode,
+                  operationalSkill: program?.allowed_session_focuses[0] ?? "RESCUE_SKILLS",
+                  instructorStaffMemberId: "",
+                  qualificationCertificationId: ""
+                });
+              }}
+              required
+              value={formState.targetProgramCode}
+            >
+              <option value="">{programsLoading ? "Loading governed programs…" : "Select a governed program"}</option>
+              {programs.map((program) => (
+                <option key={program.program_code} value={program.program_code}>{program.certification_level} · {program.display_name}</option>
+              ))}
+            </select>
+          </label>
+          <label className="block text-sm font-semibold text-text-primary">
+            Primary Session Focus
+            <select
+              className={inputClassName}
+              disabled={!selectedProgram}
               onChange={(event) =>
                 setField(
                   "operationalSkill",
@@ -2210,10 +2368,14 @@ function TrainingSessionCreatePanel({
               }
               value={formState.operationalSkill}
             >
-              {trainingOperationalSkills.map((skill) => (
+              {allowedFocuses.map((skill) => (
                 <option key={skill} value={skill}>{humanizeCode(skill)}</option>
               ))}
             </select>
+            <span className="mt-2 block font-normal text-text-muted">
+              Classifies this Session only. It does not define Program coverage
+              or prove competency completion.
+            </span>
           </label>
           <label className="block text-sm font-semibold text-text-primary">
             Starts
@@ -2272,57 +2434,49 @@ function TrainingSessionCreatePanel({
             </select>
           </label>
           <label className="block text-sm font-semibold text-text-primary">
-            Primary instructor
+            Eligible primary instructor
             <select
               className={inputClassName}
-              disabled={!formState.facilityId || personnelLoading}
-              onChange={(event) =>
-                onChange({
-                  ...formState,
-                  instructorStaffMemberId: event.currentTarget.value,
-                  qualificationCertificationId: ""
-                })
-              }
+              disabled={!formState.facilityId || !formState.targetProgramCode || !formState.startDate || instructorsLoading}
+              onChange={(event) => {
+                const instructor = instructors.find((candidate) => instructorOptionValue(candidate) === event.currentTarget.value);
+                onChange({ ...formState, instructorStaffMemberId: instructor?.personnel_id ?? "", qualificationCertificationId: instructor?.qualification.certification_id ?? "" });
+              }}
               required
-              value={formState.instructorStaffMemberId}
+              value={instructorOptionValueOrEmpty(instructors, formState)}
             >
-              <option value="">Select bound active Personnel</option>
-              {personnel.map((staffMember) => (
-                <option key={staffMember.id} value={staffMember.id}>
-                  {staffMember.full_name}
+              <option value="">{instructorsLoading ? "Resolving eligible instructors…" : "Select an eligible instructor"}</option>
+              {instructors.map((instructor) => (
+                <option key={instructorOptionValue(instructor)} value={instructorOptionValue(instructor)}>
+                  {instructor.display_name} — {instructor.qualification.title}
                 </option>
               ))}
             </select>
-          </label>
-          <label className="block text-sm font-semibold text-text-primary">
-            Exact qualifying Certification
-            <select
-              className={inputClassName}
-              disabled={!formState.instructorStaffMemberId || certificationsLoading}
-              onChange={(event) =>
-                setField(
-                  "qualificationCertificationId",
-                  event.currentTarget.value
-                )
-              }
-              required
-              value={formState.qualificationCertificationId}
-            >
-              <option value="">Select current L6/L7 Certification</option>
-              {certifications.map((certification) => (
-                <option key={certification.id} value={certification.id}>
-                  {certification.business_identifier} — {certification.certification_level} — expires {formatDateTime(certification.expiry_date)}
-                </option>
-              ))}
-            </select>
-            {formState.instructorStaffMemberId && !certificationsLoading && certifications.length === 0 ? (
+            {formState.facilityId && formState.targetProgramCode && formState.startDate && !instructorsLoading && instructors.length === 0 ? (
               <span className="mt-2 block font-normal text-text-muted">
-                No current L6/L7 Certification is available. L5 alone is not
-                sufficient for the primary instructor.
+                No instructor has qualifying Certification and operational
+                authority for this Facility, program, and Session date.
               </span>
             ) : null}
           </label>
         </div>
+        {selectedProgram ? (
+          <section aria-label="Required Program Coverage" className="rounded-component border border-blue-200 bg-blue-50 p-4">
+            <h3 className="font-semibold text-primary-navy">Required Program Coverage</h3>
+            <p className="mt-1 text-sm font-normal text-text-muted">
+              Governed course coverage for {selectedProgram.certification_level} · {selectedProgram.display_name}. This does not record attendance, assessment, readiness, or completion.
+            </p>
+            {selectedProgram.required_program_coverage.length > 0 ? (
+              <ul className="mt-3 grid gap-x-6 gap-y-1 text-sm font-normal text-text-primary sm:grid-cols-2">
+                {selectedProgram.required_program_coverage.map((item) => <li key={item}>• {item}</li>)}
+              </ul>
+            ) : (
+              <p className="mt-3 text-sm font-normal text-text-muted">
+                Course coverage has not yet been published for this Program.
+              </p>
+            )}
+          </section>
+        ) : null}
         <label className="block text-sm font-semibold text-text-primary">
           Notes
           <textarea
@@ -2337,6 +2491,7 @@ function TrainingSessionCreatePanel({
           <Button
             disabled={
               isSubmitting ||
+              !formState.targetProgramCode ||
               !formState.facilityId ||
               !formState.instructorStaffMemberId ||
               !formState.qualificationCertificationId
@@ -2434,22 +2589,36 @@ function buildCreateSessionRequest(formState: SessionFormState) {
     instructor_staff_member_id: formState.instructorStaffMemberId,
     instructor_qualification_certification_id:
       formState.qualificationCertificationId,
+    target_program_codes: [formState.targetProgramCode as TrainingProgramCode],
     training_notes: nullableText(formState.notes)
   };
 }
 
-function isCurrentInstructorCertification(
-  certification: CredentialsCertificationProjection
-) {
-  const now = Date.now();
+function requiredValue<T>(value: T | null | undefined | "", message: string): T {
+  if (value === null || value === undefined || value === "") throw new Error(message);
+  return value;
+}
 
-  return (
-    (certification.certification_level === "L6" ||
-      certification.certification_level === "L7") &&
-    certification.certification_status === "ACTIVE" &&
-    new Date(certification.issue_date).getTime() <= now &&
-    new Date(certification.expiry_date).getTime() > now
+function evidencePurposeForTemplate(templateCode: TrainingEvidenceWorkspaceRecord["evidence"]["template_code"]): TrainingEvidenceWorkspaceSlot["evidence_purpose"] {
+  if (templateCode === "OGI_F023_OPERATIONAL_SKILLS_ASSESSMENT") return "SKILLS_ASSESSMENT";
+  if (templateCode === "OGI_F024_OPERATIONAL_KNOWLEDGE_ASSESSMENT_RECORD") return "KNOWLEDGE_ASSESSMENT";
+  if (templateCode === "OGI_F025_OPERATIONAL_READINESS_EVALUATION") return "READINESS";
+  throw new Error("Unsupported Training evidence template.");
+}
+
+function instructorOptionValue(instructor: EligibleTrainingInstructor) {
+  return `${instructor.personnel_id}:${instructor.qualification.certification_id}`;
+}
+
+function instructorOptionValueOrEmpty(
+  instructors: readonly EligibleTrainingInstructor[],
+  form: SessionFormState
+) {
+  const instructor = instructors.find(
+    (candidate) => candidate.personnel_id === form.instructorStaffMemberId &&
+      candidate.qualification.certification_id === form.qualificationCertificationId
   );
+  return instructor ? instructorOptionValue(instructor) : "";
 }
 
 function studentNumberLabel(value: string | null) {

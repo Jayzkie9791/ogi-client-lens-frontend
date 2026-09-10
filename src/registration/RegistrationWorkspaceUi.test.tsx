@@ -65,7 +65,7 @@ describe("Registration workspace presentation", () => {
     const item = screen.getByRole("button", { name: "Ocean Guard International" });
     expect(item).toHaveAttribute("aria-pressed", "true");
     expect(item).not.toHaveAttribute("aria-current");
-    expect(item).toHaveClass("border-l-4", "bg-elevated", "focus-visible:ring-2");
+    expect(item).toHaveClass("border-l-4", "bg-[var(--cl-workspace-selected)]", "focus-visible:ring-2");
     await user.click(item);
     expect(onSelect).toHaveBeenCalledOnce();
   });

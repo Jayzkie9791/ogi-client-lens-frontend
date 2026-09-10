@@ -19,6 +19,7 @@ import {
   TrainingEvidenceWorkspaceRecord,
   TrainingEvidenceWorkspaceSlot,
   TrainingSession,
+  TrainingProgramAuthorityListResponse,
   TrainingTrainee
 } from "./trainingApi";
 
@@ -28,6 +29,18 @@ const staffAId = "00000000-0000-4000-8000-000000820001";
 const clientAId = "00000000-0000-4000-8000-000000830001";
 const clientBId = "00000000-0000-4000-8000-000000830002";
 const trainingSessionAId = "00000000-0000-4000-8000-000000860001";
+
+const programAuthority: TrainingProgramAuthorityListResponse = {
+  programs: [
+    { program_code: "GUARDIAN_RESPONDER", certification_level: "L1", display_name: "Guardian Responder", qualification_label: "Guardian Responder", required_training_hours: 40, required_program_coverage: ["First Aid", "CPR", "AED", "Oxygen Administration"], incremental_coverage: ["CPR - Adult, Child & Infant", "AED Operation & Application", "Basic First Aid", "Oxygen Administration", "Incident Documentation"], effective_coverage: ["CPR - Adult, Child & Infant", "AED Operation & Application", "Basic First Aid", "Oxygen Administration"], allowed_session_focuses: ["RESCUE_SKILLS", "CPR_AED", "FIRST_AID", "EAP", "COMMUNICATION_COMMAND"] },
+    { program_code: "POOL_GUARDIAN", certification_level: "L2", display_name: "Pool Guardian", qualification_label: "Pool Guardian", required_training_hours: 60, required_program_coverage: [], incremental_coverage: ["Pool Surveillance & Scanning"], effective_coverage: ["Basic First Aid", "Pool Surveillance & Scanning"], allowed_session_focuses: ["RESCUE_SKILLS", "CPR_AED", "FIRST_AID", "EAP", "COMMUNICATION_COMMAND", "SPINAL_MANAGEMENT", "SCANNING_SURVEILLANCE", "WATER_ENTRY_APPROACH", "VICTIM_EXTRACTION"] },
+    { program_code: "OPEN_WATER_GUARDIAN", certification_level: "L3", display_name: "Open Water Guardian", qualification_label: "Open Water Guardian", required_training_hours: 80, required_program_coverage: [], incremental_coverage: ["Open Water Surveillance"], effective_coverage: ["Basic First Aid", "Open Water Surveillance"], allowed_session_focuses: ["RESCUE_SKILLS", "CPR_AED", "FIRST_AID", "EAP", "COMMUNICATION_COMMAND", "SPINAL_MANAGEMENT", "SCANNING_SURVEILLANCE", "WATER_ENTRY_APPROACH", "VICTIM_EXTRACTION", "OPEN_WATER_NAVIGATION", "SURF_OPERATIONS", "RIP_CURRENT_MANAGEMENT"] },
+    { program_code: "RESCUE_TECHNICIAN", certification_level: "L4", display_name: "Rescue Technician", qualification_label: "Rescue Technician", required_training_hours: 120, required_program_coverage: [], incremental_coverage: ["Technical Rescue Principles"], effective_coverage: ["Basic First Aid", "Technical Rescue Principles"], allowed_session_focuses: ["RESCUE_SKILLS", "CPR_AED", "FIRST_AID", "EAP", "COMMUNICATION_COMMAND", "SPINAL_MANAGEMENT", "SCANNING_SURVEILLANCE", "WATER_ENTRY_APPROACH", "VICTIM_EXTRACTION", "OPEN_WATER_NAVIGATION", "SURF_OPERATIONS", "RIP_CURRENT_MANAGEMENT", "BOARD_RESCUE", "TECHNICAL_RESCUE"] },
+    { program_code: "ASSISTANT_GUARDIAN_INSTRUCTOR", certification_level: "L5", display_name: "Assistant Guardian Instructor", qualification_label: "Assistant Guardian Instructor", required_training_hours: 150, required_program_coverage: [], incremental_coverage: ["Instructional Methodology"], effective_coverage: ["Basic First Aid", "Instructional Methodology"], allowed_session_focuses: ["RESCUE_SKILLS", "CPR_AED", "FIRST_AID", "EAP", "COMMUNICATION_COMMAND", "SPINAL_MANAGEMENT", "SCANNING_SURVEILLANCE", "WATER_ENTRY_APPROACH", "VICTIM_EXTRACTION", "OPEN_WATER_NAVIGATION", "SURF_OPERATIONS", "RIP_CURRENT_MANAGEMENT", "BOARD_RESCUE", "TECHNICAL_RESCUE"] },
+    { program_code: "GUARDIAN_INSTRUCTOR", certification_level: "L6", display_name: "Guardian Instructor", qualification_label: "Guardian Instructor", required_training_hours: 210, required_program_coverage: [], incremental_coverage: ["Course Planning & Delivery"], effective_coverage: ["Basic First Aid", "Course Planning & Delivery"], allowed_session_focuses: ["RESCUE_SKILLS", "CPR_AED", "FIRST_AID", "EAP", "COMMUNICATION_COMMAND", "SPINAL_MANAGEMENT", "SCANNING_SURVEILLANCE", "WATER_ENTRY_APPROACH", "VICTIM_EXTRACTION", "OPEN_WATER_NAVIGATION", "SURF_OPERATIONS", "RIP_CURRENT_MANAGEMENT", "BOARD_RESCUE", "TECHNICAL_RESCUE"] },
+    { program_code: "MASTER_GUARDIAN_INSTRUCTOR", certification_level: "L7", display_name: "Master Guardian Instructor", qualification_label: "Master Guardian Instructor", required_training_hours: 260, required_program_coverage: [], incremental_coverage: ["Master-Level Instructional Leadership"], effective_coverage: ["Basic First Aid", "Master-Level Instructional Leadership"], allowed_session_focuses: ["RESCUE_SKILLS", "CPR_AED", "FIRST_AID", "EAP", "COMMUNICATION_COMMAND", "SPINAL_MANAGEMENT", "SCANNING_SURVEILLANCE", "WATER_ENTRY_APPROACH", "VICTIM_EXTRACTION", "OPEN_WATER_NAVIGATION", "SURF_OPERATIONS", "RIP_CURRENT_MANAGEMENT", "BOARD_RESCUE", "TECHNICAL_RESCUE"] }
+  ]
+};
 
 const baseSession: AuthenticatedSession = {
   id: "00000000-0000-4000-8000-000000000001",
@@ -706,6 +719,13 @@ function mockFetchRoutes(routesToMock: MockRoute[]) {
 
     calls.push({ url, init });
 
+    if (!route && url === "/api/v1/training/programs" && method === "GET") {
+      return new Response(JSON.stringify(programAuthority), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
     if (!route) {
       throw new Error(`Unexpected fetch call: ${method} ${url}`);
     }
@@ -872,16 +892,7 @@ describe("Registration Training frontend", () => {
       client_id: null,
       training_session_id: qualifiedSession.id
     });
-    await waitFor(() => {
-      expect(
-        calls.some(
-          (call) =>
-            (call.init?.method ?? "GET") === "GET" &&
-            call.url ===
-              `/api/v1/training/enrollments/${completedEnrollment.id}/evidence-workspace`
-        )
-      ).toBe(true);
-    });
+    expect(screen.queryByText("Trainee Records")).not.toBeInTheDocument();
 
     const prohibitedMutationCalls = calls.filter((call) => {
       const method = call.init?.method ?? "GET";
@@ -911,6 +922,67 @@ describe("Registration Training frontend", () => {
     ).toBe(false);
   });
 
+  it("resolves a new Session instructor and exact qualification through canonical backend authority", async () => {
+    const user = userEvent.setup();
+    const decisionAt = new Date("2026-09-01T08:00").toISOString();
+    const eligibleUrl = `/api/v1/training/eligible-instructors?facility_id=${trainingFacility.id}&target_program_codes=GUARDIAN_RESPONDER&at=${encodeURIComponent(decisionAt)}`;
+    const { calls } = mockFetchRoutes([
+      ...authRoutes(),
+      { url: "/api/v1/training/trainees", responses: [{ status: 200, body: { trainees: [traineeA] } }] },
+      { url: `/api/v1/training/trainees/${traineeAId}`, responses: [{ status: 200, body: traineeA }] },
+      { url: `/api/v1/training/trainees/${traineeAId}/enrollments`, responses: [{ status: 200, body: { enrollments: [] } }] },
+      { url: "/api/v1/registration/clients", responses: [{ status: 200, body: { clients: [clientA] } }] },
+      { url: "/api/v1/registration/facilities", responses: [{ status: 200, body: { facilities: [trainingFacility] } }] },
+      { url: "/api/v1/registration/personnel", responses: [{ status: 200, body: { personnel: [staffA] } }] },
+      { url: "/api/v1/training/sessions", responses: [{ status: 200, body: { sessions: [] } }] },
+      { url: eligibleUrl, responses: [{ status: 200, body: {
+        facility_id: trainingFacility.id,
+        decision_at: decisionAt,
+        target_program_codes: ["GUARDIAN_RESPONDER"],
+        instructors: [{
+          personnel_id: staffAId,
+          display_name: "Braven Burrows",
+          organizational_affiliation: "OGI",
+          linked_user: { id: "00000000-0000-4000-8000-000000800001", display_name: "Braven Burrows", email: "braven@example.test" },
+          qualification: { certification_id: qualificationCertificationId, certification_level: "L6", title: "L6 Guardian Instructor" },
+          teaching_authority_levels: ["L1", "L2", "L3", "L4", "L5"],
+          operational_scope: { authorization_id: "00000000-0000-4000-8000-000000880099", scope_mode: "CLIENT_WIDE" }
+        }]
+      } }] }
+    ]);
+
+    renderWithRoute(routes.trainingRegister);
+    const dialog = await screen.findByRole("dialog", { name: "Register Training" });
+    await user.selectOptions(
+      await within(dialog).findByRole("combobox", { name: "Existing Trainee" }),
+      traineeAId
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Next →" }));
+    await user.selectOptions(within(dialog).getByLabelText("Program"), "GUARDIAN_RESPONDER");
+    await user.selectOptions(within(dialog).getByLabelText("Sponsoring Client (optional)"), clientAId);
+    await user.selectOptions(within(dialog).getByLabelText("Facility (required for a new Session)"), trainingFacility.id);
+    const programCoverage = within(dialog).getByRole("region", { name: "Required Program Coverage" });
+    expect(programCoverage).toHaveTextContent("First Aid");
+    expect(programCoverage).toHaveTextContent("CPR");
+    expect(programCoverage).toHaveTextContent("AED");
+    expect(programCoverage).toHaveTextContent("Oxygen Administration");
+    expect(programCoverage).not.toHaveTextContent("Incident Documentation");
+    await user.click(within(dialog).getByRole("button", { name: "Next →" }));
+    await user.click(within(dialog).getByRole("radio", { name: "Create New Training Session" }));
+    await user.click(within(dialog).getByRole("button", { name: "Next →" }));
+    await user.type(within(dialog).getByLabelText("Session title"), "Governed L1 cohort");
+    expect(within(dialog).queryByRole("region", { name: "Required Program Coverage" })).not.toBeInTheDocument();
+    await user.type(within(dialog).getByLabelText("Start date"), "2026-09-01T08:00");
+    await user.click(within(dialog).getByRole("button", { name: "Next →" }));
+
+    const instructor = await within(dialog).findByRole("option", { name: "Braven Burrows · L6 Guardian Instructor" });
+    await user.selectOptions(within(dialog).getByLabelText("Eligible Primary Instructor"), instructor);
+    expect(within(dialog).getByText("Exact qualifying Certification")).toBeVisible();
+    expect(within(dialog).getByText("L6 Guardian Instructor · L6")).toBeVisible();
+    expect(calls.some((call) => call.url === eligibleUrl)).toBe(true);
+    expect(calls.some((call) => call.url.includes("/credentials/personnel/"))).toBe(false);
+  });
+
   it("exposes permission-gated Training workspaces outside Registration", async () => {
     const user = userEvent.setup();
     const { calls } = mockFetchRoutes(standardRoutes());
@@ -918,7 +990,7 @@ describe("Registration Training frontend", () => {
     renderWithRoute(routes.workbench);
 
     await user.click(await screen.findByRole("button", { name: "Menu" }));
-    await user.click(screen.getByText("Training", { selector: "summary" }));
+    await user.click(screen.getByRole("button", { name: "Training" }));
     await user.click(await screen.findByRole("link", { name: "Trainees" }));
 
     expect(
@@ -982,41 +1054,21 @@ describe("Registration Training frontend", () => {
           responses: [{ status: 200, body: { personnel: [staffA, staffB] } }]
         },
         {
-          url: `/api/v1/credentials/personnel/${staffAId}`,
-          responses: [
-            {
-              status: 200,
-              body: {
-                id: staffAId,
-                full_name: staffA.full_name,
-                hire_date: staffA.hire_date,
-                employment_status: "ACTIVE",
-                client: { id: clientAId, organization_name: clientA.organization_name },
-                facilities: [],
-                qualifications: [],
-                email: staffA.email,
-                phone_number: staffA.phone_number,
-                notes: null,
-                certifications: [
-                  {
-                    id: qualificationCertificationId,
-                    business_identifier: qualificationBusinessIdentifier,
-                    certification_level: "L6",
-                    certification_number: "CERT-L6-101",
-                    certification_status: "ACTIVE",
-                    issue_date: "2020-01-01T00:00:00.000Z",
-                    expiry_date: "2099-01-01T00:00:00.000Z",
-                    medical_clearance_provided: true,
-                    fitness_standard_achieved: true,
-                    training_hours_completed: 120,
-                    written_exam_score: 95,
-                    endorsements: []
-                  }
-                ],
-                operational_authorizations: []
-              }
-            }
-          ]
+          url: `/api/v1/training/eligible-instructors?facility_id=${trainingFacility.id}&target_program_codes=GUARDIAN_RESPONDER&at=${encodeURIComponent(new Date("2026-09-01T08:00").toISOString())}`,
+          responses: [{ status: 200, body: {
+            facility_id: trainingFacility.id,
+            decision_at: new Date("2026-09-01T08:00").toISOString(),
+            target_program_codes: ["GUARDIAN_RESPONDER"],
+            instructors: [{
+              personnel_id: staffAId,
+              display_name: staffA.full_name,
+              organizational_affiliation: "CLIENT",
+              linked_user: { id: "00000000-0000-4000-8000-000000800001", display_name: staffA.full_name, email: staffA.email },
+              qualification: { certification_id: qualificationCertificationId, certification_level: "L6", title: "L6 Guardian Instructor" },
+              teaching_authority_levels: ["L1", "L2", "L3", "L4", "L5"],
+              operational_scope: { authorization_id: null, scope_mode: null }
+            }]
+          } }]
         },
         {
           method: "POST",
@@ -1026,16 +1078,31 @@ describe("Registration Training frontend", () => {
       ])
     );
 
-    renderWithRoute(routes.trainingSessions);
+    renderWithRoute(routes.trainingTrainees);
+    expect(await screen.findByText("Trainee Records")).toBeVisible();
+
+    await user.click(
+      within(screen.getByRole("navigation", { name: "Training workspaces" })).getByRole("link", {
+        name: "Training Sessions"
+      })
+    );
+
     await user.type(await screen.findByLabelText("Session title", {}, { timeout: 5_000 }), "Qualified cohort");
+    await user.selectOptions(screen.getByLabelText("Target training program"), "GUARDIAN_RESPONDER");
+    const coverage = screen.getByRole("region", { name: "Required Program Coverage" });
+    expect(coverage).toHaveTextContent("Oxygen Administration");
+    expect(coverage).toHaveTextContent("First Aid");
+    expect(coverage).not.toHaveTextContent("Incident Documentation");
+    const focus = screen.getByRole("combobox", { name: /Primary Session Focus/ });
+    expect(within(focus).queryByRole("option", { name: "Technical Rescue" })).not.toBeInTheDocument();
+    expect(within(focus).getByRole("option", { name: "Cpr Aed" })).toBeInTheDocument();
+    expect(screen.queryByText("Trainee Records")).not.toBeInTheDocument();
     await user.type(screen.getByLabelText("Starts"), "2026-09-01T08:00");
     await user.selectOptions(screen.getByLabelText("Facility"), trainingFacility.id);
-    await user.selectOptions(screen.getByLabelText("Primary instructor"), staffAId);
     await user.selectOptions(
-      await screen.findByLabelText("Exact qualifying Certification"),
-      qualificationCertificationId
+      await screen.findByLabelText("Eligible primary instructor"),
+      `${staffAId}:${qualificationCertificationId}`
     );
-    expect(screen.getByText(new RegExp(qualificationBusinessIdentifier))).toBeInTheDocument();
     const createSessionForm = screen.getByRole("form", {
       name: "Create Training Session"
     });

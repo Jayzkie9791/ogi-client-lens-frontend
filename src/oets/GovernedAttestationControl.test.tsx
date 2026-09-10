@@ -59,7 +59,11 @@ describe("GovernedAttestationControl", () => {
     expect(screen.getByText(/Signing as/)).toHaveTextContent("Authenticated Recorder");
     const button = screen.getByRole("button", { name: "Sign & Attest" });
     expect(button).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Confirm the attestation statement above to enable signing"
+    );
     await user.click(screen.getByRole("checkbox"));
+    expect(screen.queryByText(/Confirm the attestation statement above/)).not.toBeInTheDocument();
     await user.click(button);
     expect(onAttest).toHaveBeenCalledTimes(1);
     expect(onAttest.mock.calls[0][0]).toMatchObject({
@@ -129,6 +133,39 @@ describe("GovernedAttestationControl", () => {
     );
     expect(screen.getByText(/metadata is not configured/)).toBeVisible();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("keeps the attestation action visible and explains that dirty draft changes must be saved", () => {
+    render(
+      <GovernedAttestationControl
+        attestations={[]}
+        context={context}
+        field={field}
+        pending={false}
+        readOnly={false}
+        sectionInstanceIndex={null}
+      />
+    );
+    expect(screen.getByRole("button", { name: "Sign & Attest" })).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Save the current draft changes before signing"
+    );
+  });
+
+  it("keeps the attestation action visible until a new evidence draft is persisted", () => {
+    render(
+      <GovernedAttestationControl
+        attestations={[]}
+        field={field}
+        pending={false}
+        readOnly={false}
+        sectionInstanceIndex={null}
+      />
+    );
+    expect(screen.getByRole("button", { name: "Sign & Attest" })).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Begin and persist this evidence draft"
+    );
   });
 
   it("keeps the control unsigned after an API failure and permits a safe retry", async () => {

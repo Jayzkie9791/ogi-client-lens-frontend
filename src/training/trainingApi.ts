@@ -40,6 +40,24 @@ export const trainingProgramOptions = [
 
 export type TrainingProgramCode =
   (typeof trainingProgramOptions)[number]["program_code"];
+export type CertificationLevel =
+  (typeof trainingProgramOptions)[number]["certification_level"];
+
+export interface TrainingProgramAuthority {
+  readonly program_code: TrainingProgramCode;
+  readonly certification_level: CertificationLevel;
+  readonly display_name: string;
+  readonly qualification_label: string;
+  readonly required_training_hours: number;
+  readonly required_program_coverage: readonly string[];
+  readonly incremental_coverage: readonly string[];
+  readonly effective_coverage: readonly string[];
+  readonly allowed_session_focuses: readonly TrainingOperationalSkill[];
+}
+
+export interface TrainingProgramAuthorityListResponse {
+  readonly programs: readonly TrainingProgramAuthority[];
+}
 
 export interface TrainingTraineeStaffMemberSummary {
   readonly id: string;
@@ -190,7 +208,36 @@ export interface CreateTrainingSessionRequest {
   readonly facility_id?: string | null;
   readonly instructor_staff_member_id?: string | null;
   readonly instructor_qualification_certification_id?: string | null;
+  readonly target_program_codes: readonly TrainingProgramCode[];
   readonly training_notes?: string | null;
+}
+
+export interface EligibleTrainingInstructor {
+  readonly personnel_id: string;
+  readonly display_name: string;
+  readonly organizational_affiliation: "CLIENT" | "OGI";
+  readonly linked_user: {
+    readonly id: string;
+    readonly display_name: string;
+    readonly email: string | null;
+  };
+  readonly qualification: {
+    readonly certification_id: string;
+    readonly certification_level: CertificationLevel;
+    readonly title: string;
+  };
+  readonly teaching_authority_levels: readonly CertificationLevel[];
+  readonly operational_scope: {
+    readonly authorization_id: string | null;
+    readonly scope_mode: string | null;
+  };
+}
+
+export interface EligibleTrainingInstructorsResponse {
+  readonly facility_id: string;
+  readonly decision_at: string;
+  readonly target_program_codes: readonly TrainingProgramCode[];
+  readonly instructors: readonly EligibleTrainingInstructor[];
 }
 
 export interface TrainingEnrollment {
@@ -261,6 +308,21 @@ export interface TrainingEvidenceLinkSummary {
     readonly submitted_at: string | null;
     readonly created_at: string;
   };
+}
+
+export interface RecordTrainingAssessmentRequest {
+  readonly evidence_link_id: string;
+  readonly result_status: "PASS" | "CONDITIONAL_PASS" | "FAIL";
+  readonly score: number;
+  readonly remediation_required: boolean;
+  readonly reassessment_required: boolean;
+}
+
+export interface RecordTrainingReadinessRequest {
+  readonly readiness_evidence_link_id: string;
+  readonly readiness_outcome: "OPERATIONALLY_READY" | "OPERATIONALLY_READY_WITH_RESTRICTIONS" | "REMEDIATION_REQUIRED" | "NOT_OPERATIONALLY_READY";
+  readonly remediation_required: boolean;
+  readonly certification_review_required: boolean;
 }
 
 export interface TrainingAssessmentResultSummary {
@@ -479,6 +541,13 @@ export function listTrainingSessions() {
   });
 }
 
+export function listTrainingPrograms() {
+  return apiRequest<TrainingProgramAuthorityListResponse>(
+    "/api/v1/training/programs",
+    { validate: isTrainingProgramAuthorityListResponse }
+  );
+}
+
 export function createTrainingSession(
   request: CreateTrainingSessionRequest,
   idempotencyKey: string
@@ -489,6 +558,22 @@ export function createTrainingSession(
     headers: { "idempotency-key": idempotencyKey },
     validate: isTrainingSession
   });
+}
+
+export function listEligibleTrainingInstructors(input: {
+  facilityId: string;
+  targetProgramCodes: readonly TrainingProgramCode[];
+  at: string;
+}) {
+  const search = new URLSearchParams({
+    facility_id: input.facilityId,
+    target_program_codes: input.targetProgramCodes.join(","),
+    at: input.at
+  });
+  return apiRequest<EligibleTrainingInstructorsResponse>(
+    `/api/v1/training/eligible-instructors?${search.toString()}`,
+    { validate: isEligibleTrainingInstructorsResponse }
+  );
 }
 
 export function assignTrainingEnrollmentSession(
@@ -525,6 +610,36 @@ export function createTrainingEvidenceDraft(
       body: request,
       validate: isTrainingEvidenceDraft
     }
+  );
+}
+
+export function linkTrainingEnrollmentEvidence(
+  enrollmentId: string,
+  request: { operational_evidence_record_id: string; evidence_purpose: TrainingEvidenceWorkspaceSlot["evidence_purpose"] }
+) {
+  return apiRequest<TrainingEvidenceLinkSummary>(
+    `/api/v1/training/enrollments/${encodeURIComponent(enrollmentId)}/evidence`,
+    { method: "POST", body: request, validate: isTrainingEvidenceLinkSummary }
+  );
+}
+
+export function recordTrainingAssessment(
+  enrollmentId: string,
+  request: RecordTrainingAssessmentRequest
+) {
+  return apiRequest<TrainingAssessmentResultSummary>(
+    `/api/v1/training/enrollments/${encodeURIComponent(enrollmentId)}/assessments`,
+    { method: "POST", body: request, validate: isTrainingAssessmentResultSummary }
+  );
+}
+
+export function recordTrainingReadiness(
+  enrollmentId: string,
+  request: RecordTrainingReadinessRequest
+) {
+  return apiRequest<TrainingReadinessDecisionSummary>(
+    `/api/v1/training/enrollments/${encodeURIComponent(enrollmentId)}/readiness`,
+    { method: "POST", body: request, validate: isTrainingReadinessDecisionSummary }
   );
 }
 
@@ -573,6 +688,48 @@ function isTrainingTraineeListResponse(
     isRecord(value) &&
     Array.isArray(value.trainees) &&
     value.trainees.every(isTrainingTrainee)
+  );
+}
+
+function isEligibleTrainingInstructorsResponse(
+  value: unknown
+): value is EligibleTrainingInstructorsResponse {
+  return (
+    isRecord(value) &&
+    typeof value.facility_id === "string" &&
+    typeof value.decision_at === "string" &&
+    Array.isArray(value.target_program_codes) &&
+    value.target_program_codes.every(isTrainingProgramCode) &&
+    Array.isArray(value.instructors) &&
+    value.instructors.every(isEligibleTrainingInstructor)
+  );
+}
+
+function isEligibleTrainingInstructor(value: unknown): value is EligibleTrainingInstructor {
+  return (
+    isRecord(value) &&
+    typeof value.personnel_id === "string" &&
+    typeof value.display_name === "string" &&
+    (value.organizational_affiliation === "CLIENT" || value.organizational_affiliation === "OGI") &&
+    isRecord(value.linked_user) &&
+    typeof value.linked_user.id === "string" &&
+    typeof value.linked_user.display_name === "string" &&
+    isNullableString(value.linked_user.email) &&
+    isRecord(value.qualification) &&
+    typeof value.qualification.certification_id === "string" &&
+    isCertificationLevel(value.qualification.certification_level) &&
+    typeof value.qualification.title === "string" &&
+    Array.isArray(value.teaching_authority_levels) &&
+    value.teaching_authority_levels.every(isCertificationLevel) &&
+    isRecord(value.operational_scope) &&
+    isNullableString(value.operational_scope.authorization_id) &&
+    isNullableString(value.operational_scope.scope_mode)
+  );
+}
+
+function isCertificationLevel(value: unknown): value is CertificationLevel {
+  return typeof value === "string" && trainingProgramOptions.some(
+    (program) => program.certification_level === value
   );
 }
 
@@ -939,6 +1096,47 @@ function isTrainingSessionListResponse(
     isRecord(value) &&
     Array.isArray(value.sessions) &&
     value.sessions.every(isTrainingSession)
+  );
+}
+
+function isTrainingProgramAuthorityListResponse(
+  value: unknown
+): value is TrainingProgramAuthorityListResponse {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.programs) &&
+    value.programs.length === trainingProgramOptions.length &&
+    value.programs.every(isTrainingProgramAuthority)
+  );
+}
+
+function isTrainingProgramAuthority(
+  value: unknown
+): value is TrainingProgramAuthority {
+  return (
+    isRecord(value) &&
+    isTrainingProgramCode(value.program_code) &&
+    isCertificationLevel(value.certification_level) &&
+    typeof value.display_name === "string" &&
+    typeof value.qualification_label === "string" &&
+    typeof value.required_training_hours === "number" &&
+    Array.isArray(value.required_program_coverage) &&
+    value.required_program_coverage.every((item) => typeof item === "string") &&
+    Array.isArray(value.incremental_coverage) &&
+    value.incremental_coverage.every((item) => typeof item === "string") &&
+    Array.isArray(value.effective_coverage) &&
+    value.effective_coverage.every((item) => typeof item === "string") &&
+    Array.isArray(value.allowed_session_focuses) &&
+    value.allowed_session_focuses.length > 0 &&
+    value.allowed_session_focuses.every(isTrainingOperationalSkill)
+  );
+}
+
+function isTrainingOperationalSkill(
+  value: unknown
+): value is TrainingOperationalSkill {
+  return typeof value === "string" && trainingOperationalSkills.includes(
+    value as TrainingOperationalSkill
   );
 }
 

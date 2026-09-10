@@ -10,6 +10,7 @@ export type OperationalEvidenceRecordSortDirection = "asc" | "desc";
 
 export interface OperationalEvidenceRecordsFilters {
   lifecycle_state?: string;
+  created_by_user_id?: string;
   template_code?: string;
   submitted_from?: string;
   submitted_to?: string;
@@ -26,7 +27,7 @@ export interface OperationalEvidenceRecordSummary {
   template_code: string;
   template_version: string;
   schema_version: string;
-  client_id: string;
+  client_id: string | null;
   facility_id: string | null;
   lifecycle_state: string;
   payload_checksum: string;
@@ -35,6 +36,19 @@ export interface OperationalEvidenceRecordSummary {
   created_at: string;
   submitted_at: string;
   updated_at: string;
+  presentation?: OperationalEvidencePresentation | null;
+}
+
+export interface OperationalEvidencePresentation {
+  template_name: string;
+  client_name: string | null;
+  facility_name: string | null;
+  subject: {
+    kind: "CERTIFICATION_HOLDER" | "TRAINEE";
+    display_name: string;
+    reference_number: string | null;
+    secondary_reference: string | null;
+  } | null;
 }
 
 export interface OperationalEvidencePagination {
@@ -66,6 +80,7 @@ function buildOperationalEvidenceRecordsPath(
   const searchParams = new URLSearchParams();
 
   setStringParam(searchParams, "lifecycle_state", filters.lifecycle_state);
+  setStringParam(searchParams, "created_by_user_id", filters.created_by_user_id);
   setStringParam(searchParams, "template_code", filters.template_code);
   setStringParam(searchParams, "submitted_from", filters.submitted_from);
   setStringParam(searchParams, "submitted_to", filters.submitted_to);
@@ -117,7 +132,7 @@ function isOperationalEvidenceRecordSummary(
     typeof value.template_code === "string" &&
     typeof value.template_version === "string" &&
     typeof value.schema_version === "string" &&
-    typeof value.client_id === "string" &&
+    (typeof value.client_id === "string" || value.client_id === null) &&
     (typeof value.facility_id === "string" || value.facility_id === null) &&
     typeof value.lifecycle_state === "string" &&
     typeof value.payload_checksum === "string" &&
@@ -127,8 +142,22 @@ function isOperationalEvidenceRecordSummary(
       value.submitted_by_user_id === null) &&
     typeof value.created_at === "string" &&
     typeof value.submitted_at === "string" &&
-    typeof value.updated_at === "string"
+    typeof value.updated_at === "string" &&
+    (value.presentation === undefined || value.presentation === null || isOperationalEvidencePresentation(value.presentation))
   );
+}
+
+function isOperationalEvidencePresentation(value: unknown): value is OperationalEvidencePresentation {
+  if (!isRecord(value)) return false;
+  const subject = value.subject;
+  return typeof value.template_name === "string" &&
+    (typeof value.client_name === "string" || value.client_name === null) &&
+    (typeof value.facility_name === "string" || value.facility_name === null) &&
+    (subject === null || (isRecord(subject) &&
+      (subject.kind === "CERTIFICATION_HOLDER" || subject.kind === "TRAINEE") &&
+      typeof subject.display_name === "string" &&
+      (typeof subject.reference_number === "string" || subject.reference_number === null) &&
+      (typeof subject.secondary_reference === "string" || subject.secondary_reference === null)));
 }
 
 function isOperationalEvidencePagination(

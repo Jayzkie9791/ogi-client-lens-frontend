@@ -216,24 +216,25 @@ describe("Registration Facilities frontend", () => {
     renderWithRoute(routes.workbench);
 
     await user.click(await screen.findByRole("button", { name: "Menu" }));
-    await user.click(screen.getByRole("link", { name: "Registration" }));
+    await user.click(screen.getByRole("button", { name: "Registration" }));
+    await user.click(screen.getByRole("link", { name: "Clients" }));
 
     expect(
       await screen.findByRole("heading", { name: "Clients / Organizations" })
     ).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Facilities" })).toHaveAttribute(
+    expect(within(screen.getByRole("navigation", { name: "Registration resource tabs" })).getByRole("link", { name: "Facilities" })).toHaveAttribute(
       "href",
       routes.registrationFacilities
     );
 
-    await user.click(screen.getByRole("link", { name: "Facilities" }));
+    await user.click(within(screen.getByRole("navigation", { name: "Primary navigation" })).getByRole("link", { name: "Facilities" }));
 
     expect(await screen.findByRole("heading", { name: "Facilities" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Clients" })).toHaveAttribute(
+    expect(within(screen.getByRole("navigation", { name: "Registration resource tabs" })).getByRole("link", { name: "Clients" })).toHaveAttribute(
       "href",
       routes.registrationClients
     );
-    expect(screen.getByRole("link", { name: "Facilities" })).toHaveAttribute(
+    expect(within(screen.getByRole("navigation", { name: "Registration resource tabs" })).getByRole("link", { name: "Facilities" })).toHaveAttribute(
       "aria-current",
       "page"
     );
@@ -266,7 +267,7 @@ describe("Registration Facilities frontend", () => {
     renderWithRoute(routes.registrationFacilities);
 
     await screen.findByRole("heading", { name: "Facilities" });
-    expect(screen.getByRole("link", { name: "Facilities" })).toHaveAttribute(
+    expect(within(screen.getByRole("navigation", { name: "Registration resource tabs" })).getByRole("link", { name: "Facilities" })).toHaveAttribute(
       "aria-current",
       "page"
     );
@@ -776,7 +777,8 @@ describe("Registration Facilities frontend", () => {
     renderWithRoute(routes.workbench);
 
     await user.click(await screen.findByRole("button", { name: "Menu" }));
-    await user.click(screen.getByRole("link", { name: "Registration" }));
+    await user.click(screen.getByRole("button", { name: "Registration" }));
+    await user.click(within(screen.getByRole("navigation", { name: "Primary navigation" })).getByRole("link", { name: "Facilities" }));
 
     expect(await screen.findByRole("heading", { name: "Facilities" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Clients" })).not.toBeInTheDocument();

@@ -16,7 +16,7 @@ import { LoginPage } from "./routes/LoginPage";
 import { ForgotPasswordPage, ResetPasswordPage } from "./routes/PasswordResetPages";
 import { NotFoundPage } from "./routes/NotFoundPage";
 import { OperationsPage } from "./routes/OperationsPage";
-import { RecordsPage } from "./routes/RecordsPage";
+import { MyDraftsPage, RecordsPage } from "./routes/RecordsPage";
 import { WorkbenchPage } from "./routes/WorkbenchPage";
 
 const AuditExecutionPage = lazy(() => import("../audit-risk/AuditExecutionPage").then((module) => ({ default: module.AuditExecutionPage })));
@@ -95,6 +95,10 @@ export const appRoutes: RouteObject[] = [
           {
             path: "workbench/operations/records",
             element: <RecordsPage />
+          },
+          {
+            path: "workbench/operations/my-drafts",
+            element: <MyDraftsPage />
           },
           {
             path: "workbench/administration",

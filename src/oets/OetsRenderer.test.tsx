@@ -506,7 +506,7 @@ describe("Generic OETS renderer", () => {
     expect(await screen.findByRole("button", { name: "Sign & Attest" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Finalize Evidence" })).toBeVisible();
     await user.type(screen.getByLabelText("Text Field"), "Unsaved evidence B");
-    expect(screen.queryByRole("button", { name: "Sign & Attest" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sign & Attest" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: "Finalize Evidence" })).not.toBeInTheDocument();
   });
 
@@ -530,13 +530,14 @@ describe("Generic OETS renderer", () => {
     await user.type(screen.getByLabelText("Text Field"), "Saved evidence B");
     await user.click(screen.getByRole("button", { name: "Save Draft" }));
     expect(screen.getByRole("button", { name: "Saving..." })).toBeDisabled();
-    expect(screen.queryByRole("button", { name: "Sign & Attest" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sign & Attest" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: "Finalize Evidence" })).not.toBeInTheDocument();
 
     record = evidenceRecord({ lifecycle_state: "DRAFT", payload: { sections: { GENERAL_EVIDENCE: { TEXT_FIELD: "Saved evidence B" } } } });
     record.payload_checksum = "payload-checksum-2";
     resolveSave(jsonResponse(200, record));
-    expect(await screen.findByRole("button", { name: "Sign & Attest" })).toBeVisible();
+    await user.click(await screen.findByRole("checkbox", { name: /deliberately accept the attestation statement/i }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Sign & Attest" })).toBeEnabled());
     expect(screen.getByRole("button", { name: "Finalize Evidence" })).toBeVisible();
   });
 
@@ -862,7 +863,7 @@ describe("Generic OETS renderer", () => {
       !alert.textContent?.includes("highlighted fields")
     )).toBe(true);
     expect(screen.queryByText("Draft evidence saved.")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Sign & Attest" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sign & Attest" })).toBeDisabled();
   });
 
   it("keeps a failed persisted-Draft save dirty and unavailable for signing", async () => {
@@ -890,11 +891,11 @@ describe("Generic OETS renderer", () => {
     await user.type(await screen.findByLabelText("Text Field"), "Unsaved change");
     await user.click(screen.getByRole("button", { name: "Save Draft" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
+    expect(await within(screen.getByTestId("oets-flow-messages")).findByRole("alert")).toHaveTextContent(
       "The Draft evidence payload could not be saved."
     );
     expect(screen.queryByText("Draft evidence saved.")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Sign & Attest" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sign & Attest" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: "Finalize Evidence" })).not.toBeInTheDocument();
   });
 
@@ -2254,9 +2255,11 @@ describe("Generic OETS renderer", () => {
       await screen.findAllByText("You must first select a client before creating an audit draft.")
     ).toHaveLength(2);
     expect(screen.getByRole("button", { name: "Create Audit Draft" })).toBeDisabled();
-    expect(calls.some((call) =>
-      call.url.includes("/context-requirement?")
-    )).toBe(true);
+    await waitFor(() => {
+      expect(calls.some((call) =>
+        call.url.includes("/context-requirement?")
+      )).toBe(true);
+    });
     expect(calls.some((call) =>
       call.url === "/api/v1/operational-evidence/records" &&
       call.init?.method === "POST"
@@ -2466,7 +2469,7 @@ describe("Generic OETS renderer", () => {
     await user.click(await screen.findByRole("button", { name: "Create Audit Draft" }));
 
     expect(
-      await screen.findByText(
+      await within(screen.getByTestId("oets-flow-messages")).findByText(
         "This audit template changed while you were completing it. Reload the current template before submitting."
       )
     ).toBeInTheDocument();
@@ -2530,7 +2533,7 @@ describe("Generic OETS renderer", () => {
     await user.click(await screen.findByRole("button", { name: "Create Audit Draft" }));
 
     expect(
-      await screen.findByText(
+      await within(screen.getByTestId("oets-flow-messages")).findByText(
         "The backend rejected this audit. Review the highlighted validation messages."
       )
     ).toBeInTheDocument();
@@ -2589,7 +2592,7 @@ describe("Generic OETS renderer", () => {
 
     await user.click(await screen.findByRole("button", { name: "Create Audit Draft" }));
 
-    expect(await screen.findByText("The backend rejected this audit. Review the highlighted validation messages.")).toBeInTheDocument();
+    expect(await within(screen.getByTestId("oets-flow-messages")).findByText("The backend rejected this audit. Review the highlighted validation messages.")).toBeInTheDocument();
     expect(screen.queryByText("Conflicting field issue")).not.toBeInTheDocument();
     expect(screen.queryByText("Section-only path issue")).not.toBeInTheDocument();
     expect(screen.queryByText("Conflicting section issue")).not.toBeInTheDocument();
@@ -2684,11 +2687,11 @@ describe("Generic OETS renderer", () => {
 
     await user.click(await screen.findByRole("button", { name: "Create Audit Draft" }));
     expect(
-      await screen.findByText("You are not authorized to create this audit draft.")
+      await within(screen.getByTestId("oets-flow-messages")).findByText("You are not authorized to create this audit draft.")
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Create Audit Draft" }));
-    expect(await screen.findByText("Server failed.")).toBeInTheDocument();
+    expect(await within(screen.getByTestId("oets-flow-messages")).findByText("Server failed.")).toBeInTheDocument();
   });
 
   it("fails visibly for malformed definitions and unsupported metadata", () => {
@@ -3765,7 +3768,7 @@ function optionField(
     renderRuntimeTemplatePageWithSession({ initialPath: "/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE", queryClient, currentSession: session });
 
     await user.click(await screen.findByRole("button", { name: "Begin Evidence" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Draft persistence failed.");
+    expect(await within(screen.getByTestId("oets-flow-messages")).findByRole("alert")).toHaveTextContent("Draft persistence failed.");
     expect(screen.queryByText("Persisted evidence record route")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Begin Evidence" }));
     expect(await screen.findByText("Persisted evidence record route")).toBeVisible();
@@ -3871,7 +3874,8 @@ function optionField(
     expect(screen.getByText("Read only")).toBeInTheDocument();
   });
 
-  it("keeps success and error feedback in document flow outside the sticky action strip", () => {
+  it("keeps feedback in document flow and presents save errors in a visible dismissible alert", async () => {
+    const user = userEvent.setup();
     render(
       <OetsRenderer
         definition={definition}
@@ -3886,6 +3890,11 @@ function optionField(
     expect(within(flow).getByRole("alert")).toHaveTextContent("Flow error");
     expect(within(screen.getByTestId("oets-action-strip")).queryByRole("alert"))
       .not.toBeInTheDocument();
+    const popup = screen.getByText("Draft could not be saved").closest("[role='alert']");
+    expect(popup).toHaveTextContent("Flow error");
+    await user.click(within(popup as HTMLElement).getByRole("button", { name: "Dismiss save error" }));
+    expect(screen.queryByText("Draft could not be saved")).not.toBeInTheDocument();
+    expect(within(flow).getByRole("alert")).toHaveTextContent("Flow error");
   });
 
   it("does not treat an untouched false Boolean as answered but accepts an explicit false answer", async () => {
