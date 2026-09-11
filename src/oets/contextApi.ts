@@ -21,6 +21,7 @@ export interface OetsResolvedContext {
   summary: OetsContextCandidate;
   field_policy: Record<string, OetsContextFieldPolicy>;
   authoritative_values: Record<string, string | number>;
+  required_fields: string[];
 }
 
 interface ContextAuthorityInput { templateCode: string; templateVersionId: string; checksum: string; clientId?: string | null; facilityId?: string | null; }
@@ -48,5 +49,5 @@ function object(value: unknown): value is Record<string, unknown> { return value
 function isRequirement(value: unknown): value is OetsContextRequirement { return object(value) && typeof value.required === "boolean" && (value.requirement_code === null || typeof value.requirement_code === "string") && (value.selection_mode === null || value.selection_mode === "EXPLICIT"); }
 function isCandidate(value: unknown): value is OetsContextCandidate { return object(value) && typeof value.id === "string" && typeof value.primary_label === "string" && typeof value.secondary_label === "string" && (value.holder_kind === "TRAINEE" || value.holder_kind === "STAFF_MEMBER"); }
 function isCandidates(value: unknown): value is { candidates: OetsContextCandidate[]; count: number; selection_mode: "EXPLICIT" } { return object(value) && Array.isArray(value.candidates) && value.candidates.every(isCandidate) && typeof value.count === "number" && value.selection_mode === "EXPLICIT"; }
-function isResolved(value: unknown): value is OetsResolvedContext { return object(value) && typeof value.requirement_code === "string" && typeof value.selected_id === "string" && isCandidate(value.summary) && object(value.field_policy) && Object.values(value.field_policy).every((entry) => entry === "OPERATOR_EDITABLE" || entry === "READ_ONLY_DERIVED" || entry === "UNAVAILABLE_POST_ISSUANCE") && object(value.authoritative_values) && Object.values(value.authoritative_values).every(isAuthoritativeValue); }
+function isResolved(value: unknown): value is OetsResolvedContext { return object(value) && typeof value.requirement_code === "string" && typeof value.selected_id === "string" && isCandidate(value.summary) && object(value.field_policy) && Object.values(value.field_policy).every((entry) => entry === "OPERATOR_EDITABLE" || entry === "READ_ONLY_DERIVED" || entry === "UNAVAILABLE_POST_ISSUANCE") && object(value.authoritative_values) && Object.values(value.authoritative_values).every(isAuthoritativeValue) && Array.isArray(value.required_fields) && value.required_fields.every((entry) => typeof entry === "string"); }
 function isAuthoritativeValue(value: unknown): value is string | number { return typeof value === "string" || (typeof value === "number" && Number.isFinite(value)); }

@@ -9,9 +9,10 @@ import type {
 
 interface OetsProgressNavigatorProps {
   model: OetsProgressModel;
+  compact?: boolean;
 }
 
-export function OetsProgressNavigator({ model }: OetsProgressNavigatorProps) {
+export function OetsProgressNavigator({ model, compact = false }: OetsProgressNavigatorProps) {
   const [currentSectionId, setCurrentSectionId] = useState(
     model.sections[0]?.sectionId ?? ""
   );
@@ -73,11 +74,11 @@ export function OetsProgressNavigator({ model }: OetsProgressNavigatorProps) {
   if (!current) return null;
 
   return (
-    <aside className="self-start overflow-hidden rounded-panel border border-[#CFDCEB] bg-white shadow-[0_2px_8px_rgba(15,45,95,0.06)] lg:flex lg:max-h-[calc(100vh-8.5rem)] lg:flex-col" data-testid="oets-progress-rail">
+    <aside className={`self-start overflow-hidden rounded-panel border border-[#CFDCEB] bg-white shadow-[0_2px_8px_rgba(15,45,95,0.06)] ${compact ? "" : "lg:flex lg:max-h-[calc(100vh-8.5rem)] lg:flex-col"}`} data-testid="oets-progress-rail">
       <button
         aria-controls={mobilePanelId}
         aria-expanded={mobileExpanded}
-        className="flex w-full items-center justify-between gap-3 rounded-panel px-4 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus lg:hidden"
+        className={`flex w-full items-center justify-between gap-3 rounded-panel px-4 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus ${compact ? "" : "lg:hidden"}`}
         onClick={() => setMobileExpanded((expanded) => !expanded)}
         type="button"
       >
@@ -91,7 +92,7 @@ export function OetsProgressNavigator({ model }: OetsProgressNavigatorProps) {
         </span>
         <ProgressValue model={model} />
       </button>
-      <div className={`${mobileExpanded ? "block" : "hidden"} border-t border-border p-3 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:border-t-0 lg:p-4`} id={mobilePanelId}>
+      <div className={`${mobileExpanded ? "block" : "hidden"} border-t border-border p-3 ${compact ? "" : "lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:border-t-0 lg:p-4"}`} id={mobilePanelId}>
           <ProgressContents
             currentSectionId={current.sectionId}
             sectionListRef={sectionListRef}

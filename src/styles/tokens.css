@@ -41,6 +41,17 @@
   --cl-workspace-divider: #d7e2ef;
   --cl-workspace-selected: #e4efff;
   --cl-workspace-shadow: 0 2px 8px rgb(15 45 95 / 0.06);
+  /* Shared catalogue cards for forms, audits, and other governed records. */
+  --cl-catalog-accent: #0f766e;
+  --cl-catalog-accent-soft: #e6f4f2;
+  --cl-catalog-purpose-bg: #f3f7fc;
+  --cl-catalog-purpose-border: #d3e0ee;
+  --cl-catalog-card-shadow: 0 3px 12px rgb(15 45 95 / 0.08);
+  --cl-catalog-card-shadow-hover: 0 7px 20px rgb(15 45 95 / 0.12);
+  --cl-record-accent: #0f766e;
+  --cl-record-accent-soft: #e6f4f2;
+  --cl-record-metadata-bg: #f3f7fc;
+  --cl-record-metadata-border: #d3e0ee;
   --cl-sidebar-parent-text: #173f68;
   --cl-sidebar-parent-active: #e9eef5;
   --cl-sidebar-child-text: #536d89;

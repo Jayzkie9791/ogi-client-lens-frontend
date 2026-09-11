@@ -44,11 +44,26 @@ interface EditingTemplateSession {
   warnings: string[];
 }
 
-export function RuntimeTemplatePage() {
+export function RuntimeTemplatePage({
+  embeddedTemplateCode,
+  initialClientId,
+  initialContextId,
+  initialFacilityId,
+  lockInitialContext,
+  onDraftCreated
+}: {
+  readonly embeddedTemplateCode?: string;
+  readonly initialClientId?: string | null;
+  readonly initialContextId?: string;
+  readonly initialFacilityId?: string | null;
+  readonly lockInitialContext?: boolean;
+  readonly onDraftCreated?: (recordId: string) => void;
+} = {}) {
   const navigate = useNavigate();
   const auth = useAuth();
   const session = auth.session;
-  const { templateCode } = useParams();
+  const { templateCode: routeTemplateCode } = useParams();
+  const templateCode = embeddedTemplateCode ?? routeTemplateCode;
   const [searchParams] = useSearchParams();
   const readOnly = searchParams.get("mode") === "readonly";
   const [selectedClientId, setSelectedClientId] = useState(
@@ -62,7 +77,8 @@ export function RuntimeTemplatePage() {
     useState<OperationalEvidenceRecord | null>(null);
   const [editingSession, setEditingSession] =
     useState<EditingTemplateSession | null>(null);
-  const [selectedContextId, setSelectedContextId] = useState("");
+  const [selectedContextId, setSelectedContextId] = useState(initialContextId ?? "");
+  const contextIsLocked = Boolean(lockInitialContext && initialContextId);
   const submitLockedRef = useRef(false);
   const draftIdempotencyKeyRef = useRef(crypto.randomUUID());
 
@@ -77,7 +93,8 @@ export function RuntimeTemplatePage() {
     queryKey: ["client-context", "clients"],
     queryFn: getAuthorizedClientContexts
   });
-  const effectiveClientId = session?.clientId ?? (selectedClientId || null);
+  const effectiveClientId =
+    initialClientId ?? session?.clientId ?? (selectedClientId || null);
   const facilitiesQuery = useQuery({
     enabled: !readOnly && needsExplicitClientContext && Boolean(effectiveClientId),
     queryKey: ["client-context", "facilities", effectiveClientId],
@@ -161,7 +178,9 @@ export function RuntimeTemplatePage() {
     facilitiesQuery.data?.facilities,
     needsExplicitClientContext
   );
-  const facilityId = resolveFacilityId(availableFacilityIds, selectedFacilityId);
+  const facilityId =
+    initialFacilityId ??
+    resolveFacilityId(availableFacilityIds, selectedFacilityId);
   const activeEditingSession =
     editingSession?.routeTemplateCode === templateCode ? editingSession : null;
   const contextAuthority = activeEditingSession ? {
@@ -178,7 +197,7 @@ export function RuntimeTemplatePage() {
     }
   });
   const contextCandidatesQuery = useQuery({
-    enabled: !readOnly && contextRequirementQuery.data?.required === true && Boolean(contextAuthority && effectiveClientId),
+    enabled: !readOnly && !contextIsLocked && contextRequirementQuery.data?.required === true && Boolean(contextAuthority && effectiveClientId),
     queryKey: ["oets-context-candidates", contextAuthority, effectiveClientId, facilityId],
     queryFn: () => {
       if (!contextAuthority || !effectiveClientId) throw new Error("OETS context scope is unavailable.");
@@ -193,9 +212,10 @@ export function RuntimeTemplatePage() {
       return resolveOetsContext({ ...contextAuthority, clientId: effectiveClientId, facilityId, selectedId: selectedContextId });
     }
   });
-  useEffect(() => { setSelectedContextId(""); }, [templateCode, effectiveClientId, facilityId]);
-  const contextualDefinition = useMemo(() => applyContextFieldPolicy(activeEditingSession?.definition, resolvedContextQuery.data?.field_policy), [activeEditingSession?.definition, resolvedContextQuery.data?.field_policy]);
+  useEffect(() => { setSelectedContextId(initialContextId ?? ""); }, [templateCode, effectiveClientId, facilityId, initialContextId]);
+  const contextualDefinition = useMemo(() => applyContextFieldPolicy(activeEditingSession?.definition, resolvedContextQuery.data?.field_policy, resolvedContextQuery.data?.required_fields), [activeEditingSession?.definition, resolvedContextQuery.data?.field_policy, resolvedContextQuery.data?.required_fields]);
   const contextualInitialPayload = useMemo(() => buildContextInitialPayload(contextualDefinition, resolvedContextQuery.data?.authoritative_values), [contextualDefinition, resolvedContextQuery.data?.authoritative_values]);
+  const requiresPersistedDraft = Boolean(activeEditingSession && (hasGovernedSignatureFields(activeEditingSession.definition) || (resolvedContextQuery.data?.required_fields.length ?? 0) > 0));
   const mutation = useMutation({
     mutationFn: createOperationalEvidenceRecord,
     onSuccess(record) {
@@ -221,7 +241,8 @@ export function RuntimeTemplatePage() {
     mutationFn: createOperationalEvidenceDraft,
     onSuccess(record) {
       submitLockedRef.current = false;
-      navigate(routes.evidenceRecordPath(record.id));
+      if (onDraftCreated) onDraftCreated(record.id);
+      else navigate(routes.evidenceRecordPath(record.id));
     },
     onError(error) {
       submitLockedRef.current = false;
@@ -274,7 +295,7 @@ export function RuntimeTemplatePage() {
           </ul>
         </Surface>
       ) : null}
-      {!readOnly && session ? (
+      {!readOnly && session && !contextIsLocked ? (
         <ClientContextPanel
           clients={clientContextsQuery.data?.clients ?? []}
           currentClientId={effectiveClientId}
@@ -296,6 +317,7 @@ export function RuntimeTemplatePage() {
       ) : null}
       {!readOnly &&
       session &&
+      !contextIsLocked &&
       !needsExplicitClientContext &&
       session.facilityIds.length > 1 ? (
         <Surface className="border-blue-100 bg-blue-50/50 py-3">
@@ -318,6 +340,7 @@ export function RuntimeTemplatePage() {
       ) : null}
       {!readOnly &&
       needsExplicitClientContext &&
+      !contextIsLocked &&
       effectiveClientId &&
       (facilitiesQuery.data?.facilities.length ?? 0) > 0 ? (
         <FacilityContextPanel
@@ -328,21 +351,30 @@ export function RuntimeTemplatePage() {
       ) : null}
       {!readOnly && contextRequirementQuery.data?.required ? (
         <Surface className="border-blue-200 bg-blue-50/60">
-          <label className="block text-sm font-semibold text-primary-navy">
-            Certification context
-            <select className="mt-2 min-h-10 w-full rounded-component border border-border bg-white px-3 py-2" onChange={(event) => setSelectedContextId(event.target.value)} value={selectedContextId}>
-              <option value="">Select a Certification deliberately…</option>
-              {(contextCandidatesQuery.data?.candidates ?? []).map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.primary_label} — {candidate.secondary_label}</option>)}
-            </select>
-          </label>
-          {contextCandidatesQuery.isLoading ? <p className="mt-2 text-sm text-text-muted">Loading eligible Certifications…</p> : null}
-          {contextCandidatesQuery.isError ? (
+          <p className="text-sm font-semibold text-primary-navy">Certification context</p>
+          {contextIsLocked ? (
+            <div className="mt-2 rounded-component border border-blue-200 bg-white px-3 py-3">
+              {resolvedContextQuery.isLoading ? <p className="text-sm text-text-muted">Resolving the Journey&apos;s exact Certification…</p> : null}
+              {resolvedContextQuery.data ? <><p className="text-sm font-semibold text-primary-blue">{resolvedContextQuery.data.summary.primary_label}</p><p className="mt-1 text-sm text-text-muted">{resolvedContextQuery.data.summary.secondary_label}</p><p className="mt-2 text-xs font-bold uppercase tracking-wide text-teal-700">Locked to this Training Journey</p></> : null}
+              {resolvedContextQuery.isError ? <p className="rounded-component border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">The exact Journey Certification could not be resolved. {readQueryErrorMessage(resolvedContextQuery.error)}</p> : null}
+            </div>
+          ) : (
+            <label className="mt-2 block text-sm font-semibold text-primary-navy">
+              Select Certification
+              <select className="mt-2 min-h-10 w-full rounded-component border border-border bg-white px-3 py-2" onChange={(event) => setSelectedContextId(event.target.value)} value={selectedContextId}>
+                <option value="">Select a Certification deliberately…</option>
+                {(contextCandidatesQuery.data?.candidates ?? []).map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.primary_label} — {candidate.secondary_label}</option>)}
+              </select>
+            </label>
+          )}
+          {!contextIsLocked && contextCandidatesQuery.isLoading ? <p className="mt-2 text-sm text-text-muted">Loading eligible Certifications…</p> : null}
+          {!contextIsLocked && contextCandidatesQuery.isError ? (
             <p className="mt-2 rounded-component border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
               Certification eligibility could not be loaded. {readQueryErrorMessage(contextCandidatesQuery.error)}
             </p>
           ) : null}
-          {!contextCandidatesQuery.isLoading && contextCandidatesQuery.data?.count === 0 ? <p className="mt-2 text-sm text-text-muted">No eligible Certification is available for this Client and Facility.</p> : null}
-          {resolvedContextQuery.data ? <p className="mt-2 text-sm text-text-muted">Using {resolvedContextQuery.data.summary.primary_label} for {resolvedContextQuery.data.summary.secondary_label}.</p> : null}
+          {!contextIsLocked && !contextCandidatesQuery.isLoading && contextCandidatesQuery.data?.count === 0 ? <p className="mt-2 text-sm text-text-muted">No eligible Certification is available for this Client and Facility.</p> : null}
+          {!contextIsLocked && resolvedContextQuery.data ? <p className="mt-2 text-sm text-text-muted">Using {resolvedContextQuery.data.summary.primary_label} for {resolvedContextQuery.data.summary.secondary_label}.</p> : null}
         </Surface>
       ) : null}
       <OetsRenderer
@@ -361,10 +393,10 @@ export function RuntimeTemplatePage() {
                   clientId: effectiveClientId,
                   facilityId,
                   isPending: mutation.isPending || draftMutation.isPending,
-                  mutate: hasGovernedSignatureFields(activeEditingSession.definition)
+                  mutate: requiresPersistedDraft
                     ? (request) => draftMutation.mutate({ ...request, idempotency_key: draftIdempotencyKeyRef.current })
                     : (request) => mutation.mutate(request),
-                  idempotencyKey: hasGovernedSignatureFields(activeEditingSession.definition) ? draftIdempotencyKeyRef.current : undefined,
+                  idempotencyKey: requiresPersistedDraft ? draftIdempotencyKeyRef.current : undefined,
                   setBackendValidation,
                   setFormMessage,
                   setSuccessRecord,
@@ -374,9 +406,9 @@ export function RuntimeTemplatePage() {
         }
         readOnly={readOnly}
         runtimeTemplate={activeEditingSession.runtimeTemplate}
-        submitHelpText={hasGovernedSignatureFields(activeEditingSession.definition) ? "Begin a persisted draft before saving and signing this evidence." : undefined}
-        submitLabel={hasGovernedSignatureFields(activeEditingSession.definition) ? "Begin Evidence" : undefined}
-        submittingLabel={hasGovernedSignatureFields(activeEditingSession.definition) ? "Beginning..." : undefined}
+        submitHelpText={requiresPersistedDraft ? "Begin a persisted draft before completing and submitting this evidence." : undefined}
+        submitLabel={requiresPersistedDraft ? "Begin Evidence" : undefined}
+        submittingLabel={requiresPersistedDraft ? "Beginning..." : undefined}
         submitDisabledReason={readSubmissionDisabledReason(
           effectiveClientId,
           successRecord,
@@ -511,7 +543,7 @@ function readSubmissionDisabledReason(
   return clientId ? null : "You must first select a client before creating an audit draft.";
 }
 
-function applyContextFieldPolicy(definition: OetsDefinition | undefined, policy: Record<string, "OPERATOR_EDITABLE" | "READ_ONLY_DERIVED" | "UNAVAILABLE_POST_ISSUANCE"> | undefined) {
+function applyContextFieldPolicy(definition: OetsDefinition | undefined, policy: Record<string, "OPERATOR_EDITABLE" | "READ_ONLY_DERIVED" | "UNAVAILABLE_POST_ISSUANCE"> | undefined, requiredFields: string[] | undefined) {
   if (!definition || !policy) return definition;
   return {
     ...definition,
@@ -519,6 +551,7 @@ function applyContextFieldPolicy(definition: OetsDefinition | undefined, policy:
       ...section,
       fields: section.fields.map((field) => ({
         ...field,
+        required: field.required || Boolean(requiredFields?.includes(field.field_code)),
         readonly: field.readonly || policy[field.field_code] === "READ_ONLY_DERIVED" || policy[field.field_code] === "UNAVAILABLE_POST_ISSUANCE",
         description: policy[field.field_code] === "UNAVAILABLE_POST_ISSUANCE" ? "Available only after governed Credential issuance." : field.description
       }))

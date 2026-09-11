@@ -440,6 +440,36 @@ afterEach(() => {
 });
 
 describe("Generic OETS renderer", () => {
+  it("renders evidence-only governed signatures even when payload visibility is false", async () => {
+    const queryClient = createTestQueryClient();
+    const governed = governedDefinition();
+    const hiddenSignatureDefinition = {
+      ...governed,
+      sections: governed.sections.map((section) => ({
+        ...section,
+        fields: section.fields.map((field) => ({
+          ...field,
+          readonly: true,
+          visible: false
+        }))
+      }))
+    };
+    mockFetchQueue([
+      { status: 200, body: evidenceRecord({ lifecycle_state: "DRAFT" }) },
+      { status: 200, body: { ...runtimeTemplate, definition_jsonb: hiddenSignatureDefinition } },
+      { status: 200, body: { attestations: [] } }
+    ]);
+
+    renderOperationalEvidenceRecordPageWithSession({
+      initialPath: "/workbench/evidence/evidence-record-1",
+      queryClient,
+      currentSession: session
+    });
+
+    expect(await screen.findByText("I attest to the exact evidence shown.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Sign & Attest" })).toBeVisible();
+  });
+
   it("integrates server-confirmed attestation state and recovers safely from signing failure", async () => {
     const user = userEvent.setup();
     const queryClient = createTestQueryClient();
@@ -730,7 +760,15 @@ describe("Generic OETS renderer", () => {
             training_start_date: "2026-08-20T00:00:00.000Z",
             training_end_date: "2026-08-21T00:00:00.000Z",
             facility_id: null,
-            facility: null
+            facility: null,
+            instructor_staff_member: {
+              id: "instructor-1",
+              full_name: "Maria Hannah Khrisna Depacaquivo",
+              instructor_registry_identity: {
+                instructor_number: "OGI-INS-2026-0001",
+                status: "ACTIVE"
+              }
+            }
           }
         }
       },
@@ -773,6 +811,10 @@ describe("Generic OETS renderer", () => {
     expect(screen.getByText("OGI-STU-2026-0007")).toBeInTheDocument();
     expect(screen.getByText("Open Water Guardian L1")).toBeInTheDocument();
     expect(screen.getByText("Open Water Guardian Cohort")).toBeInTheDocument();
+    expect(screen.getByText("Primary Instructor")).toBeInTheDocument();
+    expect(
+      screen.getByText("Maria Hannah Khrisna Depacaquivo")
+    ).toBeInTheDocument();
     expect(screen.getAllByText("OGI Direct / Independent").length).toBeGreaterThan(0);
     expect(screen.getAllByText("None").length).toBeGreaterThan(0);
     expect(screen.queryByText("enrollment-1")).not.toBeInTheDocument();
@@ -2930,7 +2972,8 @@ function trainingContext() {
         training_start_date: "2026-08-20T00:00:00.000Z",
         training_end_date: "2026-08-21T00:00:00.000Z",
         facility_id: null,
-        facility: null
+        facility: null,
+        instructor_staff_member: null
       }
     }
   };
@@ -3652,7 +3695,8 @@ function optionField(
           CRI_CLASSIFICATION: "GOLD",
           DEFENSIBILITY_SCORE_100: 92,
           DEFENSIBILITY_CLASSIFICATION: "PLATINUM"
-        }
+        },
+        required_fields: []
       });
       if (url === "/api/v1/operational-evidence/records" && init?.method === "POST") {
         return jsonResponse(201, evidenceRecord());
@@ -3887,6 +3931,8 @@ function optionField(
     );
     const flow = screen.getByTestId("oets-flow-messages");
     expect(within(flow).getByRole("status")).toHaveTextContent("Flow success");
+    expect(screen.getByText("Draft saved").closest("[role='status']"))
+      .toHaveTextContent("Flow success");
     expect(within(flow).getByRole("alert")).toHaveTextContent("Flow error");
     expect(within(screen.getByTestId("oets-action-strip")).queryByRole("alert"))
       .not.toBeInTheDocument();
@@ -3941,6 +3987,27 @@ function optionField(
       />
     );
     expect(screen.getByRole("button", { name: /Form progress.*100%/s })).toBeInTheDocument();
+  });
+
+  it("rehydrates visible fields when a confirmed save returns an authoritative payload", () => {
+    const view = render(
+      <OetsRenderer
+        definition={definition}
+        initialPayload={{ sections: { GENERAL_EVIDENCE: { TEXT_FIELD: "Before save" } } }}
+        runtimeTemplate={runtimeTemplate}
+      />
+    );
+    expect(screen.getByLabelText("Text Field")).toHaveValue("Before save");
+
+    view.rerender(
+      <OetsRenderer
+        definition={definition}
+        initialPayload={{ sections: { GENERAL_EVIDENCE: { TEXT_FIELD: "Server-calculated value" } } }}
+        runtimeTemplate={runtimeTemplate}
+      />
+    );
+
+    expect(screen.getByLabelText("Text Field")).toHaveValue("Server-calculated value");
   });
 
   it("uses the renderer visibility projection for required progress obligations", () => {

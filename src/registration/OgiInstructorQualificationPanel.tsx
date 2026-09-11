@@ -11,6 +11,10 @@ import {
 import { Button } from "../ui/components/Button";
 import { Surface } from "../ui/components/Surface";
 import { formatRegistrationDate } from "./registrationPresentation";
+import {
+  allocateInstructorRegistryIdentity,
+  getInstructorRegistryIdentity
+} from "./instructorRegistryApi";
 
 interface QualificationForm {
   level: Extract<CertificationLevel, "L6" | "L7">;
@@ -29,12 +33,16 @@ const inputClassName =
 export function OgiInstructorQualificationPanel({
   canCreate,
   canIssue,
+  canManageRegistry = false,
   canView,
+  canViewRegistry = false,
   personnelId
 }: {
   canCreate: boolean;
   canIssue: boolean;
+  canManageRegistry?: boolean;
   canView: boolean;
+  canViewRegistry?: boolean;
   personnelId: string;
 }) {
   const queryClient = useQueryClient();
@@ -46,6 +54,13 @@ export function OgiInstructorQualificationPanel({
     queryKey,
     queryFn: () => listPersonnelInstructorQualifications(personnelId),
     enabled: canView,
+    retry: false
+  });
+  const registryQueryKey = ["instructor-registry", personnelId] as const;
+  const registryQuery = useQuery({
+    queryKey: registryQueryKey,
+    queryFn: () => getInstructorRegistryIdentity(personnelId),
+    enabled: canViewRegistry,
     retry: false
   });
   const qualifications = useMemo(
@@ -82,6 +97,16 @@ export function OgiInstructorQualificationPanel({
       setCreating(false);
       setForm(emptyForm(canIssue));
       await queryClient.invalidateQueries({ queryKey });
+    }
+  });
+  const registryMutation = useMutation({
+    mutationFn: () => allocateInstructorRegistryIdentity(personnelId),
+    onSuccess: async (identity) => {
+      queryClient.setQueryData(registryQueryKey, identity);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["oets-context-candidates"] }),
+        queryClient.invalidateQueries({ queryKey: ["training-eligible-instructors"] })
+      ]);
     }
   });
 
@@ -123,6 +148,34 @@ export function OgiInstructorQualificationPanel({
         </div>
       ) : null}
 
+      {canViewRegistry ? (
+        <section aria-label="Instructor Registry" className="rounded-component border border-blue-200 bg-blue-50/60 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-primary-blue">Permanent instructor identity</p>
+              <h4 className="mt-1 font-semibold text-primary-navy">Instructor Registry</h4>
+            </div>
+            {registryQuery.data ? <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-800">{registryQuery.data.status}</span> : null}
+          </div>
+          {registryQuery.isLoading ? <p className="mt-3 text-sm text-text-muted" role="status">Checking Instructor Registry…</p> : null}
+          {registryQuery.isError ? <p className="mt-3 text-sm font-medium text-red-800" role="alert">Instructor Registry could not be loaded.</p> : null}
+          {!registryQuery.isLoading && !registryQuery.isError && registryQuery.data ? (
+            <div className="mt-3">
+              <p className="cl-data-label">Instructor Registry Number</p>
+              <p className="mt-1 text-lg font-semibold text-primary-navy">{registryQuery.data.instructor_number}</p>
+              <p className="mt-2 text-sm text-text-muted">This permanent number identifies this Personnel member as an instructor across qualification changes.</p>
+            </div>
+          ) : null}
+          {!registryQuery.isLoading && !registryQuery.isError && registryQuery.data === null ? (
+            <div className="mt-3">
+              <p className="text-sm text-text-muted">No Instructor Registry Number has been allocated. An active L5, L6, or L7 Certification is required.</p>
+              {canManageRegistry ? <Button className="mt-3" disabled={registryMutation.isPending || qualifications.length === 0} onClick={() => registryMutation.mutate()} type="button">{registryMutation.isPending ? "Allocating…" : "Allocate Instructor Registry Number"}</Button> : null}
+            </div>
+          ) : null}
+          {registryMutation.isError ? <p className="mt-3 text-sm font-medium text-red-800" role="alert">{registryError(registryMutation.error)}</p> : null}
+        </section>
+      ) : null}
+
       {message ? <p className="rounded-component border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-800" role="status">{message}</p> : null}
       {mutation.isError ? <p className="rounded-component border border-accent-red/30 bg-red-50 p-3 text-sm font-medium text-red-800" role="alert">{certificationError(mutation.error)}</p> : null}
 
@@ -161,3 +214,4 @@ function isoDay(value: Date) { return value.toISOString().slice(0, 10); }
 function asUtcDate(value: string) { return `${value}T00:00:00.000Z`; }
 function qualificationTitle(level: CertificationLevel) { return level === "L7" ? "L7 · Master Guardian Instructor" : "L6 · Guardian Instructor"; }
 function certificationError(error: unknown) { return isApiError(error) ? error.message : "Instructor qualification could not be recorded. Review the certification inputs and try again."; }
+function registryError(error: unknown) { return isApiError(error) ? error.message : "Instructor Registry Number could not be allocated. Confirm the active instructor qualification and try again."; }

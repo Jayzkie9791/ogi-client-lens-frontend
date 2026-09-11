@@ -55,6 +55,8 @@ const permissions = {
   ,viewCertification: "view_certification"
   ,createCertification: "create_certification_draft"
   ,issueCertification: "issue_certification"
+  ,viewInstructorRegistry: "view_instructor_registry"
+  ,manageInstructorRegistry: "manage_instructor_registry"
 } as const;
 
 type PersonnelSecondaryTab = "overview" | "facilities";
@@ -96,6 +98,8 @@ export function RegistrationPersonnelPage() {
   const canViewCertification = auth.canUsePermission(permissions.viewCertification) && auth.session?.clientId === null;
   const canCreateCertification = auth.canUsePermission(permissions.createCertification) && auth.session?.clientId === null;
   const canIssueCertification = auth.canUsePermission(permissions.issueCertification) && auth.session?.clientId === null;
+  const canViewInstructorRegistry = auth.canUsePermission(permissions.viewInstructorRegistry) && auth.session?.clientId === null;
+  const canManageInstructorRegistry = auth.canUsePermission(permissions.manageInstructorRegistry) && auth.session?.clientId === null;
   const [clientFilter, setClientFilter] = useState("");
   const [facilityFilter, setFacilityFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<
@@ -423,7 +427,9 @@ export function RegistrationPersonnelPage() {
                 <OgiInstructorQualificationPanel
                   canCreate={canCreateCertification}
                   canIssue={canIssueCertification}
+                  canManageRegistry={canManageInstructorRegistry}
                   canView={canViewCertification}
+                  canViewRegistry={canViewInstructorRegistry}
                   personnelId={selectedPersonnelQuery.data.id}
                 />
               </>

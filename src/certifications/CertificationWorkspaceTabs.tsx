@@ -3,14 +3,19 @@ import { NavLink } from "react-router-dom";
 import { routes } from "../app/routePaths";
 import { useAuth } from "../auth/useAuth";
 
-export function CertificationWorkspaceTabs() {
+export function CertificationWorkspaceTabs({ embedded = false }: { embedded?: boolean }) {
   const auth = useAuth();
   const canViewCertifications = auth.canUsePermission("view_certification");
   const canViewCredentials = auth.canUsePermission("view_staff_member");
 
   return (
     <nav aria-label="Credentials and certifications sections">
-      <ul className="flex flex-wrap gap-2 border-b border-border pb-3">
+      <ul
+        className={[
+          "flex flex-wrap gap-2",
+          embedded ? "" : "border-b border-border pb-3"
+        ].join(" ")}
+      >
         {canViewCertifications ? (
           <li>
             <WorkspaceTab label="Certifications" to={routes.certifications} />

@@ -120,10 +120,18 @@ export interface TrainingEnrollmentClientSummary {
 
 export interface TrainingEnrollmentSessionSummary {
   readonly id: string;
+  readonly business_identifier?: string;
   readonly training_title: string;
   readonly training_start_date: string;
   readonly training_end_date: string | null;
   readonly facility_id: string | null;
+  readonly duration_minutes?: number | null;
+  readonly operational_skill?: string | null;
+  readonly facility?: { readonly id:string; readonly business_identifier:string; readonly facility_name:string } | null;
+  readonly instructor_staff_member?: { readonly id:string; readonly full_name:string; readonly instructor_registry_identity:{readonly instructor_number:string;readonly status:string}|null } | null;
+  readonly instructor_qualification_certification?: {readonly id:string;readonly business_identifier:string;readonly certification_number:string;readonly certification_level:string;readonly certification_status:string}|null;
+  readonly supervisor_staff_member?: { readonly id:string; readonly full_name:string; readonly instructor_registry_identity:{readonly instructor_number:string;readonly status:string}|null } | null;
+  readonly supervisor_qualification_certification?: {readonly id:string;readonly business_identifier:string;readonly certification_number:string;readonly certification_level:string;readonly certification_status:string}|null;
 }
 
 export interface TrainingSessionFacilitySummary {
@@ -135,7 +143,7 @@ export interface TrainingSessionFacilitySummary {
 
 export interface TrainingSessionInstructorStaffMemberSummary {
   readonly id: string;
-  readonly client_id: string;
+  readonly client_id: string | null;
   readonly full_name: string;
   readonly email: string | null;
 }
@@ -162,6 +170,10 @@ export interface TrainingSession {
   readonly instructor_license_number: string | null;
   readonly instructor_staff_member_id: string | null;
   readonly instructor_qualification_certification_id: string | null;
+  readonly governed_program_authority: boolean;
+  readonly target_program_codes: readonly TrainingProgramCode[];
+  readonly supervisor_staff_member_id: string | null;
+  readonly supervisor_qualification_certification_id: string | null;
   readonly conducted_by_user_id: string | null;
   readonly training_notes: string | null;
   readonly created_at: string;
@@ -171,6 +183,12 @@ export interface TrainingSession {
     | TrainingSessionInstructorStaffMemberSummary
     | null;
   readonly instructor_qualification_certification:
+    | TrainingSessionInstructorQualificationSummary
+    | null;
+  readonly supervisor_staff_member:
+    | TrainingSessionInstructorStaffMemberSummary
+    | null;
+  readonly supervisor_qualification_certification:
     | TrainingSessionInstructorQualificationSummary
     | null;
 }
@@ -206,8 +224,11 @@ export interface CreateTrainingSessionRequest {
   readonly training_end_date?: string | null;
   readonly duration_minutes?: number | null;
   readonly facility_id?: string | null;
+  readonly conducted_by_user_id?: string | null;
   readonly instructor_staff_member_id?: string | null;
   readonly instructor_qualification_certification_id?: string | null;
+  readonly supervisor_staff_member_id?: string | null;
+  readonly supervisor_qualification_certification_id?: string | null;
   readonly target_program_codes: readonly TrainingProgramCode[];
   readonly training_notes?: string | null;
 }
@@ -231,7 +252,13 @@ export interface EligibleTrainingInstructor {
     readonly authorization_id: string | null;
     readonly scope_mode: string | null;
   };
+  readonly supervision: {
+    readonly required: boolean;
+    readonly eligible_supervisors: readonly EligibleTrainingSupervisor[];
+  };
 }
+
+export type EligibleTrainingSupervisor = Omit<EligibleTrainingInstructor, "supervision">;
 
 export interface EligibleTrainingInstructorsResponse {
   readonly facility_id: string;
@@ -244,6 +271,7 @@ export interface TrainingEnrollment {
   readonly id: string;
   readonly trainee_id: string;
   readonly program_code: TrainingProgramCode;
+  readonly training_type: TrainingType | null;
   readonly program: TrainingEnrollmentProgramSummary;
   readonly client_id: string | null;
   readonly training_session_id: string | null;
@@ -260,6 +288,7 @@ export interface TrainingEnrollment {
   };
   readonly client: TrainingEnrollmentClientSummary | null;
   readonly training_session: TrainingEnrollmentSessionSummary | null;
+  readonly journey_progress?: {readonly attendance:boolean;readonly skills_assessment:string|null;readonly knowledge_assessment:string|null;readonly readiness:string|null;readonly certification:{readonly id:string;readonly business_identifier:string;readonly certification_number:string;readonly certification_level:string;readonly certification_status:string;readonly digital_credential:{readonly f048_evidence:{readonly evidence_record_id:string;readonly lifecycle_state:string;readonly submitted_at:string;readonly association_status:"BOUND"|"REVIEW_REQUIRED"}|null;readonly issuance:{readonly id:string;readonly issued_at:string}|null}}|null;readonly next_action:"RECORD_ATTENDANCE"|"RECORD_SKILLS_ASSESSMENT"|"RECORD_KNOWLEDGE_ASSESSMENT"|"RECORD_READINESS_DECISION"|"CERTIFICATION_REVIEW"|"BEGIN_F048"|"COMPLETE_F048_REVIEW"|"CREDENTIAL_ASSOCIATION_REVIEW"|"ISSUE_DIGITAL_CREDENTIAL"|"DIGITAL_CREDENTIAL_ISSUED"}|null;
 }
 
 export type TrainingEvidenceDraftTemplateCode =
@@ -350,7 +379,18 @@ export interface TrainingReadinessDecisionSummary {
 export interface TrainingEvidenceWorkspaceRecord {
   readonly evidence: TrainingContextualEvidenceMetadata;
   readonly evidence_link: TrainingEvidenceLinkSummary | null;
+  readonly assessment_evidence: {
+    readonly result_status: "PASS" | "CONDITIONAL_PASS" | "FAIL";
+    readonly score: number;
+    readonly remediation_required: boolean;
+    readonly reassessment_required: boolean;
+  } | null;
   readonly assessment_result: TrainingAssessmentResultSummary | null;
+  readonly readiness_evidence?: {
+    readonly readiness_outcome: "OPERATIONALLY_READY" | "OPERATIONALLY_READY_WITH_RESTRICTIONS" | "REMEDIATION_REQUIRED" | "NOT_OPERATIONALLY_READY";
+    readonly remediation_required: boolean;
+    readonly certification_review_required: boolean;
+  } | null;
   readonly readiness_decision: TrainingReadinessDecisionSummary | null;
 }
 
@@ -365,6 +405,7 @@ export interface TrainingEvidenceWorkspaceSlot {
   readonly active_draft: TrainingEvidenceWorkspaceRecord | null;
   readonly history: readonly TrainingEvidenceWorkspaceRecord[];
   readonly can_create_draft: boolean;
+  readonly can_replace_active_draft: boolean;
 }
 
 export interface TrainingEvidenceWorkspace {
@@ -374,6 +415,7 @@ export interface TrainingEvidenceWorkspace {
 
 export interface CreateTrainingEvidenceDraftRequest {
   readonly template_code: TrainingEvidenceDraftTemplateCode;
+  readonly obsolete_draft_id?: string;
 }
 
 export interface TrainingEvidenceDraft {
@@ -395,6 +437,8 @@ export interface TrainingEvidenceDraft {
 export interface TrainingAttendanceEvidenceMetadata {
   readonly evidence_record_id: string;
   readonly template_code: "OGI_F022_COURSE_ATTENDANCE_VERIFICATION_RECORD";
+  readonly template_version_id: string;
+  readonly template_version: string;
   readonly template_name: string | null;
   readonly document_number: string | null;
   readonly lifecycle_state: string;
@@ -434,6 +478,7 @@ export interface TrainingAttendanceEvidenceWorkspace {
   readonly active_draft: TrainingAttendanceEvidenceRecord | null;
   readonly history: readonly TrainingAttendanceEvidenceRecord[];
   readonly can_create_draft: boolean;
+  readonly can_replace_active_draft: boolean;
 }
 
 export interface CreateTrainingAttendanceEvidenceDraftRequest {
@@ -466,10 +511,14 @@ export interface TrainingEnrollmentListResponse {
 
 export interface CreateTrainingEnrollmentRequest {
   readonly program_code: TrainingProgramCode;
+  readonly training_type: TrainingType;
   readonly client_id?: string | null;
   readonly training_session_id?: string | null;
   readonly notes?: string | null;
 }
+
+export const trainingTypes = ["INITIAL_CERTIFICATION", "RECERTIFICATION", "REMEDIATION_TRAINING", "COMPETENCY_VERIFICATION", "INSTRUCTOR_DEVELOPMENT", "SUPERVISOR_DEVELOPMENT", "RISK_MANAGEMENT_TRAINING", "INCIDENT_INVESTIGATION_TRAINING", "COMPLIANCE_TRAINING", "OTHER"] as const;
+export type TrainingType = (typeof trainingTypes)[number];
 
 export interface AssignTrainingEnrollmentSessionRequest {
   readonly training_session_id: string;
@@ -521,6 +570,13 @@ export function listTrainingEnrollments(traineeId: string) {
   );
 }
 
+export function listRecentTrainingRegistrations() {
+  return apiRequest<TrainingEnrollmentListResponse>(
+    "/api/v1/training/enrollments",
+    { validate: isTrainingEnrollmentListResponse }
+  );
+}
+
 export function createTrainingEnrollment(
   traineeId: string,
   request: CreateTrainingEnrollmentRequest
@@ -530,6 +586,20 @@ export function createTrainingEnrollment(
     {
       method: "POST",
       body: request,
+      validate: isTrainingEnrollment
+    }
+  );
+}
+
+export function confirmTrainingEnrollmentType(
+  enrollmentId: string,
+  trainingType: TrainingType
+) {
+  return apiRequest<TrainingEnrollment>(
+    `/api/v1/training/enrollments/${encodeURIComponent(enrollmentId)}/training-type-confirmation`,
+    {
+      method: "POST",
+      body: { training_type: trainingType },
       validate: isTrainingEnrollment
     }
   );
@@ -668,6 +738,21 @@ export function createTrainingAttendanceEvidenceDraft(
   );
 }
 
+export function replaceTrainingAttendanceEvidenceDraft(
+  trainingSessionId: string,
+  evidenceRecordId: string,
+  request: CreateTrainingAttendanceEvidenceDraftRequest
+) {
+  return apiRequest<TrainingAttendanceEvidenceDraft>(
+    `/api/v1/training/sessions/${encodeURIComponent(trainingSessionId)}/attendance-evidence-drafts/${encodeURIComponent(evidenceRecordId)}/replace`,
+    {
+      method: "POST",
+      body: request,
+      validate: isTrainingAttendanceEvidenceDraft
+    }
+  );
+}
+
 export function linkTrainingAttendanceEvidence(
   trainingSessionId: string,
   evidenceRecordId: string
@@ -718,6 +803,32 @@ function isEligibleTrainingInstructor(value: unknown): value is EligibleTraining
     isRecord(value.qualification) &&
     typeof value.qualification.certification_id === "string" &&
     isCertificationLevel(value.qualification.certification_level) &&
+    typeof value.qualification.title === "string" &&
+    Array.isArray(value.teaching_authority_levels) &&
+    value.teaching_authority_levels.every(isCertificationLevel) &&
+    isRecord(value.operational_scope) &&
+    isNullableString(value.operational_scope.authorization_id) &&
+    isNullableString(value.operational_scope.scope_mode) &&
+    isRecord(value.supervision) &&
+    typeof value.supervision.required === "boolean" &&
+    Array.isArray(value.supervision.eligible_supervisors) &&
+    value.supervision.eligible_supervisors.every(isEligibleTrainingSupervisor)
+  );
+}
+
+function isEligibleTrainingSupervisor(value: unknown): value is EligibleTrainingSupervisor {
+  return (
+    isRecord(value) &&
+    typeof value.personnel_id === "string" &&
+    typeof value.display_name === "string" &&
+    value.organizational_affiliation === "OGI" &&
+    isRecord(value.linked_user) &&
+    typeof value.linked_user.id === "string" &&
+    typeof value.linked_user.display_name === "string" &&
+    isNullableString(value.linked_user.email) &&
+    isRecord(value.qualification) &&
+    typeof value.qualification.certification_id === "string" &&
+    (value.qualification.certification_level === "L6" || value.qualification.certification_level === "L7") &&
     typeof value.qualification.title === "string" &&
     Array.isArray(value.teaching_authority_levels) &&
     value.teaching_authority_levels.every(isCertificationLevel) &&
@@ -792,6 +903,7 @@ function isTrainingEnrollment(value: unknown): value is TrainingEnrollment {
     typeof value.id === "string" &&
     typeof value.trainee_id === "string" &&
     isTrainingProgramCode(value.program_code) &&
+    (value.training_type === null || isTrainingType(value.training_type)) &&
     isTrainingEnrollmentProgramSummary(value.program) &&
     isNullableString(value.client_id) &&
     isNullableString(value.training_session_id) &&
@@ -809,6 +921,10 @@ function isTrainingEnrollment(value: unknown): value is TrainingEnrollment {
     (value.training_session === null ||
       isTrainingEnrollmentSessionSummary(value.training_session))
   );
+}
+
+function isTrainingType(value: unknown): value is TrainingType {
+  return typeof value === "string" && (trainingTypes as readonly string[]).includes(value);
 }
 
 function isTrainingEvidenceWorkspace(
@@ -835,7 +951,8 @@ function isTrainingEvidenceWorkspaceSlot(
       isTrainingEvidenceWorkspaceRecord(value.active_draft)) &&
     Array.isArray(value.history) &&
     value.history.every(isTrainingEvidenceWorkspaceRecord) &&
-    typeof value.can_create_draft === "boolean"
+    typeof value.can_create_draft === "boolean" &&
+    typeof value.can_replace_active_draft === "boolean"
   );
 }
 
@@ -847,8 +964,21 @@ function isTrainingEvidenceWorkspaceRecord(
     isTrainingContextualEvidenceMetadata(value.evidence) &&
     (value.evidence_link === null ||
       isTrainingEvidenceLinkSummary(value.evidence_link)) &&
+    (value.assessment_evidence === null ||
+      (isRecord(value.assessment_evidence) &&
+        (value.assessment_evidence.result_status === "PASS" ||
+          value.assessment_evidence.result_status === "CONDITIONAL_PASS" ||
+          value.assessment_evidence.result_status === "FAIL") &&
+        typeof value.assessment_evidence.score === "number" &&
+        typeof value.assessment_evidence.remediation_required === "boolean" &&
+        typeof value.assessment_evidence.reassessment_required === "boolean")) &&
     (value.assessment_result === null ||
       isTrainingAssessmentResultSummary(value.assessment_result)) &&
+    (value.readiness_evidence === undefined || value.readiness_evidence === null ||
+      (isRecord(value.readiness_evidence) &&
+        ["OPERATIONALLY_READY", "OPERATIONALLY_READY_WITH_RESTRICTIONS", "REMEDIATION_REQUIRED", "NOT_OPERATIONALLY_READY"].includes(String(value.readiness_evidence.readiness_outcome)) &&
+        typeof value.readiness_evidence.remediation_required === "boolean" &&
+        typeof value.readiness_evidence.certification_review_required === "boolean")) &&
     (value.readiness_decision === null ||
       isTrainingReadinessDecisionSummary(value.readiness_decision))
   );
@@ -995,6 +1125,8 @@ function isTrainingAttendanceEvidenceMetadata(
     isRecord(value) &&
     typeof value.evidence_record_id === "string" &&
     value.template_code === "OGI_F022_COURSE_ATTENDANCE_VERIFICATION_RECORD" &&
+    typeof value.template_version_id === "string" &&
+    typeof value.template_version === "string" &&
     isNullableString(value.template_name) &&
     isNullableString(value.document_number) &&
     typeof value.lifecycle_state === "string" &&
@@ -1156,6 +1288,11 @@ function isTrainingSession(value: unknown): value is TrainingSession {
     isNullableString(value.instructor_license_number) &&
     isNullableString(value.instructor_staff_member_id) &&
     isNullableString(value.instructor_qualification_certification_id) &&
+    typeof value.governed_program_authority === "boolean" &&
+    Array.isArray(value.target_program_codes) &&
+    value.target_program_codes.every(isTrainingProgramCode) &&
+    isNullableString(value.supervisor_staff_member_id) &&
+    isNullableString(value.supervisor_qualification_certification_id) &&
     isNullableString(value.conducted_by_user_id) &&
     isNullableString(value.training_notes) &&
     typeof value.created_at === "string" &&
@@ -1166,6 +1303,12 @@ function isTrainingSession(value: unknown): value is TrainingSession {
     (value.instructor_qualification_certification === null ||
       isTrainingSessionInstructorQualificationSummary(
         value.instructor_qualification_certification
+      )) &&
+    (value.supervisor_staff_member === null ||
+      isTrainingSessionInstructorStaffMemberSummary(value.supervisor_staff_member)) &&
+    (value.supervisor_qualification_certification === null ||
+      isTrainingSessionInstructorQualificationSummary(
+        value.supervisor_qualification_certification
       ))
   );
 }
@@ -1202,7 +1345,7 @@ function isTrainingSessionInstructorStaffMemberSummary(
   return (
     isRecord(value) &&
     typeof value.id === "string" &&
-    typeof value.client_id === "string" &&
+    isNullableString(value.client_id) &&
     typeof value.full_name === "string" &&
     isNullableString(value.email)
   );

@@ -46,9 +46,9 @@ describe("OETS context API authority guards", () => {
   it("accepts exact textual and numeric authority and rejects malformed policy or values", async () => {
     const summary = { id: "certification-1", primary_label: "OGI-CERT-2026-0001", secondary_label: "Aurelia Guard · OGI_L1_POOL_LIFEGUARD", holder_kind: "TRAINEE" };
     vi.stubGlobal("fetch", vi.fn()
-      .mockResolvedValueOnce(json({ requirement_code: "CERTIFICATION_CONTEXT", selected_id: "certification-1", summary, field_policy: { CERTIFICATION_NUMBER: "READ_ONLY_DERIVED", CURRENT_CRI_SCORE_100: "READ_ONLY_DERIVED" }, authoritative_values: { CERTIFICATION_NUMBER: "OGI-CERT-2026-0001", CURRENT_CRI_SCORE_100: 87.5 } }))
-      .mockResolvedValueOnce(json({ requirement_code: "CERTIFICATION_CONTEXT", selected_id: "certification-1", summary, field_policy: { CERTIFICATION_NUMBER: "CALLER_OVERRIDE" }, authoritative_values: {} }))
-      .mockResolvedValueOnce(json({ requirement_code: "CERTIFICATION_CONTEXT", selected_id: "certification-1", summary, field_policy: { CERTIFICATION_NUMBER: "READ_ONLY_DERIVED" }, authoritative_values: { CERTIFICATION_NUMBER: true } })));
+      .mockResolvedValueOnce(json({ requirement_code: "CERTIFICATION_CONTEXT", selected_id: "certification-1", summary, field_policy: { CERTIFICATION_NUMBER: "READ_ONLY_DERIVED", CURRENT_CRI_SCORE_100: "READ_ONLY_DERIVED" }, authoritative_values: { CERTIFICATION_NUMBER: "OGI-CERT-2026-0001", CURRENT_CRI_SCORE_100: 87.5 }, required_fields: [] }))
+      .mockResolvedValueOnce(json({ requirement_code: "CERTIFICATION_CONTEXT", selected_id: "certification-1", summary, field_policy: { CERTIFICATION_NUMBER: "CALLER_OVERRIDE" }, authoritative_values: {}, required_fields: [] }))
+      .mockResolvedValueOnce(json({ requirement_code: "CERTIFICATION_CONTEXT", selected_id: "certification-1", summary, field_policy: { CERTIFICATION_NUMBER: "READ_ONLY_DERIVED" }, authoritative_values: { CERTIFICATION_NUMBER: true }, required_fields: [] })));
 
     await expect(resolveOetsContext({ ...authority, clientId: "client-1", selectedId: "certification-1" })).resolves.toMatchObject({ selected_id: "certification-1", authoritative_values: { CURRENT_CRI_SCORE_100: 87.5 } });
     await expect(resolveOetsContext({ ...authority, clientId: "client-1", selectedId: "certification-1" })).rejects.toMatchObject({ code: "MALFORMED_RESPONSE" });

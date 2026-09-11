@@ -253,6 +253,21 @@ export function requestCredentialEvidenceBindingReview(
   );
 }
 
+export function decideCredentialEvidenceBindingReview(
+  reviewId: string,
+  rationale: string,
+  idempotencyKey: string
+) {
+  return apiRequest<CredentialEvidenceBindingReviewResponse>(
+    `/api/v1/governed-reviews/${encodeURIComponent(reviewId)}/decision`,
+    {
+      method: "POST",
+      body: { decision: "APPROVED", rationale, idempotencyKey },
+      validate: isCredentialEvidenceBindingReviewResponse
+    }
+  );
+}
+
 function isCredentialIssuancePreparationResponse(
   value: unknown
 ): value is CredentialIssuancePreparationResponse {

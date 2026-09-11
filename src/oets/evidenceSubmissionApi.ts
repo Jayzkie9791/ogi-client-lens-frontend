@@ -69,6 +69,14 @@ export interface OperationalEvidenceTrainingDraftContext {
         client_id: string;
         operational_status: string;
       } | null;
+      instructor_staff_member: {
+        id: string;
+        full_name: string;
+        instructor_registry_identity: {
+          instructor_number: string;
+          status: string;
+        } | null;
+      } | null;
     } | null;
   };
 }
@@ -243,6 +251,14 @@ function isOperationalEvidenceTrainingDraftContext(
           enrollment.training_session.training_end_date === null) &&
         (typeof enrollment.training_session.facility_id === "string" ||
           enrollment.training_session.facility_id === null) &&
+        (enrollment.training_session.instructor_staff_member === null ||
+          (isRecord(enrollment.training_session.instructor_staff_member) &&
+            typeof enrollment.training_session.instructor_staff_member.id === "string" &&
+            typeof enrollment.training_session.instructor_staff_member.full_name === "string" &&
+            (enrollment.training_session.instructor_staff_member.instructor_registry_identity === null ||
+              (isRecord(enrollment.training_session.instructor_staff_member.instructor_registry_identity) &&
+                typeof enrollment.training_session.instructor_staff_member.instructor_registry_identity.instructor_number === "string" &&
+                typeof enrollment.training_session.instructor_staff_member.instructor_registry_identity.status === "string")))) &&
         (enrollment.training_session.facility === null ||
           (isRecord(enrollment.training_session.facility) &&
             typeof enrollment.training_session.facility.id === "string" &&

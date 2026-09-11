@@ -22,11 +22,24 @@ export interface GovernanceReviewClaim {
 
 export interface GovernanceQueueItem {
   evidence_record: OperationalEvidenceRecord;
+  display_context?: GovernanceQueueDisplayContext;
   governance_authority_code: string;
   lifecycle_state: string;
   transition_trigger: string;
   target_state: string;
   active_claim: GovernanceReviewClaim | null;
+}
+
+export interface GovernanceQueueDisplayContext {
+  template_name: string;
+  document_number: string | null;
+  subject_name: string | null;
+  subject_reference: string | null;
+  client_name: string | null;
+  client_reference: string | null;
+  facility_name: string | null;
+  facility_reference: string | null;
+  claimed_by_name: string | null;
 }
 
 export interface GovernanceQueueFilter {
@@ -122,8 +135,31 @@ function isGovernanceQueueItem(value: unknown): value is GovernanceQueueItem {
     typeof value.lifecycle_state === "string" &&
     typeof value.transition_trigger === "string" &&
     typeof value.target_state === "string" &&
+    (value.display_context === undefined ||
+      isGovernanceQueueDisplayContext(value.display_context)) &&
     (value.active_claim === null || isGovernanceReviewClaim(value.active_claim))
   );
+}
+
+function isGovernanceQueueDisplayContext(
+  value: unknown
+): value is GovernanceQueueDisplayContext {
+  return (
+    isRecord(value) &&
+    typeof value.template_name === "string" &&
+    nullableString(value.document_number) &&
+    nullableString(value.subject_name) &&
+    nullableString(value.subject_reference) &&
+    nullableString(value.client_name) &&
+    nullableString(value.client_reference) &&
+    nullableString(value.facility_name) &&
+    nullableString(value.facility_reference) &&
+    nullableString(value.claimed_by_name)
+  );
+}
+
+function nullableString(value: unknown) {
+  return typeof value === "string" || value === null;
 }
 
 function isGovernanceReviewClaim(value: unknown): value is GovernanceReviewClaim {

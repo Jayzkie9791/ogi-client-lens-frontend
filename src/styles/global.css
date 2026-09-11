@@ -57,6 +57,80 @@
     line-height: 1.35rem;
   }
 
+  .cl-catalog-card {
+    position: relative;
+    overflow: hidden;
+    border-color: var(--cl-workspace-border);
+    box-shadow: var(--cl-catalog-card-shadow);
+    transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+  }
+
+  .cl-catalog-card::before {
+    position: absolute;
+    inset-block: 0;
+    inset-inline-start: 0;
+    width: 0.3rem;
+    background: var(--cl-catalog-accent);
+    content: "";
+  }
+
+  .cl-catalog-card:hover {
+    border-color: var(--cl-workflow-card-border);
+    box-shadow: var(--cl-catalog-card-shadow-hover);
+    transform: translateY(-1px);
+  }
+
+  .cl-record-card {
+    position: relative;
+    overflow: hidden;
+    border-color: var(--cl-workspace-border);
+    background: var(--cl-workspace-panel);
+    box-shadow: var(--cl-catalog-card-shadow);
+  }
+
+  .cl-record-card::before {
+    position: absolute;
+    inset-block: 0;
+    inset-inline-start: 0;
+    width: 0.3rem;
+    background: var(--cl-record-accent);
+    content: "";
+  }
+
+  .cl-record-identity {
+    border-bottom: 1px solid var(--cl-workspace-divider);
+    background: linear-gradient(90deg, var(--cl-record-accent-soft), white 72%);
+  }
+
+  .cl-record-metadata {
+    border: 1px solid var(--cl-record-metadata-border);
+    background: var(--cl-record-metadata-bg);
+  }
+
+  .cl-catalog-form-number {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid color-mix(in srgb, var(--cl-catalog-accent) 35%, white);
+    border-radius: 9999px;
+    background: var(--cl-catalog-accent-soft);
+    padding: 0.2rem 0.6rem;
+    color: var(--cl-catalog-accent);
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: var(--cl-type-label-tracking);
+    line-height: 1.25rem;
+  }
+
+  .cl-catalog-title {
+    color: var(--cl-document-title);
+  }
+
+  .cl-catalog-purpose {
+    border: 1px solid var(--cl-catalog-purpose-border);
+    border-radius: var(--cl-radius-component);
+    background: var(--cl-catalog-purpose-bg);
+  }
+
   .cl-workflow-overlay {
     background: var(--cl-workflow-overlay);
   }
@@ -173,6 +247,47 @@
     border-color: var(--cl-workspace-border);
     background: var(--cl-workspace-panel);
     box-shadow: var(--cl-workspace-shadow);
+  }
+
+  .cl-governed-table {
+    border-collapse: separate;
+    border-spacing: 0 0.625rem;
+  }
+
+  .cl-governed-row > * {
+    border-top: 1px solid var(--cl-workspace-border);
+    border-bottom: 1px solid var(--cl-workspace-border);
+    background: var(--cl-workspace-panel);
+    transition: border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
+  }
+
+  .cl-governed-row > :first-child {
+    border-left: 4px solid var(--cl-record-accent);
+    border-radius: var(--cl-radius-component) 0 0 var(--cl-radius-component);
+  }
+
+  .cl-governed-row > :last-child {
+    border-right: 1px solid var(--cl-workspace-border);
+    border-radius: 0 var(--cl-radius-component) var(--cl-radius-component) 0;
+  }
+
+  .cl-governed-row:hover > *,
+  .cl-governed-row:focus-visible > * {
+    border-color: var(--cl-workflow-card-border);
+    background: var(--cl-record-accent-soft);
+  }
+
+  .cl-governed-row:focus-visible {
+    outline: none;
+  }
+
+  .cl-governed-row:focus-visible > * {
+    box-shadow: inset 0 2px 0 var(--cl-color-focus), inset 0 -2px 0 var(--cl-color-focus);
+  }
+
+  .cl-governed-row[aria-selected="true"] > * {
+    border-color: var(--cl-record-accent);
+    background: var(--cl-record-accent-soft);
   }
 
   @media (min-width: 640px) {

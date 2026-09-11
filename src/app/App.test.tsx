@@ -220,6 +220,17 @@ const queueClaim = {
 const unclaimedQueueResponse = [
   {
     evidence_record: queueEvidenceRecord,
+    display_context: {
+      template_name: "Weekly Safety Audit Checklist",
+      document_number: "OGI F-001",
+      subject_name: "Kobe Alcantara",
+      subject_reference: "OGI-GR-2026-000029",
+      client_name: "Sky Is The Limit",
+      client_reference: "OGI-CLI-2026-SKYL",
+      facility_name: "Sky Ranch",
+      facility_reference: "OGI-FAC-2026-SKYR",
+      claimed_by_name: null
+    },
     governance_authority_code: "OGI",
     lifecycle_state: "SUBMITTED",
     transition_trigger: "begin_ogi_review",
@@ -231,6 +242,10 @@ const unclaimedQueueResponse = [
 const ownedClaimQueueResponse = [
   {
     ...unclaimedQueueResponse[0],
+    display_context: {
+      ...unclaimedQueueResponse[0].display_context,
+      claimed_by_name: "Maria Hannah Khrisna Depacaquivo"
+    },
     active_claim: queueClaim
   }
 ];
@@ -238,6 +253,10 @@ const ownedClaimQueueResponse = [
 const otherClaimQueueResponse = [
   {
     ...unclaimedQueueResponse[0],
+    display_context: {
+      ...unclaimedQueueResponse[0].display_context,
+      claimed_by_name: "Another Reviewer"
+    },
     active_claim: {
       ...queueClaim,
       claimed_by_user_id: "00000000-0000-4000-8000-000000000999"
@@ -815,10 +834,12 @@ describe("Client Lens authentication foundation", () => {
     const queueItem = within(
       screen.getByRole("list", { name: "Governance review queue" })
     ).getByRole("listitem");
-    expect(screen.getByText("OGI_F001_WEEKLY_SAFETY_AUDIT_CHECKLIST")).toBeInTheDocument();
+    expect(screen.getByText("Weekly Safety Audit Checklist")).toBeInTheDocument();
+    expect(screen.getByText("Kobe Alcantara · OGI-GR-2026-000029")).toBeInTheDocument();
+    expect(screen.getByText("Sky Is The Limit · OGI-CLI-2026-SKYL")).toBeInTheDocument();
+    expect(screen.getByText("Sky Ranch · OGI-FAC-2026-SKYR")).toBeInTheDocument();
     expect(screen.getByText("Awaiting Review")).toBeInTheDocument();
-    expect(screen.getByText("OGI")).toBeInTheDocument();
-    expect(within(queueItem).getByText("Available")).toBeInTheDocument();
+    expect(within(queueItem).getByText("OGI · Available")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Claim Review" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open Record" })).toHaveAttribute(
       "href",
@@ -872,7 +893,7 @@ describe("Client Lens authentication foundation", () => {
     await user.selectOptions(screen.getByLabelText("Claim status"), "CLAIMED");
     await user.click(screen.getByRole("button", { name: "Apply filters" }));
 
-    expect(await screen.findByText("Claimed by you")).toBeInTheDocument();
+    expect(await screen.findByText("OGI · Claimed by you")).toBeInTheDocument();
     expect(calls.map(({ url }) => url)).toContain(
       "/api/v1/operational-evidence/governance/queue?claim_status=CLAIMED&governance_authority_code=OGI&lifecycle_state=SUBMITTED"
     );
@@ -892,7 +913,7 @@ describe("Client Lens authentication foundation", () => {
 
     await user.click(await screen.findByRole("button", { name: "Claim Review" }));
 
-    expect(await screen.findByText("Claimed by you")).toBeInTheDocument();
+    expect(await screen.findByText("OGI · Claimed by you")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Continue Review" })).toHaveAttribute(
       "href",
       routes.evidenceRecordPath(queueEvidenceRecord.id)
@@ -928,7 +949,7 @@ describe("Client Lens authentication foundation", () => {
     renderWithRoute(routes.governanceQueue);
 
     expect(await screen.findByText("Claimed by another reviewer")).toBeInTheDocument();
-    expect(screen.getByText(/Claimed by 00000000-0000-4000-8000-000000000999/)).toBeInTheDocument();
+    expect(screen.getByText("Claimed by Another Reviewer.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "View Record" })).toHaveAttribute(
       "href",
       routes.evidenceRecordPath(queueEvidenceRecord.id)
@@ -1007,7 +1028,11 @@ describe("Client Lens authentication foundation", () => {
     expect(
       await screen.findByRole("heading", { name: "Forms & Audits" })
     ).toBeInTheDocument();
-    expect(screen.getByText("Choose an operational form or audit to open.")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Choose a work area, then open the form that matches what you need to do."
+      )
+    ).toBeInTheDocument();
     expect(screen.getByLabelText("Module")).toHaveValue("");
     expect(screen.getByRole("option", { name: "Select a module" })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "All modules" })).not.toBeInTheDocument();
@@ -1023,10 +1048,12 @@ describe("Client Lens authentication foundation", () => {
 
     expect(screen.getByText("Weekly Safety Audit Checklist")).toBeInTheDocument();
     expect(screen.getByText("Capture weekly operational safety audit evidence.")).toBeInTheDocument();
-    expect(screen.getAllByText("MODULE_A").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Module A").length).toBeGreaterThan(0);
     expect(screen.queryByText("Risk Register")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Weekly Safety Audit Checklist" })).toBeInTheDocument();
     expect(screen.getByText("OGI-F001 / Rev A")).toBeInTheDocument();
+    expect(screen.getByText("OGI F-001")).toBeInTheDocument();
+    expect(screen.getByText("Technical details")).toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: "Open Form" })[0]).toHaveAttribute(
       "href",
       routes.oetsTemplatePath("OGI_F001_WEEKLY_SAFETY_AUDIT_CHECKLIST")

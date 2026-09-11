@@ -221,44 +221,69 @@ function QueueItems({
     <ul aria-label="Governance review queue" className="space-y-3">
       {items.map((item) => (
         <li key={`${item.evidence_record.id}:${item.transition_trigger}`}>
-          <Surface className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div className="min-w-0 space-y-3">
+          <Surface className="border-l-4 border-l-primary-blue">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0 flex-1 space-y-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <h2 className="break-words text-lg font-semibold text-text-primary">
-                    {item.evidence_record.template_provenance.template_code}
-                  </h2>
-                  <p className="mt-1 break-all text-sm text-text-muted">
-                    Record {item.evidence_record.id}
+                  <p className="text-xs font-semibold uppercase tracking-wide text-primary-blue">
+                    Operational Evidence{item.display_context?.document_number
+                      ? ` · ${item.display_context.document_number}`
+                      : ""}
                   </p>
+                  <h2 className="break-words text-lg font-semibold text-text-primary">
+                    {item.display_context?.template_name ??
+                      humanizeTemplateCode(item.evidence_record.template_provenance.template_code)}
+                  </h2>
+                  <QueueSubject item={item} />
                 </div>
                 <span className="inline-flex w-fit rounded-component border border-border px-3 py-1 text-xs font-semibold uppercase text-text-muted">
                   {displayLifecycleStatus(item.lifecycle_state)}
                 </span>
               </div>
-              <dl className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
+              <dl className="grid gap-3 rounded-component bg-canvas p-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
                 <MetadataItem
-                  label="Governance authority"
-                  value={displayReviewAuthority(item.governance_authority_code)}
+                  label="Client"
+                  value={displayReference(
+                    item.display_context?.client_name,
+                    item.display_context?.client_reference,
+                    "OGI Direct / Independent"
+                  )}
                 />
                 <MetadataItem
-                  label="Claim state"
-                  value={claimStateLabel(item, currentUserId)}
+                  label="Facility"
+                  value={displayReference(
+                    item.display_context?.facility_name,
+                    item.display_context?.facility_reference,
+                    "No facility context"
+                  )}
                 />
                 <MetadataItem
-                  label="Client ID"
-                  value={item.evidence_record.client_id ?? "OGI Direct / Independent"}
+                  label="Submitted"
+                  value={formatQueueDate(item.evidence_record.submitted_at)}
                 />
                 <MetadataItem
-                  label="Facility ID"
-                  value={item.evidence_record.facility_id ?? "No facility context"}
+                  label="Review"
+                  value={`${displayReviewAuthority(item.governance_authority_code)} · ${claimStateLabel(item, currentUserId)}`}
                 />
               </dl>
               {item.active_claim ? (
                 <p className="text-sm text-text-muted">
-                  Claimed by {item.active_claim.claimed_by_user_id}.
+                  Claimed by {item.display_context?.claimed_by_name ?? "another authorized reviewer"}.
                 </p>
               ) : null}
+              <details className="text-sm text-text-muted">
+                <summary className="cursor-pointer font-medium text-primary-blue">
+                  Technical record details
+                </summary>
+                <dl className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <MetadataItem label="Record ID" value={item.evidence_record.id} />
+                  <MetadataItem
+                    label="Template code"
+                    value={item.evidence_record.template_provenance.template_code}
+                  />
+                </dl>
+              </details>
             </div>
             <QueueItemAction
               claimPending={claimPending}
@@ -266,6 +291,7 @@ function QueueItems({
               item={item}
               onClaim={onClaim}
             />
+            </div>
           </Surface>
         </li>
       ))}
@@ -390,4 +416,40 @@ function SafeState({
       <p className="mt-2 text-sm text-text-muted">{children}</p>
     </Surface>
   );
+}
+
+function QueueSubject({ item }: { item: GovernanceQueueItem }) {
+  const name = item.display_context?.subject_name;
+  const reference = item.display_context?.subject_reference;
+  if (!name && !reference) return null;
+
+  return (
+    <p className="mt-1 text-sm font-medium text-text-muted">
+      {[name, reference].filter(Boolean).join(" · ")}
+    </p>
+  );
+}
+
+function displayReference(
+  name: string | null | undefined,
+  reference: string | null | undefined,
+  fallback: string
+) {
+  return [name, reference].filter(Boolean).join(" · ") || fallback;
+}
+
+function formatQueueDate(value: string) {
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short"
+  }).format(new Date(value));
+}
+
+function humanizeTemplateCode(value: string) {
+  return value
+    .replace(/^OGI_/, "")
+    .replace(/_/g, " ")
+    .replace(/\bF(\d{1,3})\b/, (_, digits: string) => `F-${digits.padStart(3, "0")}`)
+    .toLowerCase()
+    .replace(/\b\w/g, (character) => character.toUpperCase());
 }

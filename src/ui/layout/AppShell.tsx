@@ -20,7 +20,7 @@ export function AppShell() {
       { label: "Clients", to: routes.registrationClients, permission: "view_client" }, { label: "Facilities", to: routes.registrationFacilities, permission: "view_facility" }, { label: "Personnel", to: routes.registrationPersonnel, permission: "view_staff_member" }
     ] },
     { label: "Training", items: [
-      { label: "Trainees", to: routes.trainingTrainees, permission: "view_training" }, { label: "Training Sessions", to: routes.trainingSessions, permission: "view_training" }, { label: "Register Training", to: routes.trainingRegister, permission: "create_training_enrollment" }, { label: "Trainer Evaluations", to: routes.trainerCommercialEvaluations, permission: "record_training_assessment" }
+      { label: "Trainees", to: routes.trainingTrainees, permission: "view_training" }, { label: "Training Sessions", to: routes.trainingSessions, permission: "view_training" }, { label: "Register Training", to: routes.trainingRegister, permission: "create_training_enrollment" }, { label: "Training Journeys", to: routes.trainingJourneys, permission: "view_training" }, { label: "Trainer Evaluations", to: routes.trainerCommercialEvaluations, permission: "record_training_assessment" }
     ] },
     { label: "Credentials", items: [
       { label: "Certifications", to: routes.certifications, permission: "view_certification" }, { label: "Credentials", to: routes.credentials, permission: "view_staff_member" }
@@ -42,12 +42,12 @@ export function AppShell() {
 
   return <div className="flex min-h-screen bg-canvas text-text-primary">
     {navigationOpen ? <button aria-label="Close navigation" className="fixed inset-0 z-40 bg-primary-navy/45 lg:hidden" onClick={closeNavigation} type="button" /> : null}
-    <aside className={["fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r border-border bg-surface shadow-xl transition-[transform,width] duration-200 lg:static lg:translate-x-0 lg:shadow-none", navigationOpen ? "translate-x-0" : "-translate-x-full", collapsed ? "lg:w-20" : "lg:w-72"].join(" ")} id="primary-navigation">
-      <div className="flex min-h-24 items-center justify-between gap-3 border-b border-border px-4">
-        <NavLink aria-label="Client Lens overview" className="min-w-0" onClick={closeNavigation} to={routes.workbench}><img alt="Client Lens by OGI Ltd." className={collapsed ? "h-14 w-auto lg:h-10 lg:w-10 lg:object-cover lg:object-left" : "h-14 w-auto"} src="/brand/client-lens-logo.png" /></NavLink>
+    <aside className={["fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r border-border bg-surface shadow-xl transition-[transform,width] duration-200 lg:sticky lg:top-0 lg:h-screen lg:self-start lg:translate-x-0 lg:shadow-none", navigationOpen ? "translate-x-0" : "-translate-x-full", collapsed ? "lg:w-20" : "lg:w-72"].join(" ")} id="primary-navigation">
+      <div className="flex min-h-24 shrink-0 items-center justify-between gap-3 border-b border-border px-4">
+        <NavLink aria-label="Client Lens overview" className="min-w-0" onClick={closeNavigation} to={routes.workbench}><img alt="Client Lens by OGI Ltd." className={collapsed ? "h-16 w-auto lg:h-10 lg:w-10 lg:object-cover lg:object-left" : "h-16 w-auto"} src="/brand/client-lens-logo.png" /></NavLink>
         <button aria-label="Close navigation" className="rounded-component p-2 text-xl text-text-muted hover:bg-elevated lg:hidden" onClick={closeNavigation} type="button">×</button>
       </div>
-      <nav aria-label="Primary navigation" className={["flex-1 px-3 py-4", collapsed ? "lg:overflow-visible" : "overflow-y-auto"].join(" ")}>
+      <nav aria-label="Primary navigation" className={["min-h-0 flex-1 px-3 py-4", collapsed ? "lg:overflow-visible" : "overflow-y-auto"].join(" ")}>
         <div className="space-y-2">{visibleGroups.map((group) => {
           const isActiveGroup = group.label === activeGroup;
           const isOpen = group.label === (previewGroup ?? expandedGroup);
@@ -64,9 +64,9 @@ export function AppShell() {
           </section>;
         })}</div>
       </nav>
-      <button aria-label={collapsed ? "Expand navigation" : "Collapse navigation"} className="hidden min-h-12 border-t border-border px-4 text-sm font-semibold text-text-muted hover:bg-elevated hover:text-text-primary lg:block" onClick={() => setCollapsed((current) => !current)} type="button">{collapsed ? "→" : "← Collapse"}</button>
+      <button aria-label={collapsed ? "Expand navigation" : "Collapse navigation"} className="hidden min-h-12 shrink-0 border-t border-border px-4 text-sm font-semibold text-text-muted hover:bg-elevated hover:text-text-primary lg:block" onClick={() => setCollapsed((current) => !current)} type="button">{collapsed ? "→" : "← Collapse"}</button>
     </aside>
-    <div className="min-w-0 flex-1"><header className="border-b border-border bg-surface"><div className="flex min-h-20 items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
+    <div className="min-w-0 flex-1"><header className="border-b border-border bg-surface"><div className="flex min-h-24 items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
       <button aria-controls="primary-navigation" aria-expanded={navigationOpen} aria-label="Menu" className="inline-flex h-11 w-11 items-center justify-center rounded-component border border-border text-xl text-primary-navy hover:bg-elevated lg:hidden" onClick={() => setNavigationOpen(true)} type="button">☰</button>
       <div className="ml-auto flex flex-wrap items-center justify-end gap-3 text-sm text-text-muted"><span className="text-right"><span className="font-medium text-text-primary">{auth.session?.fullName}</span><span className="ml-2 hidden text-xs sm:inline">{sessionIdentityLabel(auth.session)}</span></span><button className="rounded-component border border-border px-3 py-1.5 font-semibold text-text-primary hover:bg-elevated" onClick={auth.logout} type="button">Log out</button></div>
     </div></header><main className="mx-auto w-full max-w-[100rem] px-4 py-6 sm:px-6 lg:px-8"><Outlet /></main></div>

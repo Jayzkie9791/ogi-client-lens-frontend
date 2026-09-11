@@ -49,11 +49,41 @@ import {
   listEvidenceAttestations
 } from "./attestationApi";
 
-const trainingAssessmentInformationSectionCode = "ASSESSMENT_INFORMATION";
 const trainingAssessmentNumberFieldCode = "ASSESSMENT_NUMBER";
 const trainingAssessmentNumberTemplateCodes = new Set([
   "OGI_F023_OPERATIONAL_SKILLS_ASSESSMENT",
-  "OGI_F024_OPERATIONAL_KNOWLEDGE_ASSESSMENT_RECORD"
+  "OGI_F024_OPERATIONAL_KNOWLEDGE_ASSESSMENT_RECORD",
+  "OGI_F025_OPERATIONAL_READINESS_EVALUATION"
+]);
+const f025ImportedFieldsBySection = new Map<string, ReadonlySet<string>>([
+  ["PERSONNEL_INFORMATION", new Set(["PERSONNEL_NUMBER", "EMPLOYEE_ID", "PERSONNEL_NAME", "ORGANIZATION", "POSITION", "SUPERVISOR", "CLIENT_NUMBER", "FACILITY_NUMBER", "EVALUATION_DATE", "EVALUATOR"])],
+  ["TRAINING_COMPLIANCE_REVIEW", new Set(["COURSE_NUMBER", "COURSE_TITLE", "ATTENDANCE_REQUIREMENT_MET", "ATTENDANCE_PERCENTAGE", "ATTENDANCE_STATUS_IMPORTED_FROM_F_022"])],
+  ["OPERATIONAL_COMPETENCY_REVIEW", new Set(["OPERATIONAL_COMPETENCY_SCORE_OCS", "SKILLS_ASSESSMENT_STATUS", "CRITICAL_DEFICIENCIES_IDENTIFIED", "OPERATIONAL_RESTRICTIONS_RECOMMENDED"])],
+  ["KNOWLEDGE_COMPETENCY_REVIEW", new Set(["OPERATIONAL_KNOWLEDGE_SCORE_OKS", "KNOWLEDGE_ASSESSMENT_STATUS", "KNOWLEDGE_DEFICIENCIES_IDENTIFIED"])],
+  ["FINAL_AUTHORIZATION", new Set(["EVALUATOR_NAME", "EVALUATOR_NUMBER"])]
+]);
+const trainingAssessmentDerivedFieldCodes = new Set([
+  trainingAssessmentNumberFieldCode,
+  "COURSE_NUMBER",
+  "PERSONNEL_NUMBER",
+  "PERSONNEL_NAME",
+  "CLIENT_NUMBER",
+  "FACILITY_NUMBER",
+  "ASSESSMENT_LOCATION",
+  "ASSESSOR_NAME",
+  "ASSESSOR_NUMBER",
+  "PROCTOR_NAME",
+  "PROCTOR_NUMBER"
+]);
+const trainingAssessmentCalculatedSectionsByTemplate = new Map<string, Set<string>>([
+  [
+    "OGI_F023_OPERATIONAL_SKILLS_ASSESSMENT",
+    new Set(["OPERATIONAL_COMPETENCY_SCORE_OCS"])
+  ],
+  [
+    "OGI_F024_OPERATIONAL_KNOWLEDGE_ASSESSMENT_RECORD",
+    new Set(["OPERATIONAL_KNOWLEDGE_SCORE_OKS"])
+  ]
 ]);
 
 const emptyTrainingContextualFieldPolicyByTemplate = new Map<string, Set<string>>([
@@ -117,9 +147,14 @@ interface ClaimedReviewConclusionInput {
   rationale: string;
 }
 
-export function OperationalEvidenceRecordPage() {
+export function OperationalEvidenceRecordPage({
+  embeddedRecordId
+}: {
+  readonly embeddedRecordId?: string;
+} = {}) {
   const [draftDirty, setDraftDirty] = useState(false);
-  const { recordId } = useParams();
+  const { recordId: routeRecordId } = useParams();
+  const recordId = embeddedRecordId ?? routeRecordId;
   const auth = useAuth();
   const queryClient = useQueryClient();
   const [rationaleByTransitionKey, setRationaleByTransitionKey] = useState<
@@ -489,24 +524,28 @@ export function OperationalEvidenceRecordPage() {
 
   return (
     <div className="space-y-4">
-      <RecordIdentityPanel record={record} />
+      {!embeddedRecordId ? <RecordIdentityPanel record={record} /> : null}
 
       <section aria-labelledby={evidenceHeadingId} className="space-y-4">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-primary-blue">
-            Record Truth
-          </p>
+          {!embeddedRecordId ? (
+            <p className="text-xs font-semibold uppercase tracking-wide text-primary-blue">
+              Record Truth
+            </p>
+          ) : null}
           <h2
-            className="mt-1 text-xl font-semibold text-text-primary"
+            className={`${embeddedRecordId ? "" : "mt-1"} text-xl font-semibold text-text-primary`}
             id={evidenceHeadingId}
           >
             {isDraftRecord ? "Draft Evidence" : "Submitted Evidence"}
           </h2>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-text-muted">
-            {isDraftRecord
-              ? "This Draft Operational Evidence record can be edited until it is submitted."
-              : "This read-only view presents the evidence payload submitted for this Operational Evidence record."}
-          </p>
+          {!embeddedRecordId ? (
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-text-muted">
+              {isDraftRecord
+                ? "This Draft Operational Evidence record can be edited until it is submitted."
+                : "This read-only view presents the evidence payload submitted for this Operational Evidence record."}
+            </p>
+          ) : null}
         </div>
 
         {record.scope_kind === "TRAINING_SCOPED" && record.training_context ? (
@@ -530,6 +569,8 @@ export function OperationalEvidenceRecordPage() {
           }
           attestationPending={attestationMutation.isPending}
           attestations={attestationQuery.data?.attestations ?? []}
+          embedded={Boolean(embeddedRecordId)}
+          actionPortalId={embeddedRecordId ? "training-journey-record-actions" : undefined}
           definition={renderedDefinition}
           backendValidation={
             draftPayloadMutation.error &&
@@ -559,7 +600,8 @@ export function OperationalEvidenceRecordPage() {
             draftPayloadMutation.isSuccess
               ? {
                   evidenceRecordId: record.id,
-                  lifecycleState: record.lifecycle_state
+                  lifecycleState: record.lifecycle_state,
+                  payloadChecksum: record.payload_checksum
                 }
               : null
           }
@@ -668,7 +710,10 @@ function TrainingEvidenceContextBanner({
           ["Session Dates", trainingSessionDateRange(session)],
           ["Client Sponsorship", enrollment.client?.organization_name ?? "OGI Direct / Independent"],
           ["Facility", facility?.facility_name ?? "None"],
-          ["Instructor", "Not specified"]
+          [
+            "Primary Instructor",
+            session?.instructor_staff_member?.full_name ?? "Not specified"
+          ]
         ]}
       />
     </Surface>
@@ -718,10 +763,15 @@ function RecordIdentityPanel({
         entries={[
           ["Client ID", record.client_id ?? "OGI Direct / Independent"],
           ["Facility ID", record.facility_id ?? "No facility context"],
-          ["Submitted at", record.submitted_at],
+          [record.lifecycle_state === "REPLACED" ? "Replaced record timestamp" : "Submitted at", record.submitted_at],
           ["Template version", record.template_provenance.template_version]
         ]}
       />
+      {record.lifecycle_state === "REPLACED" ? (
+        <p className="rounded-component border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
+          Historical record only. This record was replaced by a newer F-022 draft and cannot satisfy the active Training journey.
+        </p>
+      ) : null}
     </Surface>
   );
 }
@@ -882,7 +932,11 @@ function WorkflowActions({
               disabled={isPending}
               key={`${transition.from}:${transition.trigger}:${transition.to}`}
               onClick={() => onTransition(transition)}
-              variant="secondary"
+              variant={
+                transition.trigger === "FINALIZE_DRAFT" || /submit/i.test(transition.trigger)
+                  ? "primary"
+                  : "secondary"
+              }
             >
               {isPending ? "Updating..." : displayWorkflowActionLabel(transition)}
             </Button>
@@ -1655,17 +1709,44 @@ function markTrainingAssessmentNumberReadonly(
   return {
     ...definition,
     sections: definition.sections.map((section) => {
-      if (section.section_code !== trainingAssessmentInformationSectionCode) {
+      const hasDerivedFields = section.fields.some((field) =>
+        trainingAssessmentDerivedFieldCodes.has(field.field_code)
+      );
+      const calculatedSection = trainingAssessmentCalculatedSectionsByTemplate
+        .get(record.template_provenance.template_code)
+        ?.has(section.section_code);
+      const skillsRatingSection =
+        record.template_provenance.template_code ===
+          "OGI_F023_OPERATIONAL_SKILLS_ASSESSMENT" &&
+        section.fields.some((field) => /^SCORE(?:_\d+)?$/.test(field.field_code));
+      const f025ImportedFields =
+        record.template_provenance.template_code ===
+          "OGI_F025_OPERATIONAL_READINESS_EVALUATION" &&
+        f025ImportedFieldsBySection.get(section.section_code);
+      if (!hasDerivedFields && !calculatedSection && !skillsRatingSection && !f025ImportedFields) {
         return section;
       }
 
       return {
         ...section,
-        fields: section.fields.map((field) =>
-          field.field_code === trainingAssessmentNumberFieldCode
+        fields: section.fields.map((field) => {
+          if (
+            record.template_provenance.template_code ===
+              "OGI_F023_OPERATIONAL_SKILLS_ASSESSMENT" &&
+            !calculatedSection &&
+            /^SCORE(?:_\d+)?$/.test(field.field_code)
+          ) {
+            return {
+              ...field,
+              validation: { ...field.validation, minimum: 0, maximum: 100 }
+            };
+          }
+          return calculatedSection ||
+            (f025ImportedFields && f025ImportedFields.has(field.field_code)) ||
+            trainingAssessmentDerivedFieldCodes.has(field.field_code)
             ? { ...field, readonly: true }
-            : field
-        )
+            : field;
+        })
       };
     })
   };

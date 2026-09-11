@@ -1,6 +1,6 @@
-import { FormEvent, ReactNode, useMemo, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
 import { QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 
 import { routes } from "../app/routePaths";
 import { isApiError } from "../api/errors";
@@ -31,6 +31,7 @@ import {
   confirmCredentialIssuance,
   CredentialIssuanceEvaluationResponse,
   CredentialIssuancePreparationResponse,
+  decideCredentialEvidenceBindingReview,
   evaluateCredentialIssuance,
   getCredentialIssuancePreparation,
   listCredentialIssuancesByCertification,
@@ -146,6 +147,7 @@ const emptyCredentialIssuanceForm: CredentialIssuanceFormState = {
 export function CertificationsPage() {
   const auth = useAuth();
   const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
   const canViewCertifications = auth.canUsePermission(viewCertificationPermission);
   const canViewPersonnel = auth.canUsePermission(viewPersonnelPermission);
   const canCreateDraft = auth.canUsePermission(createDraftPermission);
@@ -215,6 +217,29 @@ export function CertificationsPage() {
   );
   const selectedEntry =
     registryEntries.find((entry) => entry.certificationId === selectedCertificationId) ?? null;
+
+  useEffect(() => {
+    const requestedCertificationId = searchParams.get("certification");
+    if (
+      !requestedCertificationId ||
+      !registryEntries.some((entry) => entry.certificationId === requestedCertificationId)
+    ) return;
+    setSelectedCertificationId(requestedCertificationId);
+    if (searchParams.get("issue") === "1") setCredentialIssuanceMode(true);
+  }, [registryEntries, searchParams]);
+
+  useEffect(() => {
+    if (!selectedEntry || createMode) return;
+
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setSelectedCertificationId(null);
+      }
+    };
+
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [createMode, selectedEntry]);
   const selectedDetailQueryKey = [
     "credentials-personnel",
     selectedEntry?.staffMemberId,
@@ -470,17 +495,17 @@ export function CertificationsPage() {
   return (
     <CertificationWorkspaceFrame>
       <section aria-labelledby="certifications-heading" className="space-y-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="cl-workspace-content-heading flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-primary-blue">
+            <p className="cl-data-label">
               Certifications
             </p>
-            <h1
+            <h2
               className="mt-2 text-2xl font-semibold text-text-primary"
               id="certifications-heading"
             >
               Certification Registry
-            </h1>
+            </h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-text-muted">
               View Personnel-linked Certification records and create governed Certification records without issuing credentials or changing Operational Authorizations.
             </p>
@@ -506,7 +531,7 @@ export function CertificationsPage() {
         ) : credentialsQuery.isError ? (
           <CertificationErrorState error={credentialsQuery.error} />
         ) : (
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(22rem,0.9fr)]">
+          <div className="space-y-4">
             <CertificationRegistry
               entries={registryEntries}
               onSelect={(entry) => {
@@ -536,8 +561,40 @@ export function CertificationsPage() {
                 personnel={personnel}
                 submitting={createMutation.isPending}
               />
-            ) : selectedEntry ? (
-              <CertificationDetailPanel
+            ) : null}
+            {!createMode && selectedEntry ? (
+              <div className="fixed inset-0 z-40">
+                <button
+                  aria-label="Close certificate details"
+                  className="cl-workflow-overlay absolute inset-0 cursor-default backdrop-blur-[2px]"
+                  onClick={() => setSelectedCertificationId(null)}
+                  type="button"
+                />
+                <aside
+                  aria-labelledby="selected-certification-heading"
+                  className="cl-workflow-card absolute inset-y-0 right-0 flex w-full max-w-4xl flex-col overflow-hidden border-l bg-surface"
+                >
+                  <div className="cl-workflow-header sticky top-0 z-10 flex items-center justify-between gap-4 border-b px-5 py-4">
+                    <div>
+                      <p className="cl-data-label">
+                        Selected Certification
+                      </p>
+                      <h2
+                        className="mt-1 text-lg font-semibold text-primary-blue"
+                        id="selected-certification-heading"
+                      >
+                        {selectedEntry.personnelName} · {selectedEntry.label}
+                      </h2>
+                    </div>
+                    <Button
+                      onClick={() => setSelectedCertificationId(null)}
+                      variant="secondary"
+                    >
+                      Close
+                    </Button>
+                  </div>
+                  <div className="cl-workflow-canvas min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
+                    <CertificationDetailPanel
                 authorizationCommandError={authorizationCommandMutation.error}
                 authorizationCommandPending={authorizationCommandMutation.isPending}
                 authorizationGovernanceForm={authorizationGovernanceForm}
@@ -682,16 +739,11 @@ export function CertificationsPage() {
                   }
                 }}
                 recentIssuedCredentialId={recentIssuedCredentialId}
-              />            ) : (
-              <Surface>
-                <h2 className="text-base font-semibold text-text-primary">
-                  Select a Certification
-                </h2>
-                <p className="mt-2 text-sm leading-6 text-text-muted">
-                  Choose a Certification record from the registry to view its Personnel context and read-only detail.
-                </p>
-              </Surface>
-            )}
+                    />
+                  </div>
+                </aside>
+              </div>
+            ) : null}
           </div>
         )}
         {digitalCertificateIssuanceId ? (
@@ -707,10 +759,22 @@ export function CertificationsPage() {
 
 function CertificationWorkspaceFrame({ children }: { children: ReactNode }) {
   return (
-    <div className="space-y-4">
-      <CertificationWorkspaceTabs />
-      {children}
-    </div>
+    <section className="cl-workspace-page" data-testid="certifications-workspace">
+      <header className="cl-workspace-header">
+        <div className="cl-workspace-header-copy">
+          <h1 className="text-2xl font-semibold text-primary-navy">
+            Certification Governance
+          </h1>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-text-muted">
+            Govern Personnel certification records, operational authority, and credential issuance from one authoritative workspace.
+          </p>
+        </div>
+        <div className="cl-workspace-navigation">
+          <CertificationWorkspaceTabs embedded />
+        </div>
+      </header>
+      <div className="cl-workspace-content">{children}</div>
+    </section>
   );
 }
 
@@ -737,56 +801,75 @@ function CertificationRegistry({
   }
 
   return (
-    <Surface>
+    <Surface className="cl-workspace-frame overflow-hidden bg-workspace-canvas p-3 sm:p-4">
       <div className="overflow-x-auto">
-        <table className="min-w-full text-left text-sm">
-          <thead className="border-b border-border text-xs uppercase tracking-wide text-text-muted">
+        <table className="cl-governed-table min-w-[52rem] w-full text-left text-sm">
+          <thead className="text-xs uppercase tracking-label text-text-label">
             <tr>
-              <th className="px-3 py-3 font-semibold" scope="col">
-                Personnel
+              <th className="px-4 pb-1 font-semibold" scope="col">
+                Personnel and client
               </th>
-              <th className="px-3 py-3 font-semibold" scope="col">
-                Certification
+              <th className="px-4 pb-1 font-semibold" scope="col">
+                Qualification
               </th>
-              <th className="px-3 py-3 font-semibold" scope="col">
-                Status
+              <th className="px-4 pb-1 font-semibold" scope="col">
+                Lifecycle
               </th>
-              <th className="px-3 py-3 font-semibold" scope="col">
+              <th className="px-4 pb-1 font-semibold" scope="col">
                 Validity
               </th>
-              <th className="px-3 py-3 font-semibold" scope="col">
-                Detail
+              <th className="px-4 pb-1 text-right font-semibold" scope="col">
+                <span className="sr-only">Actions</span>
               </th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-border">
+          <tbody>
             {entries.map((entry) => (
-              <tr key={entry.certificationId}>
-                <th className="px-3 py-4 align-top font-semibold text-text-primary" scope="row">
-                  <span className="block break-words">{entry.personnelName}</span>
+              <tr
+                aria-selected={selectedCertificationId === entry.certificationId}
+                className="cl-governed-row cursor-pointer"
+                key={entry.certificationId}
+                onClick={() => onSelect(entry)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    onSelect(entry);
+                  }
+                }}
+                tabIndex={0}
+              >
+                <th className="px-4 py-4 align-middle font-semibold text-text-primary" scope="row">
+                  <span className="block break-words text-base">{entry.personnelName}</span>
                   <span className="mt-1 block text-xs font-normal text-text-muted">
                     {entry.clientName}
                   </span>
                 </th>
-                <td className="px-3 py-4 align-top text-text-primary">
-                  {entry.label}
+                <td className="px-4 py-4 align-middle">
+                  <span className="block font-semibold text-primary-blue">{entry.label}</span>
                 </td>
-                <td className="px-3 py-4 align-top">
+                <td className="px-4 py-4 align-middle">
                   <StatusBadge value={entry.status} />
                 </td>
-                <td className="px-3 py-4 align-top text-text-primary">
-                  {formatDate(entry.issueDate)} to {formatDate(entry.expiryDate)}
+                <td className="px-4 py-4 align-middle text-text-primary">
+                  <span className="block font-semibold text-primary-blue">
+                    {formatDate(entry.issueDate)} → {formatDate(entry.expiryDate)}
+                  </span>
+                  <span className="mt-1 block text-xs text-text-muted">Issued → expires</span>
                 </td>
-                <td className="px-3 py-4 align-top">
+                <td className="px-4 py-4 text-right align-middle">
                   <Button
-                    onClick={() => onSelect(entry)}
+                    aria-label="View Certificate Details"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onSelect(entry);
+                    }}
                     variant={
                       selectedCertificationId === entry.certificationId
                         ? "primary"
                         : "secondary"
                     }
                   >
-                    View Certificate Details
+                    Open record
                   </Button>
                 </td>
               </tr>
@@ -938,13 +1021,11 @@ function CertificationDetailPanel({
   );
 
   return (
-    <Surface>
+    <Surface className="cl-record-card pl-6">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-primary-blue">
-            Selected Certification
-          </p>
-          <h2 className="mt-2 text-xl font-semibold text-text-primary">
+          <p className="cl-data-label">Certification record</p>
+          <h2 className="mt-2 text-xl font-semibold text-primary-blue">
             {programLabel(certification)}
           </h2>
           <p className="mt-1 text-sm text-text-muted">{detail.full_name}</p>
@@ -963,11 +1044,11 @@ function CertificationDetailPanel({
         </div>
       </div>
       <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
-        <MetadataItem label="Personnel" value={detail.full_name} />
+        <MetadataItem emphasis label="Personnel" value={detail.full_name} />
         <MetadataItem label="Client" value={detail.client.organization_name} />
-        <MetadataItem label="Certification number" value={certification.certification_number} />
-        <MetadataItem label="Issue date" value={formatDate(certification.issue_date)} />
-        <MetadataItem label="Expiry date" value={formatDate(certification.expiry_date)} />
+        <MetadataItem emphasis label="Certification number" value={certification.certification_number} />
+        <MetadataItem emphasis label="Issue date" value={formatDate(certification.issue_date)} />
+        <MetadataItem emphasis label="Expiry date" value={formatDate(certification.expiry_date)} />
         <MetadataItem label="Medical clearance" value={yesNo(certification.medical_clearance_provided)} />
         <MetadataItem label="Fitness standard" value={yesNo(certification.fitness_standard_achieved)} />
         <MetadataItem
@@ -975,6 +1056,7 @@ function CertificationDetailPanel({
           value={certification.training_hours_completed?.toString() ?? "Not specified"}
         />
         <MetadataItem
+          emphasis
           label="Written exam score"
           value={certification.written_exam_score?.toString() ?? "Not specified"}
         />
@@ -1080,7 +1162,7 @@ function EndorsementsSection({
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h3
-            className="text-base font-semibold text-text-primary"
+            className="text-base font-semibold text-primary-blue"
             id="certification-endorsements-heading"
           >
             Endorsements
@@ -1211,6 +1293,8 @@ function CredentialIssuanceSection({
   const queryClient = useQueryClient();
   const [selectedBindingCandidateId, setSelectedBindingCandidateId] = useState("");
   const [bindingReviewSuccess, setBindingReviewSuccess] = useState<string | null>(null);
+  const [pendingBindingReviewId, setPendingBindingReviewId] = useState<string | null>(null);
+  const [bindingDecisionRationale, setBindingDecisionRationale] = useState("");
   const bindingReviewAction = preparation?.remediation_actions.find(
     (action) => action.action_code === "REQUEST_CREDENTIAL_EVIDENCE_BINDING_REVIEW"
   ) ?? null;
@@ -1228,8 +1312,9 @@ function CredentialIssuanceSection({
         crypto.randomUUID()
       );
     },
-    onSuccess: async () => {
+    onSuccess: async (result) => {
       setSelectedBindingCandidateId("");
+      setPendingBindingReviewId(result.review.id);
       setBindingReviewSuccess("Governed association review requested. Approval remains required before binding is established.");
       await queryClient.invalidateQueries({
         queryKey: ["credential-issuance-preparation", certification.id]
@@ -1238,6 +1323,26 @@ function CredentialIssuanceSection({
     onError: async () => {
       setSelectedBindingCandidateId("");
       setBindingReviewSuccess(null);
+      await queryClient.invalidateQueries({
+        queryKey: ["credential-issuance-preparation", certification.id]
+      });
+    }
+  });
+  const bindingDecisionMutation = useMutation({
+    mutationFn: () => {
+      if (!pendingBindingReviewId || !bindingDecisionRationale.trim()) {
+        throw new Error("A governed association rationale is required.");
+      }
+      return decideCredentialEvidenceBindingReview(
+        pendingBindingReviewId,
+        bindingDecisionRationale.trim(),
+        crypto.randomUUID()
+      );
+    },
+    onSuccess: async () => {
+      setPendingBindingReviewId(null);
+      setBindingDecisionRationale("");
+      setBindingReviewSuccess("F-048 association approved. Credential issuance preparation is now available.");
       await queryClient.invalidateQueries({
         queryKey: ["credential-issuance-preparation", certification.id]
       });
@@ -1268,7 +1373,7 @@ function CredentialIssuanceSection({
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h3
-            className="text-base font-semibold text-text-primary"
+            className="text-base font-semibold text-primary-blue"
             id="credential-issuance-heading"
           >
             Credential Issuances
@@ -1414,8 +1519,22 @@ function CredentialIssuanceSection({
                     </fieldset>
                   )}
                   {bindingReviewSuccess ? <p className="mt-3 text-sm text-text-primary" role="status">{bindingReviewSuccess}</p> : null}
+                  {pendingBindingReviewId ? (
+                    <div className="mt-3 space-y-3 rounded-component border border-blue-200 bg-blue-50/60 p-3">
+                      <p className="text-sm font-semibold text-primary-navy">Complete credential association review</p>
+                      <p className="text-sm text-text-muted">Review {pendingBindingReviewId} is governed separately from the F-048 conclusion. Backend authority and separation policy remain enforced.</p>
+                      <label className="block text-sm font-semibold text-text-primary">
+                        Association approval rationale
+                        <textarea className={`${inputClassName} min-h-24`} onChange={(event) => setBindingDecisionRationale(event.currentTarget.value)} value={bindingDecisionRationale} />
+                      </label>
+                      {bindingDecisionMutation.error ? <CertificationErrorState compact error={bindingDecisionMutation.error} operation="issuance" /> : null}
+                      <Button disabled={!bindingDecisionRationale.trim() || bindingDecisionMutation.isPending} onClick={() => bindingDecisionMutation.mutate()} type="button">
+                        {bindingDecisionMutation.isPending ? "Approving Association" : "Approve F-048 Association"}
+                      </Button>
+                    </div>
+                  ) : null}
                   {bindingReviewMutation.error ? <div className="mt-3"><CertificationErrorState compact error={bindingReviewMutation.error} operation="issuance" /></div> : null}
-                  {bindingReviewAction.action_available && bindingReviewAction.actor_can_act && preparation.evidence_binding_candidates.length > 0 ? (
+                  {!pendingBindingReviewId && bindingReviewAction.action_available && bindingReviewAction.actor_can_act && preparation.evidence_binding_candidates.length > 0 ? (
                     <Button
                       disabled={!selectedBindingCandidate || bindingReviewMutation.isPending}
                       onClick={() => bindingReviewMutation.mutate()}
@@ -1423,9 +1542,9 @@ function CredentialIssuanceSection({
                     >
                       {bindingReviewMutation.isPending ? "Requesting Governance Review" : "Request Governance Review"}
                     </Button>
-                  ) : (
+                  ) : !pendingBindingReviewId ? (
                     <p className="mt-3 text-sm font-semibold text-text-primary">Governance review required.</p>
-                  )}
+                  ) : null}
                 </section>
               ) : null}
               {preparation.preparation_status === "ALREADY_ISSUED" &&
@@ -1555,7 +1674,7 @@ function CredentialIssuanceSection({
             </>
           ) : null}
           {evaluation ? (
-            <section aria-labelledby="credential-evaluation-heading" className="rounded-component border border-blue-200 bg-blue-50/60 px-3 py-3">
+            <section aria-labelledby="credential-evaluation-heading" className="cl-record-metadata rounded-component px-3 py-3">
               <h4 className="text-sm font-semibold text-primary-navy" id="credential-evaluation-heading">Authoritative evaluation</h4>
               <p className="mt-1 text-sm text-text-primary"><strong>Ready for review.</strong> Evaluated by {evaluation.evaluated_by.name}.</p>
               <dl className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
@@ -1807,7 +1926,7 @@ function OperationalAuthorizationSection({
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h3
-            className="text-base font-semibold text-text-primary"
+            className="text-base font-semibold text-primary-blue"
             id="operational-authorization-heading"
           >
             Operational Authorization
@@ -2217,7 +2336,7 @@ function CreateCertificationPanel({
             </select>
           </label>
         </div>
-        <div className="rounded-component border border-blue-200 bg-blue-50 p-3 text-sm text-text-muted">
+        <div className="cl-record-metadata rounded-component p-3 text-sm text-text-muted">
           <span className="font-semibold text-primary-navy">Certification number:</span>{" "}
           Assigned automatically after this Certification is saved.
         </div>
@@ -2475,23 +2594,53 @@ function SafeState({
   );
 }
 
-function MetadataItem({ label, value }: { label: string; value: string }) {
+function MetadataItem({
+  emphasis = false,
+  label,
+  value
+}: {
+  emphasis?: boolean;
+  label: string;
+  value: string;
+}) {
   return (
     <div className="min-w-0">
       <dt className="text-xs font-semibold uppercase tracking-wide text-text-muted">
         {label}
       </dt>
-      <dd className="mt-1 break-words text-text-primary">{value}</dd>
+      <dd
+        className={`mt-1 break-words ${
+          emphasis ? "font-semibold text-primary-blue" : "text-text-primary"
+        }`}
+      >
+        {value}
+      </dd>
     </div>
   );
 }
 
 function StatusBadge({ value }: { value: string }) {
+  const statusClassName = certificationStatusClassName(value);
+
   return (
-    <span className="inline-flex rounded-component border border-border bg-surface px-2 py-1 text-xs font-semibold uppercase tracking-wide text-text-primary">
+    <span className={`inline-flex rounded-component border px-2 py-1 text-xs font-semibold uppercase tracking-wide ${statusClassName}`}>
       {displayCode(value)}
     </span>
   );
+}
+
+function certificationStatusClassName(value: string) {
+  switch (value.toUpperCase()) {
+    case "ACTIVE":
+      return "border-evidence-approved bg-evidence-approved-bg text-evidence-approved";
+    case "PENDING":
+      return "border-evidence-draft bg-evidence-draft-bg text-evidence-draft";
+    case "SUSPENDED":
+    case "REVOKED":
+      return "border-evidence-exception bg-evidence-exception-bg text-evidence-exception";
+    default:
+      return "border-border bg-elevated text-text-muted";
+  }
 }
 
 function programLabel(certification: CredentialsCertificationProjection) {

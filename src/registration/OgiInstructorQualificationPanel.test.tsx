@@ -65,6 +65,32 @@ describe("OGI Personnel instructor qualification", () => {
     expect(screen.getByRole("button", { name: "Record Qualification" })).toBeDisabled();
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
   });
+
+  it("allocates and displays a permanent Instructor Registry Number", async () => {
+    const user = userEvent.setup();
+    const active = certification({ expiry_date: "2099-01-01T00:00:00.000Z" });
+    let allocated = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith(`/certifications/personnel/${personnelId}/instructor-qualifications`)) return response({ certifications: [active] });
+      if (url.endsWith(`/instructor-registry/personnel/${personnelId}`) && init?.method === "POST") {
+        allocated = true;
+        return response(registryIdentity(), 201);
+      }
+      if (url.endsWith(`/instructor-registry/personnel/${personnelId}`)) {
+        return allocated ? response(registryIdentity()) : response({ code: "INSTRUCTOR_REGISTRY_NOT_FOUND", message: "Not found" }, 404);
+      }
+      throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><OgiInstructorQualificationPanel canCreate canIssue canManageRegistry canView canViewRegistry personnelId={personnelId} /></QueryClientProvider>);
+
+    await screen.findByText("No Instructor Registry Number has been allocated. An active L5, L6, or L7 Certification is required.");
+    await user.click(screen.getByRole("button", { name: "Allocate Instructor Registry Number" }));
+    expect(await screen.findByText("OGI-INS-2026-0001")).toBeVisible();
+    expect(within(screen.getByRole("region", { name: "Instructor Registry" })).getByText("ACTIVE")).toBeVisible();
+  });
 });
 
 function renderPanel() {
@@ -92,4 +118,16 @@ function certification(overrides: Record<string, unknown>) {
 
 function response(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+}
+
+function registryIdentity() {
+  return {
+    id: "00000000-0000-4000-8000-000000500099",
+    personnel_id: personnelId,
+    instructor_number: "OGI-INS-2026-0001",
+    initial_entry_year: 2026,
+    status: "ACTIVE",
+    created_by_user_id: "00000000-0000-4000-8000-000000500002",
+    created_at: "2026-09-10T00:00:00.000Z"
+  };
 }

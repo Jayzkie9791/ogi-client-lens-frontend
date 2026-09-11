@@ -145,6 +145,10 @@ export const appRoutes: RouteObject[] = [
             element: lazyRoute(<RegistrationTrainingPage workspace="register" />)
           },
           {
+            path: "workbench/training/journeys",
+            element: lazyRoute(<RegistrationTrainingPage workspace="journeys" />)
+          },
+          {
             path: "workbench/training/trainer-evaluations",
             element: lazyRoute(<TrainerCommercialEvaluationPage />)
           },

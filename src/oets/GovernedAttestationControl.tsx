@@ -205,10 +205,26 @@ export function GovernedAttestationControl({
 
 function AttestationSnapshot({ item }: { item: EvidenceAttestation }) {
   const external = item.signer_mode === "RECORDED_EXTERNAL_ATTESTATION";
+  if (item.status === "CURRENT") {
+    return (
+      <details className="rounded-component border border-teal-300 bg-teal-50 px-3 py-2 text-sm">
+        <summary className="cursor-pointer font-semibold text-teal-900">
+          ✓ <span>Current attestation</span> · {item.subject_name_snapshot} · {new Date(item.signed_at).toLocaleString()}
+        </summary>
+        <div className="mt-2 border-t border-teal-200 pt-2 text-text-primary">
+          <p>{external ? "External signer" : "Authenticated signer"}: {item.subject_name_snapshot}</p>
+          {item.external_subject_role_snapshot ? <p>External role: {item.external_subject_role_snapshot}</p> : null}
+          {external ? <p>Recorded by: {item.actor_display_name_snapshot}</p> : null}
+          <p>Assurance: {displayMode(item.assurance)}</p>
+          <p className="mt-1 break-all text-xs text-text-muted">Attestation ID: {item.id}</p>
+        </div>
+      </details>
+    );
+  }
   return (
     <div className="rounded-component border border-border bg-canvas p-3 text-sm">
       <p className="font-semibold text-text-primary">
-        {item.status === "CURRENT" ? "Current attestation" : "Stale historical attestation"}
+        Stale historical attestation
       </p>
       <p className="mt-1 text-text-primary">
         {external ? "External signer" : "Authenticated signer"}: {item.subject_name_snapshot}

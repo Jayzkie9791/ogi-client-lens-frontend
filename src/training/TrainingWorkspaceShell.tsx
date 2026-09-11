@@ -16,6 +16,7 @@ export function TrainingWorkspaceShell({ children, description, headingId, title
     { label: "Trainees", permission: "view_training", to: routes.trainingTrainees },
     { label: "Training Sessions", permission: "view_training", to: routes.trainingSessions },
     { label: "Register Training", permission: "create_training_enrollment", to: routes.trainingRegister },
+    { label: "Training Journeys", permission: "view_training", to: routes.trainingJourneys },
     { label: "Trainer Evaluations", permission: "record_training_assessment", to: routes.trainerCommercialEvaluations }
   ];
 

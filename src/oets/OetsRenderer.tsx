@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 
 import { Button } from "../ui/components/Button";
@@ -69,6 +70,7 @@ interface OetsRendererProps {
   submitSuccess?: {
     evidenceRecordId: string;
     lifecycleState: string;
+    payloadChecksum?: string;
     recordHref?: string;
   } | null;
   attestations?: readonly EvidenceAttestation[];
@@ -77,6 +79,8 @@ interface OetsRendererProps {
   attestationErrorMessage?: string | null;
   onAttest?: (request: CreateEvidenceAttestationRequest) => Promise<unknown>;
   onDirtyChange?: (dirty: boolean) => void;
+  embedded?: boolean;
+  actionPortalId?: string;
 }
 
 export function OetsRenderer({
@@ -101,10 +105,13 @@ export function OetsRenderer({
   attestationPending = false,
   attestationErrorMessage,
   onAttest,
-  onDirtyChange
+  onDirtyChange,
+  embedded = false,
+  actionPortalId
 }: OetsRendererProps) {
   const diagnosticsEnabled = isOetsDeveloperDiagnosticsEnabled();
   const [dismissedFormMessage, setDismissedFormMessage] = useState<string | null>(null);
+  const [dismissedSuccessChecksum, setDismissedSuccessChecksum] = useState<string | null>(null);
   const [state, setState] = useState(() =>
     initialPayload
       ? createEvidenceStateFromPayload(definition, initialPayload)
@@ -132,10 +139,18 @@ export function OetsRenderer({
       setDismissedFormMessage(null);
     }
   }, [isSubmitting]);
-  // The server payload object changes only after a confirmed save; the current assembled
-  // payload is intentionally captured at that boundary as the new visual signing baseline.
+  // A changed initial payload is the authoritative response from a confirmed save.
+  // Rehydrate the visible form so server-derived/calculated fields are shown immediately.
   useEffect(() => {
-    savedPayloadRef.current = JSON.stringify(payload.sections);
+    if (!initialPayload) return;
+    const authoritativeState = createEvidenceStateFromPayload(definition, initialPayload);
+    const savedSections = JSON.stringify(
+      assembleEvidencePayload(runtimeTemplate, definition, authoritativeState).sections
+    );
+    setState(authoritativeState);
+    setRepeatableCounters(createInitialRepeatableCounters(definition));
+    setExplicitValueKeys(createInitialExplicitValueKeys(definition, initialPayload));
+    savedPayloadRef.current = savedSections;
     onDirtyChange?.(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialPayload]);
@@ -162,9 +177,34 @@ export function OetsRenderer({
       renderedSections
     ]
   );
+  const actionPortalTarget = actionPortalId
+    ? document.getElementById(actionPortalId)
+    : null;
 
   return (
     <div className="space-y-5">
+      {submitSuccess && dismissedSuccessChecksum !== (submitSuccess.payloadChecksum ?? submitSuccess.evidenceRecordId) ? (
+        <div
+          aria-live="polite"
+          className="fixed right-4 top-4 z-[70] w-[min(28rem,calc(100vw-2rem))] rounded-component border border-state-success bg-white p-4 shadow-xl"
+          role="status"
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="font-semibold text-state-success">Draft saved</p>
+              <p className="mt-1 text-sm leading-5 text-text-primary">{submitSuccessMessage}</p>
+            </div>
+            <button
+              aria-label="Dismiss save confirmation"
+              className="rounded-component px-2 py-1 text-lg leading-none text-text-muted hover:bg-elevated hover:text-text-primary"
+              onClick={() => setDismissedSuccessChecksum(submitSuccess.payloadChecksum ?? submitSuccess.evidenceRecordId)}
+              type="button"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      ) : null}
       {formMessage && dismissedFormMessage !== formMessage ? (
         <div
           aria-live="assertive"
@@ -202,14 +242,9 @@ export function OetsRenderer({
       ) : null}
       {/* AppShell's header is document-flow rather than sticky. This OETS-local
           strip therefore uses the viewport top after the shell header scrolls away. */}
-      <Surface className="sticky top-0 z-20 flex flex-col gap-3 border-l-4 border-l-accent-red bg-gradient-to-r from-blue-50/95 to-white/95 p-3 shadow-[0_2px_8px_rgba(15,45,95,0.08)] backdrop-blur-sm lg:flex-row lg:items-center lg:justify-between" data-testid="oets-action-strip">
+      {!embedded ? <Surface className="sticky top-0 z-20 flex flex-col gap-3 border-l-4 border-l-accent-red bg-gradient-to-r from-blue-50/95 to-white/95 p-3 shadow-[0_2px_8px_rgba(15,45,95,0.08)] backdrop-blur-sm lg:flex-row lg:items-center lg:justify-between" data-testid="oets-action-strip">
           <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
-              Audit Template
-            </p>
-            <h1 className="text-xl font-semibold text-primary-navy sm:text-2xl">
-              {definition.template_metadata.template_name}
-            </h1>
+            <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">Audit Template</p><h1 className="text-xl font-semibold text-primary-navy sm:text-2xl">{definition.template_metadata.template_name}</h1>
             <p className="text-sm text-text-muted">
               {runtimeTemplate.template_code} · Version{" "}
               {runtimeTemplate.template_version}
@@ -235,7 +270,21 @@ export function OetsRenderer({
           </>
         ) : null}
         </div>
-      </Surface>
+      </Surface> : null}
+
+      {embedded && actionPortalTarget
+        ? createPortal(
+            !readOnly && onSubmit ? (
+              <Button
+                disabled={isSubmitting || Boolean(submitDisabledReason)}
+                onClick={() => onSubmit(payload)}
+              >
+                {isSubmitting ? submittingLabel : submitLabel}
+              </Button>
+            ) : null,
+            actionPortalTarget
+          )
+        : null}
 
       <div className="space-y-3" data-testid="oets-flow-messages">
         {submitSuccess ? (
@@ -276,11 +325,9 @@ export function OetsRenderer({
         ) : null}
       </div>
 
-      <div className="space-y-4 lg:grid lg:grid-cols-[minmax(0,1fr)_17rem] lg:items-start lg:gap-5 lg:space-y-0" data-testid="oets-workspace">
-        <div className="lg:sticky lg:top-[7.5rem] lg:col-start-2 lg:row-start-1 lg:pt-4" data-testid="oets-progress-column">
-          <OetsProgressNavigator model={progressModel} />
-        </div>
-        <div className="space-y-5 rounded-panel bg-[#EEF3F9] p-3 sm:p-4 lg:col-start-1 lg:row-start-1 lg:px-6" data-testid="oets-section-stack">
+      <div className={embedded ? "space-y-3" : "space-y-4 lg:grid lg:grid-cols-[minmax(0,1fr)_17rem] lg:items-start lg:gap-5 lg:space-y-0"} data-testid="oets-workspace">
+        {!embedded ? <div className="lg:sticky lg:top-[7.5rem] lg:col-start-2 lg:row-start-1 lg:pt-4" data-testid="oets-progress-column"><OetsProgressNavigator model={progressModel} /></div> : null}
+        <div className={`space-y-5 rounded-panel bg-[#EEF3F9] p-3 sm:p-4 ${embedded ? "" : "lg:col-start-1 lg:row-start-1 lg:px-6"}`} data-testid="oets-section-stack">
       {renderedSections.map(({ domId, section, sourceSection, sectionState, sectionValues }) => {
         if (section.repeatable) {
           return (
@@ -474,7 +521,7 @@ function OetsSectionCard({
       <div className="bg-white p-5">
       {developerDiagnostics ? <ValidationMessages messages={validation?.sectionMessages[section.section_code]} /> : null}
       <div className="grid gap-x-6 gap-y-6 md:grid-cols-2">
-        {orderedFields(section.fields).map((field) => (
+        {renderableFields(section.fields).map((field) => (
           <OetsFieldControl
             attestationContext={attestationContext}
             attestationErrorMessage={attestationErrorMessage}
@@ -488,7 +535,7 @@ function OetsSectionCard({
             field={field}
             key={field.field_id}
             onChange={(value) => onValueChange(field.field_code, value)}
-            readOnly={readOnly || field.readonly}
+            readOnly={readOnly || (field.field_type !== "SIGNATURE" && field.readonly)}
             sectionInstanceIndex={null}
             value={values[field.field_code]}
             onAttest={onAttest}
@@ -567,7 +614,7 @@ function RepeatableSection({
               </Button>
             </div>
             <div className="grid gap-x-6 gap-y-6 md:grid-cols-2">
-              {orderedFields(section.fields).map((field) => (
+              {renderableFields(section.fields).map((field) => (
                 <OetsFieldControl
                   attestationContext={attestationContext}
                   attestationErrorMessage={attestationErrorMessage}
@@ -583,7 +630,7 @@ function RepeatableSection({
                       fieldErrorKey(section.section_code, field.field_code, index)
                     ]
                   }
-                  readOnly={readOnly || field.readonly}
+                  readOnly={readOnly || (field.field_type !== "SIGNATURE" && field.readonly)}
                   sectionInstanceIndex={index}
                   value={instance.values[field.field_code]}
                   onAttest={onAttest}
@@ -603,7 +650,7 @@ function visibleSectionFields(
   values: Record<string, OetsFieldValue>,
   fieldVisibilityPolicy: OetsFieldVisibilityPolicy | undefined
 ) {
-  const fields = orderedFields(section.fields);
+  const fields = renderableFields(section.fields);
 
   if (!fieldVisibilityPolicy) {
     return fields;
@@ -954,6 +1001,17 @@ function createInitialRepeatableCounters(
       .filter((section) => section.repeatable)
       .map((section) => [section.section_code, 1])
   );
+}
+
+function renderableFields(fields: OetsField[]) {
+  return [...fields]
+    .filter(
+      (field) =>
+        field.visible ||
+        (field.field_type === "SIGNATURE" &&
+          Boolean(field.metadata?.governed_attestation))
+    )
+    .sort((left, right) => left.sequence - right.sequence);
 }
 
 interface RenderedSectionProjection {

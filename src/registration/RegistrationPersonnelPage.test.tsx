@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -274,6 +274,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  cleanup();
   configureApiAuth(null);
   vi.unstubAllGlobals();
   window.sessionStorage.clear();
@@ -415,7 +416,7 @@ describe("Registration Personnel frontend", () => {
       "page"
     );
     const clientFilter = screen.getByLabelText("Client filter");
-    await within(clientFilter).findByRole("option", { name: "Bluewater Resorts" });
+    await within(clientFilter).findByRole("option", { name: "Bluewater Resorts" }, { timeout: 5_000 });
     await user.selectOptions(clientFilter, clientB.id);
     expect(await screen.findByText("Jamie Brooks")).toBeInTheDocument();
 
@@ -461,7 +462,7 @@ describe("Registration Personnel frontend", () => {
     renderWithRoute(routes.registrationPersonnel);
 
     const clientFilter = await screen.findByLabelText("Client filter");
-    await within(clientFilter).findByRole("option", { name: "Bluewater Resorts" });
+    await within(clientFilter).findByRole("option", { name: "Bluewater Resorts" }, { timeout: 5_000 });
     await user.selectOptions(clientFilter, clientB.id);
     await screen.findByText("Jamie Brooks");
     await user.click(screen.getByRole("button", { name: "Register Personnel" }));

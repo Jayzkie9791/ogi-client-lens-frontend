@@ -28,6 +28,9 @@ export const routes = {
   trainingTrainees: "/workbench/training/trainees",
   trainingSessions: "/workbench/training/sessions",
   trainingRegister: "/workbench/training/register",
+  trainingJourneys: "/workbench/training/journeys",
+  trainingJourneyPath: (enrollmentId: string) =>
+    `/workbench/training/journeys?enrollment=${encodeURIComponent(enrollmentId)}`,
   trainerCommercialEvaluations: "/workbench/training/trainer-evaluations",
   certifications: "/workbench/certifications",
   credentials: "/workbench/credentials",
