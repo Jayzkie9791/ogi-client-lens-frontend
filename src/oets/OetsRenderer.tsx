@@ -16,6 +16,10 @@ import {
 } from "./evidenceState";
 import { isSupportedOetsFieldType } from "./definitionGuards";
 import { isOetsDeveloperDiagnosticsEnabled } from "./developerDiagnostics";
+import {
+  evidenceSectionGuidance,
+  formatEvidenceSectionTitle,
+} from "./evidencePresentation";
 import { CreateEvidenceAttestationRequest, EvidenceAttestation } from "./attestationApi";
 import { OetsProgressNavigator } from "./OetsProgressNavigator";
 import {
@@ -190,13 +194,13 @@ export function OetsRenderer({
           role="status"
         >
           <div className="flex items-start justify-between gap-4">
-            <div>
+            <div className="min-w-0 flex-1">
               <p className="font-semibold text-state-success">Draft saved</p>
-              <p className="mt-1 text-sm leading-5 text-text-primary">{submitSuccessMessage}</p>
+              <p className="mt-1 break-words text-sm leading-5 text-text-primary [overflow-wrap:anywhere]">{submitSuccessMessage}</p>
             </div>
             <button
               aria-label="Dismiss save confirmation"
-              className="rounded-component px-2 py-1 text-lg leading-none text-text-muted hover:bg-elevated hover:text-text-primary"
+              className="shrink-0 rounded-component px-2 py-1 text-lg leading-none text-text-muted hover:bg-elevated hover:text-text-primary"
               onClick={() => setDismissedSuccessChecksum(submitSuccess.payloadChecksum ?? submitSuccess.evidenceRecordId)}
               type="button"
             >
@@ -212,13 +216,13 @@ export function OetsRenderer({
           role="alert"
         >
           <div className="flex items-start justify-between gap-4">
-            <div>
+            <div className="min-w-0 flex-1">
               <p className="font-semibold text-state-error">Draft could not be saved</p>
-              <p className="mt-1 text-sm leading-5 text-text-primary">{formMessage}</p>
+              <p className="mt-1 break-words text-sm leading-5 text-text-primary [overflow-wrap:anywhere]">{formMessage}</p>
             </div>
             <button
               aria-label="Dismiss save error"
-              className="rounded-component px-2 py-1 text-lg leading-none text-text-muted hover:bg-elevated hover:text-text-primary"
+              className="shrink-0 rounded-component px-2 py-1 text-lg leading-none text-text-muted hover:bg-elevated hover:text-text-primary"
               onClick={() => setDismissedFormMessage(formMessage)}
               type="button"
             >
@@ -535,9 +539,11 @@ function OetsSectionCard({
             field={field}
             key={field.field_id}
             onChange={(value) => onValueChange(field.field_code, value)}
-            readOnly={readOnly || (field.field_type !== "SIGNATURE" && field.readonly)}
+            readOnly={field.field_type === "SIGNATURE"
+              ? readOnly && !onAttest
+              : readOnly || field.readonly || isGovernedAttestationProjection(field)}
             sectionInstanceIndex={null}
-            value={values[field.field_code]}
+            value={projectGovernedAttestationValue(field, values[field.field_code], attestations, null)}
             onAttest={onAttest}
             developerDiagnostics={developerDiagnostics}
           />
@@ -630,9 +636,11 @@ function RepeatableSection({
                       fieldErrorKey(section.section_code, field.field_code, index)
                     ]
                   }
-                  readOnly={readOnly || (field.field_type !== "SIGNATURE" && field.readonly)}
+                  readOnly={field.field_type === "SIGNATURE"
+                    ? readOnly && !onAttest
+                    : readOnly || field.readonly || isGovernedAttestationProjection(field)}
                   sectionInstanceIndex={index}
-                  value={instance.values[field.field_code]}
+                  value={projectGovernedAttestationValue(field, instance.values[field.field_code], attestations, index)}
                   onAttest={onAttest}
                   developerDiagnostics={developerDiagnostics}
                 />
@@ -666,14 +674,24 @@ function visibleSectionFields(
 }
 
 function SectionHeader({ section }: { section: Section }) {
+  const guidance = evidenceSectionGuidance(section.section_code);
   return (
     <div className="relative flex-1 border-b border-blue-100 bg-blue-50 px-5 py-4 before:absolute before:inset-y-0 before:left-0 before:w-1 before:bg-accent-red">
       <p className="text-xs font-semibold uppercase tracking-wide text-primary-blue">
         Section {section.sequence}
       </p>
-      <h2 className="mt-1 text-xl font-semibold text-primary-navy">{section.title}</h2>
+      <h2 className="mt-1 text-xl font-semibold text-primary-navy">
+        {formatEvidenceSectionTitle(section.title)}
+      </h2>
       {section.description ? (
-        <p className="mt-1 text-sm text-text-muted">{section.description}</p>
+        <p className="mt-1 text-sm text-text-muted">
+          {formatEvidenceSectionTitle(section.description)}
+        </p>
+      ) : null}
+      {guidance ? (
+        <p className="mt-3 rounded-component border border-blue-200 bg-white px-3 py-2 text-sm font-medium text-primary-navy">
+          {guidance}
+        </p>
       ) : null}
     </div>
   );
@@ -914,12 +932,12 @@ function renderMultiSelect(
   const selectedValues = Array.isArray(value) ? value : [];
 
   return (
-    <fieldset aria-labelledby={`${id}-label`} className="grid gap-2 rounded-component border border-border bg-blue-50/40 p-3 sm:grid-cols-2" id={id}>
+    <fieldset aria-labelledby={`${id}-label`} className="grid gap-2 rounded-component border-2 border-[#9db3ca] bg-[#f3f7fc] p-3 shadow-sm sm:grid-cols-2" id={id}>
       <legend className="sr-only" id={`${id}-label`}>{field.label}</legend>
       {orderedOptions(field).map((option) => {
         const checked = selectedValues.includes(option.value);
         return (
-          <label className="flex min-h-10 cursor-pointer items-center gap-3 rounded-component border border-transparent bg-white px-3 py-2 text-sm text-text-primary transition hover:border-blue-200 hover:bg-blue-50 has-[:focus-visible]:border-focus has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-focus has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60" key={option.value}>
+          <label className="flex min-h-10 cursor-pointer items-center gap-3 rounded-component border border-[#c2d0df] bg-white px-3 py-2 text-sm text-text-primary shadow-sm transition hover:border-primary-blue hover:bg-blue-50 has-[:focus-visible]:border-focus has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-focus has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60" key={option.value}>
             <input
               checked={checked}
               className="h-4 w-4 rounded border-border text-primary-blue focus:ring-focus"
@@ -947,22 +965,32 @@ function renderRadioGroup(
   }
 
   return (
-    <span className="flex flex-wrap gap-x-6 gap-y-3 rounded-component border border-transparent bg-blue-50/30 p-3">
-      {orderedOptions(field).map((option) => (
-        <label
-          className="inline-flex min-h-9 cursor-pointer items-center gap-3 rounded-component px-2 text-sm font-normal text-text-primary hover:bg-blue-50 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60"
-          key={option.value}
-        >
-          <input
-            checked={value === option.value}
-            disabled={readOnly}
-            name={id}
-            onChange={() => onChange(option.value)}
-            type="radio"
-          />
-          {option.label}
-        </label>
-      ))}
+    <span className="flex flex-wrap gap-2 rounded-component border border-[#c2d0df] bg-[#f3f7fc] p-3">
+      {orderedOptions(field).map((option) => {
+        const checked = value === option.value;
+        return (
+          <label
+            className={`inline-flex min-h-9 items-center gap-3 rounded-component border px-3 text-sm transition ${
+              checked
+                ? "border-primary-blue bg-blue-50 font-semibold text-primary-navy shadow-sm"
+                : readOnly
+                  ? "cursor-not-allowed border-transparent text-text-muted opacity-55"
+                  : "cursor-pointer border-transparent font-normal text-text-primary hover:border-[#c2d0df] hover:bg-white"
+            }`}
+            key={option.value}
+          >
+            <input
+              checked={checked}
+              className="h-4 w-4 accent-primary-blue"
+              disabled={readOnly}
+              name={id}
+              onChange={() => onChange(option.value)}
+              type="radio"
+            />
+            {option.label}
+          </label>
+        );
+      })}
     </span>
   );
 }
@@ -991,7 +1019,7 @@ function orderedOptions(field: OetsField) {
 }
 
 const inputClassName =
-  "min-h-11 w-full rounded-component border border-blue-200 bg-blue-50/30 px-3 py-2 text-sm text-text-primary outline-none transition hover:border-primary-blue focus:border-focus focus:bg-white focus:ring-2 focus:ring-focus disabled:cursor-not-allowed disabled:border-border disabled:bg-elevated disabled:text-text-muted";
+  "min-h-11 w-full rounded-component border-2 border-[#8faac8] bg-[#fbfdff] px-3 py-2 text-sm text-text-primary shadow-sm outline-none transition hover:border-primary-blue hover:bg-white focus:border-focus focus:bg-white focus:ring-2 focus:ring-focus disabled:cursor-not-allowed disabled:border-[#b8c8da] disabled:bg-elevated disabled:text-text-muted disabled:shadow-none";
 
 function createInitialRepeatableCounters(
   definition: OetsDefinition
@@ -1001,6 +1029,41 @@ function createInitialRepeatableCounters(
       .filter((section) => section.repeatable)
       .map((section) => [section.section_code, 1])
   );
+}
+
+function projectGovernedAttestationValue(
+  field: OetsField,
+  fallback: OetsFieldValue | undefined,
+  attestations: readonly EvidenceAttestation[],
+  sectionInstanceIndex: number | null
+) {
+  const projection = readGovernedAttestationProjection(field);
+  if (!projection) return fallback;
+  const current = attestations.find(
+    (item) => item.status === "CURRENT" &&
+      item.signature_field_id === projection.sourceSignatureFieldId &&
+      item.section_instance_index === sectionInstanceIndex
+  );
+  if (!current) return null;
+  return projection.value === "SUBJECT_NAME"
+    ? current.subject_name_snapshot
+    : current.signed_at.slice(0, 10);
+}
+
+function isGovernedAttestationProjection(field: OetsField) {
+  return readGovernedAttestationProjection(field) !== null;
+}
+
+function readGovernedAttestationProjection(field: OetsField): {
+  sourceSignatureFieldId: string;
+  value: "SUBJECT_NAME" | "SIGNED_AT_DATE";
+} | null {
+  const projection = field.metadata?.governed_attestation_projection;
+  if (!projection || typeof projection !== "object" || Array.isArray(projection)) return null;
+  const sourceSignatureFieldId = (projection as Record<string, unknown>).source_signature_field_id;
+  const value = (projection as Record<string, unknown>).value;
+  if (typeof sourceSignatureFieldId !== "string" || (value !== "SUBJECT_NAME" && value !== "SIGNED_AT_DATE")) return null;
+  return { sourceSignatureFieldId, value };
 }
 
 function renderableFields(fields: OetsField[]) {

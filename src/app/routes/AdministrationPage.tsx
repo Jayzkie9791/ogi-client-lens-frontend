@@ -1,3 +1,4 @@
+import { ReactNode } from "react";
 import { useQuery, UseQueryResult } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
@@ -11,6 +12,8 @@ import { routes } from "../routePaths";
 import { useAuth } from "../../auth/useAuth";
 import { Button } from "../../ui/components/Button";
 import { Surface } from "../../ui/components/Surface";
+import { WorkspaceShell } from "../../ui/components/WorkspaceShell";
+import { RegistrationStatusBadge } from "../../registration/RegistrationWorkspaceUi";
 
 const viewUsersPermission = "view_users";
 const createUserPermission = "create_user";
@@ -35,44 +38,18 @@ export function AdministrationPage() {
   }
 
   return (
-    <section aria-labelledby="administration-users-heading" className="space-y-4">
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-wide text-primary-blue">
-          Administration
-        </p>
-        <h1
-          className="mt-2 text-2xl font-semibold text-text-primary"
-          id="administration-users-heading"
-        >
-          Administration
-        </h1>
-        <p className="mt-2 max-w-3xl text-sm leading-6 text-text-muted">
-          Use only the administrative capabilities available through your current server-authorized session.
-        </p>
-      </div>
-
-      {canProvisionClientPoc ? <ClientPocProvisioningAction /> : null}
-
+    <WorkspaceShell
+      description="Use the administrative capabilities available through your current server-authorized session."
+      headerActions={canProvisionClientPoc ? <Button asChild><Link to={routes.administrationClientPocs}>Provision Client POC</Link></Button> : null}
+      headingId="administration-users-heading"
+      navigation={null}
+      sectionDescription="Review the user accounts visible to your administrative authority."
+      sectionTitle="Authorized users"
+      showSectionHeader={false}
+      title="Administration"
+    >
       {canViewUsers ? <AuthorizedUsersPanel usersQuery={usersQuery} /> : null}
-    </section>
-  );
-}
-
-function ClientPocProvisioningAction() {
-  return (
-    <Surface className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-      <div>
-        <h2 className="text-base font-semibold text-text-primary">
-          Provision Client POC
-        </h2>
-        <p className="mt-2 max-w-2xl text-sm leading-6 text-text-muted">
-          Create one Client point-of-contact account through the purpose-built server-owned provisioning workflow.
-        </p>
-      </div>
-      <Button asChild>
-        <Link to={routes.administrationClientPocs}>Provision Client POC</Link>
-      </Button>
-    </Surface>
+    </WorkspaceShell>
   );
 }
 
@@ -117,19 +94,19 @@ function AuthorizedUsersPanel({
 
 function UserSummaryCard({ user }: { user: AdministrationUserSummary }) {
   return (
-    <Surface className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-      <div className="min-w-0">
-        <h2 className="text-lg font-semibold text-text-primary">
-          {user.full_name}
-        </h2>
-        <p className="mt-1 break-words text-sm text-text-muted">{userIdentityLabel(user)}</p>
+    <article className="cl-record-card rounded-component border pl-1">
+      <div className="cl-record-identity grid min-h-24 gap-4 px-5 py-4 sm:grid-cols-[minmax(0,2fr)_minmax(8rem,0.65fr)_minmax(12rem,0.85fr)] sm:items-center">
+        <div className="min-w-0 self-center">
+          <p className="text-xs font-bold uppercase tracking-wide text-primary-blue">User account</p>
+          <h2 className="mt-1 text-lg font-semibold text-text-primary">
+            {user.full_name}
+          </h2>
+          <p className="mt-1 break-words text-sm text-text-muted">{userIdentityLabel(user)}</p>
+        </div>
+        <MetadataItem label="Status" value={<RegistrationStatusBadge value={user.status} />} />
+        <MetadataItem label="Created" value={formatAdministrationDateTime(user.created_at)} />
       </div>
-      <dl className="grid gap-3 text-sm text-text-muted sm:grid-cols-2 lg:min-w-[32rem] lg:grid-cols-3">
-        <MetadataItem label="Status" value={user.status} />
-        <MetadataItem label="Created" value={user.created_at} />
-        <MetadataItem label="User ID" lowEmphasis value={user.id} />
-      </dl>
-    </Surface>
+    </article>
   );
 }
 
@@ -138,30 +115,27 @@ function userIdentityLabel(user: AdministrationUserSummary) {
 }
 function MetadataItem({
   label,
-  lowEmphasis = false,
   value
 }: {
   label: string;
-  lowEmphasis?: boolean;
-  value: string;
+  value: ReactNode;
 }) {
   return (
     <div className="min-w-0">
-      <dt className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+      <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
         {label}
-      </dt>
-      <dd
-        className={[
-          "mt-1 break-words text-text-primary",
-          lowEmphasis ? "text-xs text-text-muted" : ""
-        ]
-          .filter(Boolean)
-          .join(" ")}
-      >
+      </p>
+      <div className="mt-1.5 break-words font-medium text-text-primary">
         {value}
-      </dd>
+      </div>
     </div>
   );
+}
+
+function formatAdministrationDateTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Date unavailable";
+  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
 
 function UsersErrorState({ error }: { error: Error }) {

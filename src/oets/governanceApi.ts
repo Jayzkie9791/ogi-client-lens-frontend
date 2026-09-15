@@ -50,6 +50,37 @@ export interface GovernanceQueueFilter {
   claim_status?: GovernanceQueueClaimFilter;
 }
 
+export type EvidenceRecordActionCode =
+  | "UPDATE_DRAFT" | "DISCARD_DRAFT" | "ATTEST" | "TRANSITION"
+  | "CREATE_CORRECTION_DRAFT" | "CONTINUE_CORRECTION_DRAFT"
+  | "CREATE_REVISION_DRAFT" | "CONTINUE_REVISION_DRAFT"
+  | "CLAIM_REVIEW" | "RELEASE_REVIEW" | "SUBMIT_REVIEW_CONCLUSION"
+  | "WAIT_FOR_REVIEWER";
+
+export interface EvidenceRecordActionProjectionItem {
+  action: EvidenceRecordActionCode;
+  transition_trigger: string | null;
+  target_state: string | null;
+  governance_authority_code: string | null;
+  review_claim: GovernanceReviewClaim | null;
+  claimed_by_name: string | null;
+}
+
+export interface EvidenceRecordActionProjection {
+  projection_version: "EVIDENCE_RECORD_ACTIONS_V1";
+  evidence_record_id: string;
+  lifecycle_state: string;
+  revision: string;
+  actions: EvidenceRecordActionProjectionItem[];
+}
+
+export function getEvidenceRecordActionProjection(evidenceRecordId: string) {
+  return apiRequest<EvidenceRecordActionProjection>(
+    `/api/v1/operational-evidence/records/${encodeURIComponent(evidenceRecordId)}/actions`,
+    { validate: isEvidenceRecordActionProjection }
+  );
+}
+
 export interface ClaimGovernanceReviewRequest {
   evidence_record_id: string;
   governance_authority_code: string;
@@ -121,6 +152,21 @@ export function transitionClaimedGovernanceReview(
       validate: isOperationalEvidenceRecord
     }
   );
+}
+
+function isEvidenceRecordActionProjection(value: unknown): value is EvidenceRecordActionProjection {
+  return isRecord(value) && value.projection_version === "EVIDENCE_RECORD_ACTIONS_V1" &&
+    typeof value.evidence_record_id === "string" && typeof value.lifecycle_state === "string" &&
+    typeof value.revision === "string" && Array.isArray(value.actions) &&
+    value.actions.every(isEvidenceRecordActionProjectionItem);
+}
+
+function isEvidenceRecordActionProjectionItem(value: unknown): value is EvidenceRecordActionProjectionItem {
+  const codes: EvidenceRecordActionCode[] = ["UPDATE_DRAFT", "DISCARD_DRAFT", "ATTEST", "TRANSITION", "CREATE_CORRECTION_DRAFT", "CONTINUE_CORRECTION_DRAFT", "CREATE_REVISION_DRAFT", "CONTINUE_REVISION_DRAFT", "CLAIM_REVIEW", "RELEASE_REVIEW", "SUBMIT_REVIEW_CONCLUSION", "WAIT_FOR_REVIEWER"];
+  return isRecord(value) && codes.includes(value.action as EvidenceRecordActionCode) &&
+    nullableString(value.transition_trigger) && nullableString(value.target_state) &&
+    nullableString(value.governance_authority_code) && nullableString(value.claimed_by_name) &&
+    (value.review_claim === null || isGovernanceReviewClaim(value.review_claim));
 }
 
 function isGovernanceQueueItems(value: unknown): value is GovernanceQueueItem[] {

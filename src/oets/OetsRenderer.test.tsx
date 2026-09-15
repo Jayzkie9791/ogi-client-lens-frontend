@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { readFile } from "node:fs/promises";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { act } from "react";
+import { act, type ComponentProps, useState } from "react";
 import {
   createMemoryRouter,
   MemoryRouter,
@@ -28,6 +28,7 @@ import { OetsRenderer } from "./OetsRenderer";
 import { OperationalEvidenceRecordPage } from "./OperationalEvidenceRecordPage";
 import { transitionClaimedGovernanceReviewWithConclusion } from "./reviewConclusionApi";
 import { RuntimeTemplatePage } from "./RuntimeTemplatePage";
+import type { EvidenceAttestation } from "./attestationApi";
 import { OetsDefinition, OetsEvidencePayload, OetsTemplateRuntimeDefinition } from "./types";
 
 const testClientId = "00000000-0000-4000-8000-000000000101";
@@ -77,11 +78,13 @@ function createTestQueryClient() {
 function renderRuntimeTemplatePageWithSession({
   initialPath,
   queryClient,
-  currentSession
+  currentSession,
+  runtimeProps
 }: {
   initialPath: string;
   queryClient: QueryClient;
   currentSession: typeof session;
+  runtimeProps?: ComponentProps<typeof RuntimeTemplatePage>;
 }) {
   function element(nextSession: typeof session) {
     return (
@@ -90,7 +93,7 @@ function renderRuntimeTemplatePageWithSession({
           <MemoryRouter initialEntries={[initialPath]}>
             <Routes>
             <Route
-              element={<RuntimeTemplatePage />}
+              element={<RuntimeTemplatePage {...runtimeProps} />}
               path="/workbench/oets/:templateCode"
             />
             <Route
@@ -130,8 +133,15 @@ function authContextValue(currentSession: typeof session): AuthContextValue {
 
 function mockFetchQueue(responses: MockResponse[]) {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
+  let lastEvidenceRecord: ReturnType<typeof evidenceRecord> | null = null;
+  let lastTemplateDefinition: OetsDefinition | null = null;
+  const takeResponse = (predicate: (response: MockResponse) => boolean) => {
+    const index = responses.findIndex(predicate);
+    return index >= 0 ? responses.splice(index, 1)[0] : undefined;
+  };
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = readRequestPath(input);
+    const method = init?.method ?? "GET";
 
     calls.push({
       url,
@@ -142,14 +152,85 @@ function mockFetchQueue(responses: MockResponse[]) {
       return jsonResponse(200, {
         required: false,
         requirement_code: null,
-        selection_mode: null
+        selection_mode: null,
+        presentation: null,
+        duplicate_policy: null,
+        successor_policy: null
       });
     }
 
-    const next = responses.shift();
+    if (url.endsWith("/actions")) {
+      const projected = takeResponse((response) =>
+        (response.body as { projection_version?: string } | undefined)?.projection_version === "EVIDENCE_RECORD_ACTIONS_V1"
+      );
+      if (projected) return jsonResponse(projected.status, projected.body);
+      const template = responses.find((response) =>
+        Boolean((response.body as { definition_jsonb?: unknown } | undefined)?.definition_jsonb)
+      )?.body as { definition_jsonb?: OetsDefinition } | undefined;
+      const lifecycleState = lastEvidenceRecord?.lifecycle_state ?? "DRAFT";
+      const definition = template?.definition_jsonb ?? lastTemplateDefinition;
+      const workflowTransitions = definition?.workflow?.transitions;
+      const transitions = Array.isArray(workflowTransitions)
+        ? (workflowTransitions as Array<{ from: string; to: string; trigger: string }>)
+          .filter((transition) => transition.from === lifecycleState)
+        : [];
+      return jsonResponse(200, {
+        projection_version: "EVIDENCE_RECORD_ACTIONS_V1",
+        evidence_record_id: "evidence-record-1",
+        lifecycle_state: lifecycleState,
+        revision: "test:derived-actions",
+        actions: [
+          ...(lifecycleState === "DRAFT" ? [{
+            action: "UPDATE_DRAFT",
+            transition_trigger: null,
+            target_state: null,
+            governance_authority_code: null,
+            review_claim: null,
+            claimed_by_name: null
+          }] : []),
+          ...transitions.map((transition) => ({
+            action: "TRANSITION",
+            transition_trigger: transition.trigger,
+            target_state: transition.to,
+            governance_authority_code: null,
+            review_claim: null,
+            claimed_by_name: null
+          }))
+        ]
+      });
+    }
+
+    let next: MockResponse | undefined;
+    if (method === "GET" && url.includes("/template-versions/")) {
+      next = takeResponse((response) =>
+        Boolean((response.body as { definition_jsonb?: unknown } | undefined)?.definition_jsonb)
+      );
+    } else if (method === "GET" && /\/operational-evidence\/records\/[^/]+$/.test(url)) {
+      next = takeResponse((response) => {
+        const body = response.body as Record<string, unknown> | undefined;
+        return Boolean(body && "lifecycle_state" in body && "template_provenance" in body);
+      });
+    }
+
+    next ??= responses.shift();
 
     if (!next) {
       throw new Error(`Unexpected fetch call: ${String(input)}`);
+    }
+
+    if (next.body && typeof next.body === "object" &&
+        "lifecycle_state" in next.body && "template_provenance" in next.body) {
+      lastEvidenceRecord = next.body as ReturnType<typeof evidenceRecord>;
+    }
+    if (next.body && typeof next.body === "object" && "definition_jsonb" in next.body) {
+      lastTemplateDefinition = next.body.definition_jsonb as OetsDefinition;
+    }
+    if (next.body && typeof next.body === "object" && "evidence_record" in next.body) {
+      const nestedRecord = next.body.evidence_record;
+      if (nestedRecord && typeof nestedRecord === "object" &&
+          "lifecycle_state" in nestedRecord && "template_provenance" in nestedRecord) {
+        lastEvidenceRecord = nestedRecord as ReturnType<typeof evidenceRecord>;
+      }
     }
 
     return new Response(
@@ -215,6 +296,7 @@ function evidenceRecord(
     payload: Pick<OetsEvidencePayload, "sections">;
     scope_kind: "CLIENT_SCOPED" | "TRAINING_SCOPED";
     training_context: unknown;
+    context: unknown;
   }> = {}
 ) {
   return {
@@ -363,6 +445,43 @@ function clientContext() {
   };
 }
 
+function recordActionProjection({
+  activeClaim = null,
+  record = evidenceRecord(),
+  governanceAuthorityCode = "OGI"
+}: {
+  activeClaim?: ReturnType<typeof governanceClaim> | null;
+  record?: ReturnType<typeof evidenceRecord>;
+  governanceAuthorityCode?: string;
+} = {}) {
+  const transitionTrigger = `begin_${governanceAuthorityCode.toLowerCase()}_review`;
+  return {
+    projection_version: "EVIDENCE_RECORD_ACTIONS_V1",
+    evidence_record_id: record.id,
+    lifecycle_state: record.lifecycle_state,
+    revision: `${record.updated_at}:${activeClaim?.updated_at ?? "unclaimed"}`,
+    actions: [{
+      action: activeClaim
+        ? activeClaim.claimed_by_user_id === session.id
+          ? "SUBMIT_REVIEW_CONCLUSION"
+          : "WAIT_FOR_REVIEWER"
+        : "CLAIM_REVIEW",
+      transition_trigger: transitionTrigger,
+      target_state: `UNDER_${governanceAuthorityCode}_REVIEW`,
+      governance_authority_code: governanceAuthorityCode,
+      review_claim: activeClaim,
+      claimed_by_name: null
+    }, ...(activeClaim?.claimed_by_user_id === session.id ? [{
+      action: "RELEASE_REVIEW",
+      transition_trigger: transitionTrigger,
+      target_state: `UNDER_${governanceAuthorityCode}_REVIEW`,
+      governance_authority_code: governanceAuthorityCode,
+      review_claim: activeClaim,
+      claimed_by_name: null
+    }] : [])]
+  };
+}
+
 const governedSignatureField = {
   field_id: "00000000-0000-4000-8000-000000000099",
   field_code: "GOVERNED_SIGNATURE",
@@ -405,7 +524,7 @@ function governedEditableDefinition(): OetsDefinition {
   };
 }
 
-function governedAttestation(status: "CURRENT" | "STALE" = "CURRENT") {
+function governedAttestation(status: "CURRENT" | "STALE" = "CURRENT"): EvidenceAttestation {
   return {
     id: "attestation-server-1", evidence_record_id: "evidence-record-1",
     template_version_id: runtimeTemplate.template_version_id,
@@ -440,6 +559,63 @@ afterEach(() => {
 });
 
 describe("Generic OETS renderer", () => {
+  it("projects governed signer identity and date from the current attestation event", () => {
+    const projectionDefinition: OetsDefinition = {
+      ...governedDefinition(),
+      sections: [{
+        ...governedDefinition().sections[0],
+        fields: [
+          {
+            field_id: "actor-projection",
+            field_code: "SIGNER_NAME",
+            label: "Signer Name",
+            field_type: "TEXT",
+            required: false,
+            readonly: true,
+            visible: true,
+            sequence: 1,
+            metadata: { governed_attestation_projection: {
+              source_signature_field_id: governedSignatureField.field_id,
+              value: "SUBJECT_NAME"
+            } }
+          },
+          { ...governedSignatureField, sequence: 2 },
+          {
+            field_id: "date-projection",
+            field_code: "SIGNATURE_DATE",
+            label: "Signature Date",
+            field_type: "DATE",
+            required: false,
+            readonly: true,
+            visible: true,
+            sequence: 3,
+            metadata: { governed_attestation_projection: {
+              source_signature_field_id: governedSignatureField.field_id,
+              value: "SIGNED_AT_DATE"
+            } }
+          }
+        ]
+      }]
+    };
+    render(
+      <OetsRenderer
+        attestations={[governedAttestation()]}
+        definition={projectionDefinition}
+        initialPayload={{ sections: { GOVERNED_ATTESTATION: {
+          SIGNER_NAME: "Spoofed Payload Actor",
+          GOVERNED_SIGNATURE: null,
+          SIGNATURE_DATE: "1999-01-01"
+        } } }}
+        readOnly
+        runtimeTemplate={runtimeTemplate}
+      />
+    );
+    expect(screen.getByLabelText("Signer Name")).toHaveValue("Server Confirmed Operator");
+    expect(screen.getByLabelText("Signature Date")).toHaveValue("2026-08-24");
+    expect(screen.getByLabelText("Signer Name")).toBeDisabled();
+    expect(screen.getByLabelText("Signature Date")).toBeDisabled();
+  });
+
   it("renders evidence-only governed signatures even when payload visibility is false", async () => {
     const queryClient = createTestQueryClient();
     const governed = governedDefinition();
@@ -463,11 +639,14 @@ describe("Generic OETS renderer", () => {
     renderOperationalEvidenceRecordPageWithSession({
       initialPath: "/workbench/evidence/evidence-record-1",
       queryClient,
-      currentSession: session
+      currentSession: {
+        ...session,
+        permissions: [...session.permissions, "submit_operational_evidence"]
+      }
     });
 
     expect(await screen.findByText("I attest to the exact evidence shown.")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Sign & Attest" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "Sign & Attest" })).toBeVisible();
   });
 
   it("integrates server-confirmed attestation state and recovers safely from signing failure", async () => {
@@ -535,7 +714,11 @@ describe("Generic OETS renderer", () => {
 
     expect(await screen.findByRole("button", { name: "Sign & Attest" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Finalize Evidence" })).toBeVisible();
+    expect(screen.getByTestId("draft-save-state")).toHaveTextContent("No unsaved changes.");
+    expect(screen.getByRole("button", { name: "Save Draft" })).toBeDisabled();
     await user.type(screen.getByLabelText("Text Field"), "Unsaved evidence B");
+    expect(screen.getByTestId("draft-save-state")).toHaveTextContent("Unsaved changes. Save Draft before finalizing.");
+    expect(screen.getByRole("button", { name: "Save Draft" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Sign & Attest" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: "Finalize Evidence" })).not.toBeInTheDocument();
   });
@@ -551,6 +734,20 @@ describe("Generic OETS renderer", () => {
       if (url.endsWith("/payload") && init?.method === "PATCH") {
         return new Promise<Response>((resolve) => { resolveSave = resolve; });
       }
+      if (url.endsWith("/actions")) return jsonResponse(200, {
+        projection_version: "EVIDENCE_RECORD_ACTIONS_V1",
+        evidence_record_id: record.id,
+        lifecycle_state: record.lifecycle_state,
+        revision: `test:${record.payload_checksum}`,
+        actions: [{
+          action: "TRANSITION",
+          transition_trigger: "submit",
+          target_state: "SUBMITTED",
+          governance_authority_code: null,
+          review_claim: null,
+          claimed_by_name: null
+        }]
+      });
       if (url.includes("/attestations")) return jsonResponse(200, { attestations: [] });
       if (url.includes("/template-versions/")) return jsonResponse(200, { ...runtimeTemplate, definition_jsonb: governedEditableDefinition() });
       return jsonResponse(200, record);
@@ -560,6 +757,7 @@ describe("Generic OETS renderer", () => {
     await user.type(screen.getByLabelText("Text Field"), "Saved evidence B");
     await user.click(screen.getByRole("button", { name: "Save Draft" }));
     expect(screen.getByRole("button", { name: "Saving..." })).toBeDisabled();
+    expect(screen.getByTestId("draft-save-state")).toHaveTextContent("Saving Draft");
     expect(screen.getByRole("button", { name: "Sign & Attest" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: "Finalize Evidence" })).not.toBeInTheDocument();
 
@@ -568,7 +766,59 @@ describe("Generic OETS renderer", () => {
     resolveSave(jsonResponse(200, record));
     await user.click(await screen.findByRole("checkbox", { name: /deliberately accept the attestation statement/i }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Sign & Attest" })).toBeEnabled());
+    expect(screen.getByTestId("draft-save-state")).toHaveTextContent("Draft saved. No unsaved changes.");
+    expect(screen.getByRole("button", { name: "Save Draft" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Finalize Evidence" })).toBeVisible();
+  });
+
+  it("makes lifecycle-action load failure visible and retryable", async () => {
+    const queryClient = createTestQueryClient();
+    const projection = {
+      projection_version:"EVIDENCE_RECORD_ACTIONS_V1",evidence_record_id:"evidence-record-1",lifecycle_state:"DRAFT",revision:"test:actions",
+      actions:[{action:"TRANSITION",transition_trigger:"submit",target_state:"SUBMITTED",governance_authority_code:null,review_claim:null,claimed_by_name:null}]
+    };
+    mockFetchQueue([
+      {status:200,body:evidenceRecord({lifecycle_state:"DRAFT"})},
+      {status:200,body:{...runtimeTemplate,definition_jsonb:governedEditableDefinition()}},
+      {status:500,body:{...projection,error:{code:"OEE_INTERNAL_ERROR",message:"Action projection failed."}}},
+      {status:200,body:projection},
+      {status:200,body:{attestations:[]}}
+    ]);
+    const user=userEvent.setup();
+    renderOperationalEvidenceRecordPageWithSession({initialPath:"/workbench/evidence/evidence-record-1",queryClient,currentSession:{...session,permissions:[...session.permissions,"submit_operational_evidence"]}});
+    expect(await screen.findByText("Available lifecycle actions could not be loaded.")).toBeVisible();
+    await user.click(screen.getByRole("button",{name:"Retry actions"}));
+    expect(await screen.findByRole("button",{name:"Finalize Evidence"})).toBeVisible();
+  });
+
+  it("restores an allowlisted durable Facility Journey return after a direct record load", async () => {
+    const queryClient = createTestQueryClient();
+    mockFetchQueue([
+      { status: 200, body: evidenceRecord({ lifecycle_state: "DRAFT" }) },
+      { status: 200, body: { ...runtimeTemplate, definition_jsonb: governedEditableDefinition() } },
+      { status: 200, body: { attestations: [] } }
+    ]);
+    renderOperationalEvidenceRecordPageWithSession({
+      initialPath: "/workbench/evidence/evidence-record-1?return=facility-assessment&client=client-1&facility=facility-1&category=LIFEGUARD_OPERATIONS",
+      queryClient,
+      currentSession: session
+    });
+    expect(await screen.findByRole("button", { name: /Back to Facility Assessment Journey/ })).toBeVisible();
+  });
+
+  it("restores an allowlisted durable Training Journey return after a direct record load", async () => {
+    const queryClient = createTestQueryClient();
+    mockFetchQueue([
+      { status: 200, body: evidenceRecord({ lifecycle_state: "DRAFT" }) },
+      { status: 200, body: { ...runtimeTemplate, definition_jsonb: governedEditableDefinition() } },
+      { status: 200, body: { attestations: [] } }
+    ]);
+    renderOperationalEvidenceRecordPageWithSession({
+      initialPath: "/workbench/evidence/evidence-record-1?return=training-journey&enrollment=enrollment-1",
+      queryClient,
+      currentSession: session
+    });
+    expect(await screen.findByRole("button", { name: /Back to Training Journey/ })).toBeVisible();
   });
 
   it("uses server-confirmed lifecycle state after successful persisted-draft finalization", async () => {
@@ -600,12 +850,14 @@ describe("Generic OETS renderer", () => {
     expect(
       await screen.findByRole("heading", { name: "Generic Runtime Template" })
     ).toBeInTheDocument();
-    expect(calls.map(({ url }) => url)).toEqual([
-      "/api/v1/auth/refresh",
-      "/api/v1/auth/me",
-      "/api/v1/operational-evidence/templates/ARBITRARY_RUNTIME_TEMPLATE/current",
-      "/api/v1/operational-evidence/templates/ARBITRARY_RUNTIME_TEMPLATE/context-requirement?template_version_id=version-1&checksum=checksum-1"
-    ]);
+    await waitFor(() => {
+      expect(calls.map(({ url }) => url)).toEqual([
+        "/api/v1/auth/refresh",
+        "/api/v1/auth/me",
+        "/api/v1/operational-evidence/templates/ARBITRARY_RUNTIME_TEMPLATE/current",
+        "/api/v1/operational-evidence/templates/ARBITRARY_RUNTIME_TEMPLATE/context-requirement?template_version_id=version-1&checksum=checksum-1"
+      ]);
+    });
   });
 
   it("retrieves an Operational Evidence record by ID through the authenticated API boundary", async () => {
@@ -723,8 +975,51 @@ describe("Generic OETS renderer", () => {
     expect(screen.queryByRole("button", { name: /save/i })).not.toBeInTheDocument();
     expect(calls.map(({ url }) => url)).toEqual([
       "/api/v1/operational-evidence/records/evidence-record-1",
+      "/api/v1/operational-evidence/records/evidence-record-1/actions",
       "/api/v1/operational-evidence/template-versions/version-1"
     ]);
+  });
+
+  it("restores and saves immutable qualified context without current candidate resolution", async () => {
+    const user = userEvent.setup();
+    const contextualRecord = evidenceRecord({
+      lifecycle_state: "DRAFT",
+      context: {
+        requirement_code: "CERTIFICATION_CONTEXT",
+        context_kind: "CERTIFICATION",
+        selected_id: "certification-1",
+        summary: { id: "certification-1", primary_label: "OGI-CERT-2026-0001", secondary_label: "Sky Guard", context_kind: "CERTIFICATION", holder_kind: "TRAINEE" },
+        field_policy: { "GENERAL_EVIDENCE.TEXT_FIELD": "READ_ONLY_DERIVED" },
+        authoritative_values: { "GENERAL_EVIDENCE.TEXT_FIELD": "Stored certification value" },
+        snapshot_provenance: "EVIDENCE_BINDING_AND_PAYLOAD"
+      },
+      payload: { sections: { GENERAL_EVIDENCE: { TEXT_FIELD: "Stored certification value" } } }
+    });
+    const queryClient = createTestQueryClient();
+    const { calls } = mockFetchQueue([
+      { status: 200, body: contextualRecord },
+      { status: 200, body: { ...runtimeTemplate, definition_jsonb: definition } },
+      { status: 200, body: evidenceRecord({ lifecycle_state:"DRAFT",context:contextualRecord.context,payload:{sections:{GENERAL_EVIDENCE:{TEXT_FIELD:"Stored certification value",NUMBER_FIELD:8}}} }) }
+    ]);
+
+    renderOperationalEvidenceRecordPageWithSession({
+      initialPath: "/workbench/evidence/evidence-record-1",
+      queryClient,
+      currentSession: { ...session, permissions: [...session.permissions, "submit_operational_evidence"] }
+    });
+
+    expect(await screen.findByText("Evidence Context")).toBeInTheDocument();
+    expect(screen.getByText("OGI-CERT-2026-0001")).toBeInTheDocument();
+    expect(screen.getByText("Sky Guard")).toBeInTheDocument();
+    expect(screen.getByLabelText("Text Field")).toHaveValue("Stored certification value");
+    expect(screen.getByLabelText("Text Field")).toBeDisabled();
+    expect(calls.some(({ url }) => url.includes("/context-candidates"))).toBe(false);
+    expect(calls.some(({ url }) => url.includes("/context-requirement"))).toBe(false);
+    await user.type(screen.getByLabelText("Number Field"), "8");
+    await user.click(screen.getByRole("button", { name: "Save Draft" }));
+    await waitFor(() => expect(calls.filter(({ init }) => init?.method === "PATCH")).toHaveLength(1));
+    const saved = JSON.parse(String(calls.find(({ init }) => init?.method === "PATCH")?.init?.body));
+    expect(saved.payload.sections.GENERAL_EVIDENCE).toMatchObject({ TEXT_FIELD:"Stored certification value", NUMBER_FIELD:8 });
   });
 
   it("edits a Training-scoped Draft payload through the generic OETS renderer with contextual handoff details", async () => {
@@ -826,7 +1121,7 @@ describe("Generic OETS renderer", () => {
     await user.type(textField, "Updated training evidence");
     await user.click(screen.getByRole("button", { name: "Save Draft" }));
 
-    await screen.findByText("Draft evidence saved.");
+    expect(await screen.findAllByText("Draft evidence saved.")).toHaveLength(2);
     const patchCall = calls.find((call) => call.init?.method === "PATCH");
     expect(patchCall?.url).toBe(
       "/api/v1/operational-evidence/records/evidence-record-1/payload"
@@ -905,6 +1200,8 @@ describe("Generic OETS renderer", () => {
       !alert.textContent?.includes("highlighted fields")
     )).toBe(true);
     expect(screen.queryByText("Draft evidence saved.")).not.toBeInTheDocument();
+    expect(screen.getByTestId("draft-save-state")).toHaveTextContent("Draft save failed. Your changes remain unsaved");
+    expect(screen.getByRole("button", { name: "Save Draft" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Sign & Attest" })).toBeDisabled();
   });
 
@@ -1352,7 +1649,7 @@ describe("Generic OETS renderer", () => {
     await user.type(screen.getByLabelText("Skill Observation"), "Updated observation");
     await user.click(screen.getByRole("button", { name: "Save Draft" }));
 
-    await screen.findByText("Draft evidence saved.");
+    expect(await screen.findAllByText("Draft evidence saved.")).toHaveLength(2);
     const patchCall = calls.find((call) => call.init?.method === "PATCH");
     const updateBody = JSON.parse(String(patchCall?.init?.body));
     expect(updateBody.payload.sections.ASSESSMENT_INFORMATION).toMatchObject({
@@ -1424,12 +1721,8 @@ describe("Generic OETS renderer", () => {
     expect(requestBody).toEqual({
       transition_trigger: "submit_intake_request"
     });
-    expect(calls.map(({ init }) => init?.method ?? "GET")).toEqual([
-      "GET",
-      "GET",
-      "POST",
-      "GET"
-    ]);
+    expect(calls.filter(({ init }) => (init?.method ?? "GET") === "POST")).toHaveLength(1);
+    expect(calls.some((call) => call.url.endsWith("/actions"))).toBe(true);
     expect(calls.some((call) => call.init?.method === "PATCH")).toBe(false);
   });
 
@@ -1443,12 +1736,13 @@ describe("Generic OETS renderer", () => {
     const conclusion = reviewConclusion();
     const { calls } = mockFetchQueue([
       { status: 200, body: submittedRecord },
+      { status: 200, body: recordActionProjection({ record: submittedRecord }) },
       {
         status: 200,
         body: { ...runtimeTemplate, definition_jsonb: ogiReviewWorkflowDefinition }
       },
-      { status: 200, body: [governanceQueueItem({ record: submittedRecord })] },
       { status: 201, body: claim },
+      { status: 200, body: recordActionProjection({ activeClaim: claim, record: submittedRecord }) },
       {
         status: 200,
         body: {
@@ -1636,11 +1930,11 @@ describe("Generic OETS renderer", () => {
       { status: 200, body: submittedRecord },
       {
         status: 200,
-        body: { ...runtimeTemplate, definition_jsonb: ogiReviewWorkflowDefinition }
+        body: recordActionProjection({ activeClaim, record: submittedRecord })
       },
       {
         status: 200,
-        body: [governanceQueueItem({ activeClaim, record: submittedRecord })]
+        body: { ...runtimeTemplate, definition_jsonb: ogiReviewWorkflowDefinition }
       }
     ]);
 
@@ -1684,7 +1978,7 @@ describe("Generic OETS renderer", () => {
         },
         {
           status: 200,
-          body: [governanceQueueItem({ activeClaim, record: submittedRecord })]
+          body: recordActionProjection({ activeClaim, record: submittedRecord })
         },
         {
           status,
@@ -1891,6 +2185,7 @@ describe("Generic OETS renderer", () => {
     expect(screen.queryByText("submit_intake_request")).not.toBeInTheDocument();
     expect(calls.map(({ url }) => url)).toEqual([
       "/api/v1/operational-evidence/records/evidence-record-1",
+      "/api/v1/operational-evidence/records/evidence-record-1/actions",
       "/api/v1/operational-evidence/template-versions/version-1"
     ]);
   });
@@ -2135,8 +2430,8 @@ describe("Generic OETS renderer", () => {
     await user.click(screen.getByRole("button", { name: "Create Audit Draft" }));
 
     expect(
-      await screen.findByText("Draft audit created successfully.")
-    ).toBeInTheDocument();
+      await screen.findAllByText("Draft audit created successfully.")
+    ).toHaveLength(2);
     expect(screen.getByRole("link", { name: "Open Audit" })).toHaveAttribute(
       "href",
       "/workbench/evidence/evidence-record-1"
@@ -2216,11 +2511,7 @@ describe("Generic OETS renderer", () => {
       GENERAL_EVIDENCE: {
         TEXT_FIELD: "Version N"
       },
-      REPEATABLE_OBSERVATIONS: [
-        {
-          OBSERVATION_TIME: null
-        }
-      ]
+      REPEATABLE_OBSERVATIONS: []
     });
     expect(requestBody.payload.sections.NEW_SECTION).toBeUndefined();
   });
@@ -2332,8 +2623,8 @@ describe("Generic OETS renderer", () => {
     await user.click(screen.getByRole("button", { name: "Create Audit Draft" }));
 
     expect(
-      await screen.findByText("Draft audit created successfully.")
-    ).toBeInTheDocument();
+      await screen.findAllByText("Draft audit created successfully.")
+    ).toHaveLength(2);
 
     const requestBody = JSON.parse(String(findRequest(
       calls,
@@ -2375,7 +2666,10 @@ describe("Generic OETS renderer", () => {
           return jsonResponse(200, {
             required: false,
             requirement_code: null,
-            selection_mode: null
+            selection_mode: null,
+            presentation: null,
+            duplicate_policy: null,
+            successor_policy: null
           });
         }
 
@@ -2408,7 +2702,7 @@ describe("Generic OETS renderer", () => {
 
     resolveSubmit(jsonResponse(201, evidenceRecord()));
 
-    expect(await screen.findByText("Draft audit created successfully.")).toBeInTheDocument();
+    expect(await screen.findAllByText("Draft audit created successfully.")).toHaveLength(2);
   });
 
   it("uses a synchronous lock so immediate submit activations create only one request", async () => {
@@ -2426,7 +2720,10 @@ describe("Generic OETS renderer", () => {
           return jsonResponse(200, {
             required: false,
             requirement_code: null,
-            selection_mode: null
+            selection_mode: null,
+            presentation: null,
+            duplicate_policy: null,
+            successor_policy: null
           });
         }
 
@@ -2463,7 +2760,7 @@ describe("Generic OETS renderer", () => {
 
     resolveSubmit(jsonResponse(201, evidenceRecord()));
 
-    expect(await screen.findByText("Draft audit created successfully.")).toBeInTheDocument();
+    expect(await screen.findAllByText("Draft audit created successfully.")).toHaveLength(2);
   });
 
   it("does not allow the same successful evidence capture to be submitted again", async () => {
@@ -2480,7 +2777,7 @@ describe("Generic OETS renderer", () => {
 
     await user.click(await screen.findByRole("button", { name: "Create Audit Draft" }));
 
-    expect(await screen.findByText("Draft audit created successfully.")).toBeInTheDocument();
+    expect(await screen.findAllByText("Draft audit created successfully.")).toHaveLength(2);
     expect(
       screen.queryByRole("button", { name: "Create Audit Draft" })
     ).not.toBeInTheDocument();
@@ -2582,7 +2879,7 @@ describe("Generic OETS renderer", () => {
     for (const diagnostic of ["Form issue", "Section issue", "Backend field issue", "Repeatable field issue", "Unrecognized path issue"]) {
       expect(screen.queryByText(diagnostic)).not.toBeInTheDocument();
     }
-    expect(screen.getAllByText("Review this field.")).toHaveLength(2);
+    expect(screen.getAllByText("Review this field.")).toHaveLength(1);
     await user.click(screen.getByRole("button", { name: /Form progress/s }));
     expect(screen.getByText("This form needs attention.")).toBeInTheDocument();
     expect(screen.getAllByText("Needs attention")).toHaveLength(2);
@@ -3327,11 +3624,11 @@ function optionField(
     const submittedRecord = evidenceRecord({ lifecycle_state: "SUBMITTED" });
     mockFetchQueue([
       { status: 200, body: submittedRecord },
+      { status: 200, body: recordActionProjection({ record: submittedRecord }) },
       {
         status: 200,
         body: { ...runtimeTemplate, definition_jsonb: ogiReviewWorkflowDefinition }
-      },
-      { status: 200, body: [governanceQueueItem({ record: submittedRecord })] }
+      }
     ]);
 
     renderOperationalEvidenceRecordPageWithSession({
@@ -3354,11 +3651,11 @@ function optionField(
       { status: 200, body: submittedRecord },
       {
         status: 200,
-        body: { ...runtimeTemplate, definition_jsonb: ogiReviewWorkflowDefinition }
+        body: recordActionProjection({ activeClaim, record: submittedRecord })
       },
       {
         status: 200,
-        body: [governanceQueueItem({ activeClaim, record: submittedRecord })]
+        body: { ...runtimeTemplate, definition_jsonb: ogiReviewWorkflowDefinition }
       }
     ]);
 
@@ -3386,11 +3683,11 @@ function optionField(
       { status: 200, body: submittedRecord },
       {
         status: 200,
-        body: { ...runtimeTemplate, definition_jsonb: ogiReviewWorkflowDefinition }
+        body: recordActionProjection({ activeClaim, record: submittedRecord })
       },
       {
         status: 200,
-        body: [governanceQueueItem({ activeClaim, record: submittedRecord })]
+        body: { ...runtimeTemplate, definition_jsonb: ogiReviewWorkflowDefinition }
       }
     ]);
 
@@ -3403,14 +3700,11 @@ function optionField(
     await screen.findByText("Claimed by you");
 
     const submittedEvidenceHeading = await screen.findByRole("heading", {
-      name: "Submitted Evidence"
+      name: "Awaiting Review Evidence"
     });
     const governanceReviewSection = screen
       .getByRole("heading", { name: "Governance Review" })
       .closest("section");
-    const reviewConclusionsHeading = screen.getByRole("heading", {
-      name: "Review Conclusions"
-    });
 
     expect(governanceReviewSection).not.toBeNull();
     expect(
@@ -3418,16 +3712,7 @@ function optionField(
         screen.getByRole("heading", { name: "Governance Review" })
       ) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
-    expect(
-      screen
-        .getByRole("heading", { name: "Governance Review" })
-        .compareDocumentPosition(reviewConclusionsHeading) &
-        Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy();
-    expect(
-      reviewConclusionsHeading.compareDocumentPosition(screen.getByText("Provenance")) &
-        Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Review Conclusions" })).not.toBeInTheDocument();
 
     expect(within(governanceReviewSection as HTMLElement).getByText("Review authority")).toBeInTheDocument();
     expect(within(governanceReviewSection as HTMLElement).getByText("OGI")).toBeInTheDocument();
@@ -3460,7 +3745,7 @@ function optionField(
       },
       {
         status: 200,
-        body: [governanceQueueItem({ activeClaim, record: submittedRecord })]
+        body: recordActionProjection({ activeClaim, record: submittedRecord })
       }
     ]);
 
@@ -3485,16 +3770,17 @@ function optionField(
       { status: 200, body: submittedRecord },
       {
         status: 200,
+        body: recordActionProjection({ activeClaim, record: submittedRecord })
+      },
+      {
+        status: 200,
         body: { ...runtimeTemplate, definition_jsonb: ogiReviewWorkflowDefinition }
       },
       {
         status: 200,
-        body: [governanceQueueItem({ activeClaim, record: submittedRecord })]
-      },
-      {
-        status: 200,
         body: governanceClaim({ claim_status: "RELEASED", released_at: "2026-07-27T00:05:00.000Z" })
-      }
+      },
+      { status: 200, body: recordActionProjection({ record: submittedRecord }) }
     ]);
 
     renderOperationalEvidenceRecordPageWithSession({
@@ -3522,11 +3808,11 @@ function optionField(
       { status: 200, body: submittedRecord },
       {
         status: 200,
-        body: { ...runtimeTemplate, definition_jsonb: ogiReviewThenArchiveWorkflowDefinition }
+        body: recordActionProjection({ activeClaim, record: submittedRecord })
       },
       {
         status: 200,
-        body: [governanceQueueItem({ activeClaim, record: submittedRecord })]
+        body: { ...runtimeTemplate, definition_jsonb: ogiReviewThenArchiveWorkflowDefinition }
       },
       {
         status: 200,
@@ -3537,6 +3823,20 @@ function optionField(
         }
       },
       { status: 200, body: reviewRecord },
+      { status: 200, body: {
+        projection_version: "EVIDENCE_RECORD_ACTIONS_V1",
+        evidence_record_id: reviewRecord.id,
+        lifecycle_state: reviewRecord.lifecycle_state,
+        revision: "test:archive-action",
+        actions: [{
+          action: "TRANSITION",
+          transition_trigger: "archive",
+          target_state: "ARCHIVED",
+          governance_authority_code: null,
+          review_claim: null,
+          claimed_by_name: null
+        }]
+      } },
       { status: 200, body: [] }
     ]);
 
@@ -3555,7 +3855,7 @@ function optionField(
     );
 
     expect(await screen.findByText("Under Review")).toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: "Archive" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Archive Record" })).toBeInTheDocument();
     expect(calls.some((call) =>
       call.url.endsWith("/governance/review-claims/claim-1/transitions")
     )).toBe(false);
@@ -3568,11 +3868,11 @@ function optionField(
     const activeClaim = governanceClaim({ claimed_by_user_id: "user-2" });
     mockFetchQueue([
       { status: 200, body: submittedRecord },
+      { status: 200, body: recordActionProjection({ record: submittedRecord }) },
       {
         status: 200,
         body: { ...runtimeTemplate, definition_jsonb: ogiReviewWorkflowDefinition }
       },
-      { status: 200, body: [governanceQueueItem({ record: submittedRecord })] },
       {
         status: 409,
         statusText: "Conflict",
@@ -3585,7 +3885,7 @@ function optionField(
       },
       {
         status: 200,
-        body: [governanceQueueItem({ activeClaim, record: submittedRecord })]
+        body: recordActionProjection({ activeClaim, record: submittedRecord })
       }
     ]);
 
@@ -3654,7 +3954,10 @@ function optionField(
       if (url.includes("/context-requirement?")) return jsonResponse(200, {
         required: true,
         requirement_code: "CERTIFICATION_CONTEXT",
-        selection_mode: "EXPLICIT"
+        selection_mode: "EXPLICIT",
+        presentation: { label: "Certification context", help_text: "Select one.", candidate_singular: "Certification", candidate_plural: "Certifications" },
+        duplicate_policy: "IDEMPOTENCY_ONLY",
+        successor_policy: "CLONE_IMMUTABLE_CONTEXT"
       });
       if (url.includes("/context-candidates?") && !url.includes("/certification-1?")) return jsonResponse(200, {
         candidates: [{
@@ -3664,6 +3967,7 @@ function optionField(
           holder_kind: "TRAINEE"
         }],
         count: 1,
+        next_cursor: null,
         selection_mode: "EXPLICIT"
       });
       if (url.includes("/context-candidates/certification-1?")) return jsonResponse(200, {
@@ -3698,7 +4002,7 @@ function optionField(
         },
         required_fields: []
       });
-      if (url === "/api/v1/operational-evidence/records" && init?.method === "POST") {
+      if (url === "/api/v1/operational-evidence/records/drafts" && init?.method === "POST") {
         return jsonResponse(201, evidenceRecord());
       }
       throw new Error(`Unexpected F-048 request: ${url}`);
@@ -3714,7 +4018,7 @@ function optionField(
       currentSession: session
     });
 
-    const selector = await screen.findByLabelText("Certification context");
+    const selector = await screen.findByLabelText("Select Certification");
     const candidateOption = await screen.findByRole("option", {
       name: "MBC-generation-009-L1 — Marvin Beach Club L1 Trainee generation-009 · L1"
     });
@@ -3743,11 +4047,11 @@ function optionField(
     expect(screen.getByLabelText("Defensibility Classification")).toHaveValue("PLATINUM");
     expect(screen.getByLabelText("Defensibility Classification")).toBeDisabled();
 
-    await user.click(screen.getByRole("button", { name: "Create Audit Draft" }));
+    await user.click(screen.getByRole("button", { name: "Begin Evidence" }));
     const requestBody = JSON.parse(String(findRequest(
       calls,
       "POST",
-      "/api/v1/operational-evidence/records"
+      "/api/v1/operational-evidence/records/drafts"
     ).init?.body));
     expect(requestBody.context).toEqual({
       requirement_code: "CERTIFICATION_CONTEXT",
@@ -3767,6 +4071,73 @@ function optionField(
       CREDENTIAL_ISSUE_DATE: null,
       CREDENTIAL_EXPIRATION_DATE: null
     });
+  });
+
+  it("uses presentation metadata and traverses bounded context pages without auto-selection", async () => {
+    const queryClient = createTestQueryClient();
+    queryClient.setQueryData(["oets-runtime-template", runtimeTemplate.template_code], { ...runtimeTemplate, definition_jsonb: definition });
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = readRequestPath(input);
+      calls.push(url);
+      if (url.includes("/context-requirement?")) return jsonResponse(200, {
+        required: true,
+        requirement_code: "PERSONNEL_CONTEXT",
+        selection_mode: "EXPLICIT",
+        presentation: { label: "Personnel subject", help_text: "Choose the governed subject deliberately.", candidate_singular: "Person", candidate_plural: "People" },
+        duplicate_policy: "IDEMPOTENCY_ONLY",
+        successor_policy: "CLONE_IMMUTABLE_CONTEXT"
+      });
+      if (url.includes("cursor=page-2")) return jsonResponse(200, {
+        candidates: [{ id: "person-2", primary_label: "Person Two", secondary_label: "Second subject", context_kind: "PERSONNEL" }],
+        count: 2,
+        next_cursor: null,
+        selection_mode: "EXPLICIT"
+      });
+      if (url.includes("/context-candidates?")) return jsonResponse(200, {
+        candidates: [{ id: "person-1", primary_label: "Person One", secondary_label: "First subject", context_kind: "PERSONNEL" }],
+        count: 2,
+        next_cursor: "page-2",
+        selection_mode: "EXPLICIT"
+      });
+      throw new Error(`Unexpected context orchestration request: ${url}`);
+    }));
+    const user = userEvent.setup();
+    renderRuntimeTemplatePageWithSession({ initialPath: "/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE", queryClient, currentSession: session });
+
+    expect(await screen.findByText("Personnel subject")).toBeInTheDocument();
+    expect(screen.getByText("Choose the governed subject deliberately.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Begin Evidence" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: "Person One — First subject" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Select Person")).toHaveValue("");
+    await user.click(screen.getByRole("button", { name: "Load more" }));
+    expect(await screen.findByRole("option", { name: "Person Two — Second subject" })).toBeInTheDocument();
+    expect(calls.some((url) => url.includes("limit=25") && url.includes("cursor=page-2"))).toBe(true);
+  });
+
+  it("does not erase operator input when a Journey recreates equivalent initial field values on dirty change", async () => {
+    const queryClient = createTestQueryClient();
+    queryClient.setQueryData(["oets-runtime-template", runtimeTemplate.template_code], { ...runtimeTemplate, definition_jsonb: definition });
+    mockFetchQueue([]);
+    const user = userEvent.setup();
+    function JourneyHarness() {
+      const [, setDirty] = useState(false);
+      return <RuntimeTemplatePage initialFieldValues={{ TEXT_FIELD: "Initial" }} onDirtyChange={setDirty} />;
+    }
+    render(
+      <QueryClientProvider client={queryClient}>
+        <AuthContext.Provider value={authContextValue(session)}>
+          <MemoryRouter initialEntries={["/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE"]}>
+            <Routes><Route element={<JourneyHarness />} path="/workbench/oets/:templateCode" /></Routes>
+          </MemoryRouter>
+        </AuthContext.Provider>
+      </QueryClientProvider>
+    );
+
+    const field = await screen.findByLabelText("Text Field");
+    expect(field).toHaveValue("Initial");
+    await user.type(field, " retained");
+    expect(field).toHaveValue("Initial retained");
   });
 
   it("creates a governed-template draft only after deliberate Begin Evidence and uses the draft endpoint", async () => {
@@ -3799,6 +4170,144 @@ function optionField(
     );
     expect(JSON.parse(String(draftRequest.init?.body)).idempotency_key).toEqual(expect.any(String));
     expect(await screen.findByText("Persisted evidence record route")).toBeVisible();
+  });
+
+  it("starts every facility-journey form as a persisted draft and hands it back to the record workspace", async () => {
+    const queryClient = createTestQueryClient();
+    queryClient.setQueryData(
+      ["oets-runtime-template", runtimeTemplate.template_code],
+      { ...runtimeTemplate, definition_jsonb: definition }
+    );
+    const onDraftCreated = vi.fn();
+    const { calls } = mockFetchQueue([
+      { status: 201, body: evidenceRecord({ lifecycle_state: "DRAFT" }) }
+    ]);
+    const user = userEvent.setup();
+    const actionPortal = document.createElement("div");
+    actionPortal.id = "test-facility-journey-actions";
+    document.body.appendChild(actionPortal);
+
+    renderRuntimeTemplatePageWithSession({
+      initialPath: "/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE",
+      queryClient,
+      currentSession: session,
+      runtimeProps: {
+        actionPortalId: "test-facility-journey-actions",
+        embeddedTemplateCode: runtimeTemplate.template_code,
+        initialClientId: session.clientId,
+        initialFacilityId: session.facilityIds[0],
+        lockInitialScope: true,
+        onDraftCreated
+      }
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Begin Evidence" }));
+
+    await waitFor(() => expect(onDraftCreated).toHaveBeenCalledWith("evidence-record-1"));
+    expect(calls.filter((call) =>
+      call.url === "/api/v1/operational-evidence/records/drafts" &&
+      call.init?.method === "POST"
+    )).toHaveLength(1);
+    expect(calls.some((call) =>
+      call.url === "/api/v1/operational-evidence/records" &&
+      call.init?.method === "POST"
+    )).toBe(false);
+    actionPortal.remove();
+  });
+
+  it("reproduces the F041 facility-journey handoff and dispatches one contextual Draft save", async () => {
+    const user = userEvent.setup();
+    const queryClient = createTestQueryClient();
+    const f041Runtime: OetsTemplateRuntimeDefinition = {
+      ...runtimeTemplate,
+      template_code: "OGI_F041_LIFEGUARD_CERTIFICATION_RECORD",
+      template_version: "3.2",
+      template_version_id: "f041-version-32",
+      checksum: "f041-checksum"
+    };
+    const f041Definition: OetsDefinition = {
+      ...definition,
+      template_metadata: { ...definition.template_metadata, template_code: f041Runtime.template_code, template_name: "Certification Intelligence Record", version: "3.2" },
+      sections: [{
+        section_id: "f041-holder-section",
+        section_code: "CERTIFIED_INDIVIDUAL_PROFILE",
+        title: "Certified Individual Profile",
+        sequence: 1,
+        repeatable: false,
+        fields: [
+          textField("FIRST_NAME", "First Name", "TEXT", 1),
+          textField("LAST_NAME", "Last Name", "TEXT", 2),
+          textField("EMAIL", "Email", "EMAIL", 3),
+          textField("TELEPHONE", "Telephone", "PHONE", 4)
+        ]
+      }],
+      workflow: {
+        states: [{ state_code: "DRAFT", label: "Draft" }, { state_code: "SUBMITTED", label: "Submitted" }],
+        transitions: [{ from: "DRAFT", to: "SUBMITTED", trigger: "FINALIZE_DRAFT", label: "Finalize Draft" }]
+      }
+    };
+    const context = {
+      requirement_code: "CERTIFICATION_CONTEXT",
+      context_kind: "CERTIFICATION",
+      selected_id: "certification-1",
+      summary: { id: "certification-1", primary_label: "OGI-GR-2026-000030", secondary_label: "Cloudio Alcantara", context_kind: "CERTIFICATION" },
+      field_policy: {
+        FIRST_NAME: "OPERATOR_EDITABLE",
+        LAST_NAME: "OPERATOR_EDITABLE",
+        "CERTIFIED_INDIVIDUAL_PROFILE.EMAIL": "READ_ONLY_DERIVED",
+        "CERTIFIED_INDIVIDUAL_PROFILE.TELEPHONE": "READ_ONLY_DERIVED"
+      },
+      authoritative_values: {
+        "CERTIFIED_INDIVIDUAL_PROFILE.EMAIL": "cloudio@skyranch.com",
+        "CERTIFIED_INDIVIDUAL_PROFILE.TELEPHONE": "+63 917 555 0101"
+      },
+      required_fields: [],
+      snapshot_provenance: "EVIDENCE_BINDING_AND_PAYLOAD"
+    } as const;
+    let persisted = {
+      ...evidenceRecord({ lifecycle_state: "DRAFT", context, payload: { sections: { CERTIFIED_INDIVIDUAL_PROFILE: { EMAIL: "cloudio@skyranch.com", TELEPHONE: "+63 917 555 0101" } } } }),
+      template_provenance: { template_id:"f041",template_code:f041Runtime.template_code,template_version:"3.2",template_registry_id:f041Runtime.template_registry_id,template_version_id:f041Runtime.template_version_id,schema_version:f041Runtime.schema_version,checksum:f041Runtime.checksum }
+    };
+    const calls: Array<{url:string;init?:RequestInit}> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = readRequestPath(input); const method = init?.method ?? "GET"; calls.push({url,init});
+      if (url.includes("/context-requirement?")) return jsonResponse(200,{required:true,requirement_code:"CERTIFICATION_CONTEXT",selection_mode:"EXPLICIT",presentation:{label:"Certification context",help_text:"Select certification.",candidate_singular:"Certification",candidate_plural:"Certifications"},duplicate_policy:"ONE_LIVE_RECORD_PER_SUBJECT",successor_policy:"CLONE_IMMUTABLE_CONTEXT"});
+      if (url.includes("/context-candidates/certification-1?")) return jsonResponse(200,context);
+      if (url === "/api/v1/operational-evidence/records/drafts" && method === "POST") return jsonResponse(201,persisted);
+      if (url === `/api/v1/operational-evidence/records/${persisted.id}` && method === "GET") return jsonResponse(200,persisted);
+      if (url.endsWith("/actions")) return jsonResponse(200,{projection_version:"EVIDENCE_RECORD_ACTIONS_V1",evidence_record_id:persisted.id,lifecycle_state:"DRAFT",revision:`test:${persisted.payload_checksum}`,actions:[{action:"TRANSITION",transition_trigger:"FINALIZE_DRAFT",target_state:"SUBMITTED",governance_authority_code:null,review_claim:null,claimed_by_name:null}]});
+      if (url.includes("/template-versions/f041-version-32")) return jsonResponse(200,{...f041Runtime,definition_jsonb:f041Definition});
+      if (url.endsWith("/payload") && method === "PATCH") {
+        const body = JSON.parse(String(init?.body));
+        persisted = { ...persisted, payload: body.payload, payload_checksum: "f041-payload-checksum-2" };
+        return jsonResponse(200,persisted);
+      }
+      throw new Error(`Unexpected F041 journey request: ${method} ${url}`);
+    }));
+    queryClient.setQueryData(["oets-runtime-template",f041Runtime.template_code],{...f041Runtime,definition_jsonb:f041Definition});
+
+    function F041JourneyHarness() {
+      const [recordId,setRecordId] = useState<string|null>(null);
+      const [dirty,setDirty] = useState(false);
+      return <div><header><div id="f041-journey-actions" />{dirty?<span>Unsaved journey changes</span>:null}<button type="button">← Back to Facility Assessment Journey</button></header>{recordId?<OperationalEvidenceRecordPage actionPortalId="f041-journey-actions" embeddedRecordId={recordId} onDirtyChange={setDirty}/>:<RuntimeTemplatePage actionPortalId="f041-journey-actions" embeddedTemplateCode={f041Runtime.template_code} initialClientId={session.clientId} initialContextId="certification-1" initialFacilityId={session.facilityIds[0]} lockInitialContext lockInitialScope onDirtyChange={setDirty} onDraftCreated={setRecordId}/>}</div>;
+    }
+    render(<QueryClientProvider client={queryClient}><AuthContext.Provider value={authContextValue({...session,permissions:[...session.permissions,"submit_operational_evidence"]})}><MemoryRouter><F041JourneyHarness/></MemoryRouter></AuthContext.Provider></QueryClientProvider>);
+
+    await user.click(await screen.findByRole("button",{name:"Begin Evidence"}));
+    expect(await screen.findByRole("button",{name:/Back to Facility Assessment Journey/})).toBeVisible();
+    expect(await screen.findByLabelText("Email")).toBeDisabled();
+    expect(screen.getByLabelText("Telephone")).toBeDisabled();
+    expect(await screen.findByRole("button",{name:"Finalize Draft"})).toBeVisible();
+    await user.type(screen.getByLabelText("First Name"),"Cloudio");
+    expect(screen.getByText("Unsaved journey changes")).toBeVisible();
+    expect(screen.queryByRole("button",{name:"Finalize Draft"})).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button",{name:"Save Draft"}));
+    await waitFor(()=>expect(calls.filter(call=>call.init?.method==="PATCH")).toHaveLength(1));
+    const savedBody=JSON.parse(String(calls.find(call=>call.init?.method==="PATCH")?.init?.body));
+    expect(savedBody.payload.sections.CERTIFIED_INDIVIDUAL_PROFILE).toMatchObject({FIRST_NAME:"Cloudio",EMAIL:"cloudio@skyranch.com",TELEPHONE:"+63 917 555 0101"});
+    expect((await screen.findAllByText("Draft evidence saved.")).length).toBeGreaterThan(0);
+    await waitFor(()=>expect(screen.queryByText("Unsaved journey changes")).not.toBeInTheDocument());
+    expect(await screen.findByRole("button",{name:"Finalize Draft"})).toBeVisible();
   });
 
   it("recovers from governed draft creation failure without fake navigation and permits retry", async () => {
@@ -3938,6 +4447,8 @@ function optionField(
       .not.toBeInTheDocument();
     const popup = screen.getByText("Draft could not be saved").closest("[role='alert']");
     expect(popup).toHaveTextContent("Flow error");
+    expect(within(popup as HTMLElement).getByText("Flow error")).toHaveClass("break-words", "[overflow-wrap:anywhere]");
+    expect(within(popup as HTMLElement).getByRole("button", { name: "Dismiss save error" })).toHaveClass("shrink-0");
     await user.click(within(popup as HTMLElement).getByRole("button", { name: "Dismiss save error" }));
     expect(screen.queryByText("Draft could not be saved")).not.toBeInTheDocument();
     expect(within(flow).getByRole("alert")).toHaveTextContent("Flow error");

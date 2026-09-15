@@ -191,6 +191,17 @@ function mockFetchRoutes(routesToMock: MockRoute[]) {
 
     calls.push({ url, init });
 
+    if (
+      !route &&
+      method === "GET" &&
+      url === "/api/v1/registration/personnel-registration-intents/current"
+    ) {
+      return new Response(JSON.stringify({ intent: null }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
     if (!route) {
       throw new Error(`Unexpected fetch call: ${method} ${url}`);
     }
@@ -323,20 +334,13 @@ describe("Registration Personnel frontend", () => {
     expect(within(form).getByLabelText("Full name")).toHaveValue("Braven Burrows");
     await user.click(screen.getByRole("button", { name: "Create OGI Personnel" }));
 
-    expect(await screen.findByText("OGI Personnel record created successfully.")).toBeVisible();
+    expect(await screen.findByText("OGI Personnel registration completed successfully.")).toBeVisible();
     const createCall = calls.find((call) => call.url === "/api/v1/registration/personnel/ogi" && call.init?.method === "POST");
     const requestHeaders = new Headers(createCall?.init?.headers);
     expect(requestHeaders.get("idempotency-key")).toEqual(expect.any(String));
     expect(JSON.parse(String(createCall?.init?.body))).toMatchObject({ user_id: linkableUser.id, full_name: "Braven Burrows" });
 
-    const editForm = await screen.findByRole("form", { name: "Save Personnel" });
-    expect(within(editForm).getByLabelText("Client")).toHaveValue("Ocean Guard International");
-    await user.clear(within(editForm).getByLabelText("Notes"));
-    await user.type(within(editForm).getByLabelText("Notes"), "Instructor employment profile");
-    await user.click(within(editForm).getByRole("button", { name: "Save Personnel" }));
-    expect(await screen.findByText("Personnel record updated successfully.")).toBeVisible();
-    const updateCall = calls.find((call) => call.url === `/api/v1/registration/personnel/${ogiPersonnel.id}` && call.init?.method === "PATCH");
-    expect(JSON.parse(String(updateCall?.init?.body))).toMatchObject({ notes: "Instructor employment profile" });
+    expect(screen.getByRole("link", { name: "Open Personnel Masterlist" })).toHaveAttribute("href", routes.personnelMasterlist);
   });
 
   it("renders the Personnel route and exposes all implemented Registration routes", async () => {
@@ -347,39 +351,9 @@ describe("Registration Personnel frontend", () => {
 
     await user.click(await screen.findByRole("button", { name: "Menu" }));
     await user.click(screen.getByRole("button", { name: "Registration" }));
-    await user.click(screen.getByRole("link", { name: "Clients" }));
-
-    expect(
-      await screen.findByRole("heading", { name: "Clients / Organizations" })
-    ).toBeInTheDocument();
-
-    await user.click(within(screen.getByRole("navigation", { name: "Registration resource tabs" })).getByRole("link", { name: "Personnel" }));
-
-    expect(await screen.findByRole("heading", { name: "Personnel" })).toBeInTheDocument();
-    const registrationNavigation = screen.getByRole("navigation", { name: "Registration resource tabs" });
-    expect(within(registrationNavigation).getByRole("link", { name: "Clients" })).toHaveAttribute(
-      "href",
-      routes.registrationClients
-    );
-    expect(within(registrationNavigation).getByRole("link", { name: "Facilities" })).toHaveAttribute(
-      "href",
-      routes.registrationFacilities
-    );
-    expect(within(registrationNavigation).getByRole("link", { name: "Personnel" })).toHaveAttribute(
-      "href",
-      routes.registrationPersonnel
-    );
-    expect(within(registrationNavigation).getByRole("link", { name: "Personnel" })).toHaveAttribute(
-      "aria-current",
-      "page"
-    );
-    expect(await screen.findByText("Ana Santos")).toBeInTheDocument();
-    expect(screen.getByText("Jamie Brooks")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Register Personnel" })).toBeInTheDocument();
-    expect(screen.queryByRole("form", { name: "Create Personnel" })).not.toBeInTheDocument();
-    expect(
-      within(screen.getByRole("list", { name: "Personnel records" })).queryByText(staffA.id)
-    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("link", { name: "Register Personnel" }));
+    expect(await screen.findByRole("heading", { name: "Registration" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Register Personnel" })).toBeInTheDocument();
     expect(calls.some((call) => call.url.includes("/registration/credentials"))).toBe(false);
   });
 
@@ -408,13 +382,9 @@ describe("Registration Personnel frontend", () => {
       }
     ]));
 
-    renderWithRoute(routes.registrationPersonnel);
+    renderWithRoute(routes.personnelMasterlist);
 
-    await screen.findByRole("heading", { name: "Personnel" });
-    expect(within(screen.getByRole("navigation", { name: "Registration resource tabs" })).getByRole("link", { name: "Personnel" })).toHaveAttribute(
-      "aria-current",
-      "page"
-    );
+    await screen.findByRole("heading", { name: "Workforce" });
     const clientFilter = screen.getByLabelText("Client filter");
     await within(clientFilter).findByRole("option", { name: "Bluewater Resorts" }, { timeout: 5_000 });
     await user.selectOptions(clientFilter, clientB.id);
@@ -461,15 +431,10 @@ describe("Registration Personnel frontend", () => {
 
     renderWithRoute(routes.registrationPersonnel);
 
-    const clientFilter = await screen.findByLabelText("Client filter");
-    await within(clientFilter).findByRole("option", { name: "Bluewater Resorts" }, { timeout: 5_000 });
-    await user.selectOptions(clientFilter, clientB.id);
-    await screen.findByText("Jamie Brooks");
-    await user.click(screen.getByRole("button", { name: "Register Personnel" }));
+    await user.click(await screen.findByRole("button", { name: "Register Personnel" }));
 
     const registrationDialog = await screen.findByRole("dialog", { name: "Register Personnel" });
     expect(within(registrationDialog).getByLabelText("Governing Client")).toHaveValue(clientB.id);
-    expect(screen.getByLabelText("Client filter")).toHaveValue(clientB.id);
     expect(
       calls.some(
         (call) =>
@@ -499,14 +464,12 @@ describe("Registration Personnel frontend", () => {
 
     renderWithRoute(routes.registrationPersonnel);
 
-    await user.click(await screen.findByRole("button", { name: /Jamie Brooks/ }));
-    await screen.findByDisplayValue("Jamie Brooks");
-    await user.click(screen.getByRole("button", { name: "Register Personnel" }));
+    await user.click(await screen.findByRole("button", { name: "Register Personnel" }));
     const registrationDialog = await screen.findByRole("dialog", { name: "Register Personnel" });
     await user.type(within(registrationDialog).getByLabelText("Full name"), "Canceled Personnel");
     await user.click(within(registrationDialog).getByRole("button", { name: "Save and close" }));
 
-    expect(await screen.findByDisplayValue("Jamie Brooks")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Registration" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "Register Personnel" })).not.toBeInTheDocument();
     expect(
       calls.some(
@@ -516,7 +479,7 @@ describe("Registration Personnel frontend", () => {
     ).toBe(false);
   });
 
-  it("renders Overview by default, switches to Facilities, and resets to Overview on Personnel change", async () => {
+  it("renders Profile by default, exposes Facilities within Profile, and resets to Profile on Personnel change", async () => {
     const user = userEvent.setup();
     mockFetchRoutes(standardRoutes([
       {
@@ -533,36 +496,37 @@ describe("Registration Personnel frontend", () => {
       }
     ]));
 
-    renderWithRoute(routes.registrationPersonnel);
+    renderWithRoute(routes.personnelMasterlist);
 
-    expect(await screen.findByRole("tab", { name: "Overview" })).toHaveAttribute(
+    await user.click(await screen.findByRole("button", { name: /Ana Santos/ }));
+    expect(await screen.findByRole("tab", { name: "Profile" })).toHaveAttribute(
       "aria-selected",
       "true"
     );
-    expect(screen.getByRole("tab", { name: "Facilities" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Records" })).toBeInTheDocument();
     expect(await screen.findByDisplayValue("Ana Santos")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("tab", { name: "Facilities" }));
-
+    await user.click(screen.getByRole("button", { name: "Next Profile card" }));
     expect(await screen.findByRole("heading", { name: "Facility Assignments" })).toBeInTheDocument();
     expect(screen.getByText("Track where this person works.")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /Jamie Brooks/ }));
 
     expect(await screen.findByDisplayValue("Jamie Brooks")).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute(
+    expect(screen.getByRole("tab", { name: "Profile" })).toHaveAttribute(
       "aria-selected",
       "true"
     );
   });
 
-  it("hides the Facilities secondary tab without Facility Assignment view permission", async () => {
+  it("hides Facility content without Facility Assignment view permission", async () => {
     const sessionWithoutAssignments: AuthenticatedSession = {
       ...baseSession,
       permissions: baseSession.permissions.filter(
         (permission) => permission !== "view_facility_assignment"
       )
     };
+    const user = userEvent.setup();
     const { calls } = mockFetchRoutes([
       ...authRoutes(sessionWithoutAssignments),
       {
@@ -583,10 +547,11 @@ describe("Registration Personnel frontend", () => {
       }
     ]);
 
-    renderWithRoute(routes.registrationPersonnel);
+    renderWithRoute(routes.personnelMasterlist);
 
-    expect(await screen.findByRole("tab", { name: "Overview" })).toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "Facilities" })).not.toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: /Ana Santos/ }));
+    expect(await screen.findByRole("tab", { name: "Profile" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Facility Assignments" })).not.toBeInTheDocument();
     expect(calls.some((call) => call.url.includes("facility-assignments"))).toBe(false);
   });
 
@@ -666,13 +631,9 @@ describe("Registration Personnel frontend", () => {
     const registrationDialog = await screen.findByRole("dialog", { name: "Register Personnel" });
     await user.click(within(registrationDialog).getByRole("button", { name: "Complete Registration" }));
 
-    expect(await screen.findByText("Registration completed successfully.")).toBeInTheDocument();
+    expect(await screen.findByText("Personnel registration completed successfully.")).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "Register Personnel" })).not.toBeInTheDocument();
-    expect(await screen.findByDisplayValue("Morgan Lee")).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute(
-      "aria-selected",
-      "true"
-    );
+    expect(screen.getByRole("link", { name: "Open Personnel Masterlist" })).toHaveAttribute("href", routes.personnelMasterlist);
     const createCall = calls.find(
       (call) => call.url === "/api/v1/registration/personnel" && call.init?.method === "POST"
     );
@@ -727,8 +688,9 @@ describe("Registration Personnel frontend", () => {
       }
     ]));
 
-    renderWithRoute(routes.registrationPersonnel);
+    renderWithRoute(routes.personnelMasterlist);
 
+    await user.click(await screen.findByRole("button", { name: /Ana Santos/ }));
     const editForm = await screen.findByRole("form", { name: "Save Personnel" });
     await user.clear(within(editForm).getByLabelText("Full name"));
     await user.type(within(editForm).getByLabelText("Full name"), "Ana Santos Updated");
@@ -780,8 +742,9 @@ describe("Registration Personnel frontend", () => {
       }
     ]));
 
-    renderWithRoute(routes.registrationPersonnel);
+    renderWithRoute(routes.personnelMasterlist);
 
+    await user.click(await screen.findByRole("button", { name: /Ana Santos/ }));
     await user.click(await screen.findByRole("button", { name: "Deactivate Personnel" }));
 
     expect(await screen.findByText("Personnel record updated successfully.")).toBeInTheDocument();
@@ -813,12 +776,12 @@ describe("Registration Personnel frontend", () => {
       }
     ]);
 
-    renderWithRoute(routes.registrationPersonnel);
+    renderWithRoute(routes.personnelMasterlist);
 
     expect(await screen.findByText("Loading Personnel records.")).toBeInTheDocument();
     expect(
       await screen.findByRole("heading", {
-        name: "No Personnel match the current filters."
+        name: "No Personnel selected."
       })
     ).toBeInTheDocument();
 
@@ -846,7 +809,7 @@ describe("Registration Personnel frontend", () => {
       }
     ]);
 
-    renderWithRoute(routes.registrationPersonnel);
+    renderWithRoute(routes.personnelMasterlist);
 
     expect(
       await screen.findByRole("heading", {
@@ -946,10 +909,10 @@ describe("Registration Personnel frontend", () => {
     renderWithRoute(routes.workbench);
 
     await user.click(await screen.findByRole("button", { name: "Menu" }));
-    await user.click(screen.getByRole("button", { name: "Registration" }));
-    await user.click(screen.getByRole("link", { name: "Personnel" }));
+    await user.click(screen.getByRole("button", { name: "Workforce" }));
+    await user.click(screen.getByRole("link", { name: "Personnel Masterlist" }));
 
-    expect(await screen.findByRole("heading", { name: "Personnel" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Workforce" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Clients" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Facilities" })).not.toBeInTheDocument();
     expect(calls.some((call) => call.url === "/api/v1/registration/clients")).toBe(false);

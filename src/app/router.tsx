@@ -8,6 +8,7 @@ import { AuditRiskWorkspacePage } from "../audit-risk/AuditRiskWorkspacePage";
 import { RegistrationClientsPage } from "../registration/RegistrationClientsPage";
 import { RegistrationFacilitiesPage } from "../registration/RegistrationFacilitiesPage";
 import { RegistrationPersonnelPage } from "../registration/RegistrationPersonnelPage";
+import { PersonnelRegistrationPage } from "../registration/PersonnelRegistrationPage";
 import { AppShell } from "../ui/layout/AppShell";
 import { routes } from "./routePaths";
 import { AdministrationPage } from "./routes/AdministrationPage";
@@ -29,7 +30,10 @@ const CredentialsListPage = lazy(() => import("../credentials/CredentialsPage").
 const CertificateDevPreviewPage = lazy(() => import("../credentials/CertificatePage").then((module) => ({ default: module.CertificateDevPreviewPage })));
 const CertificatePage = lazy(() => import("../credentials/CertificatePage").then((module) => ({ default: module.CertificatePage })));
 const RegistrationTrainingPage = lazy(() => import("../training/RegistrationTrainingPage").then((module) => ({ default: module.RegistrationTrainingPage })));
+const RequestTrainingPage = lazy(() => import("../training/RequestTrainingPage").then((module) => ({ default: module.RequestTrainingPage })));
 const TrainerCommercialEvaluationPage = lazy(() => import("../training/TrainerCommercialEvaluationPage").then((module) => ({ default: module.TrainerCommercialEvaluationPage })));
+const FacilityAssessmentJourneysPage = lazy(() => import("../assessments/FacilityAssessmentJourneysPage").then((module) => ({ default: module.FacilityAssessmentJourneysPage })));
+const AuditorAppointmentsPage = lazy(() => import("../governance/AuditorAppointmentsPage").then((module) => ({ default: module.AuditorAppointmentsPage })));
 
 function lazyRoute(element: ReactNode) {
   return <Suspense fallback={<p role="status">Loading workspace.</p>}>{element}</Suspense>;
@@ -110,15 +114,31 @@ export const appRoutes: RouteObject[] = [
           },
           {
             path: "workbench/registration/clients",
-            element: <RegistrationClientsPage />
+            element: <RegistrationClientsPage workspace="registration" />
           },
           {
             path: "workbench/registration/facilities",
-            element: <RegistrationFacilitiesPage />
+            element: <RegistrationFacilitiesPage workspace="registration" />
           },
           {
             path: "workbench/registration/personnel",
+            element: <PersonnelRegistrationPage />
+          },
+          {
+            path: "workbench/organizations/clients",
+            element: <RegistrationClientsPage workspace="masterlist" />
+          },
+          {
+            path: "workbench/organizations/facilities",
+            element: <RegistrationFacilitiesPage workspace="masterlist" />
+          },
+          {
+            path: "workbench/workforce/personnel",
             element: <RegistrationPersonnelPage />
+          },
+          {
+            path: "workbench/assessments/facility-journeys",
+            element: lazyRoute(<FacilityAssessmentJourneysPage />)
           },
           {
             path: "workbench/registration/training",
@@ -139,6 +159,10 @@ export const appRoutes: RouteObject[] = [
           {
             path: "workbench/training/sessions",
             element: lazyRoute(<RegistrationTrainingPage workspace="sessions" />)
+          },
+          {
+            path: "workbench/training/requests",
+            element: lazyRoute(<RequestTrainingPage />)
           },
           {
             path: "workbench/training/register",
@@ -175,6 +199,10 @@ export const appRoutes: RouteObject[] = [
           {
             path: "workbench/governance/queue",
             element: lazyRoute(<GovernanceQueuePage />)
+          },
+          {
+            path: "workbench/governance/auditor-appointments",
+            element: lazyRoute(<AuditorAppointmentsPage />)
           },
           {
             path: "workbench/oets/:templateCode",

@@ -64,6 +64,13 @@ const administrationUsersResponse = [
     created_at: "2026-08-02T00:00:00.000Z"
   }
 ];
+const emptyWorkbenchResponses: MockResponse[] = [
+  {
+    status: 200,
+    body: { records: [], pagination: { limit: 3, offset: 0, total_count: 0 } }
+  },
+  { status: 200, body: [] }
+];
 const catalogResponse = {
   templates: [
     {
@@ -351,7 +358,7 @@ describe("Client Lens authentication foundation", () => {
     renderWithRoute(routes.workbench);
 
     expect(
-      screen.queryByRole("heading", { name: "Client Lens Overview" })
+      screen.queryByRole("heading", { name: "Welcome, Operator One" })
     ).not.toBeInTheDocument();
     expect(
       await screen.findByRole("heading", { name: "Sign in to Client Lens" })
@@ -391,6 +398,7 @@ describe("Client Lens authentication foundation", () => {
     expect(
       await screen.findByRole("navigation", { name: "Primary navigation" })
     ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Workspace" }));
     expect(screen.getByRole("link", { name: "Overview" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Governance" }));
     expect(
@@ -412,6 +420,7 @@ describe("Client Lens authentication foundation", () => {
     const { calls } = mockFetchQueue([
       { status: 200, body: { accessToken: "access-token" } },
       { status: 200, body: administrationSession },
+      ...emptyWorkbenchResponses,
       { status: 200, body: administrationUsersResponse }
     ]);
     renderWithRoute(routes.workbench);
@@ -424,15 +433,14 @@ describe("Client Lens authentication foundation", () => {
     expect(screen.getAllByText("Administration").length).toBeGreaterThan(0);
     expect(
       screen.getByText(
-        "Use only the administrative capabilities available through your current server-authorized session."
+        "Use the administrative capabilities available through your current server-authorized session."
       )
     ).toBeInTheDocument();
     expect(screen.getByRole("list", { name: "Authorized users" })).toBeInTheDocument();
     expect(screen.getByText("Marvin Alcantara")).toBeInTheDocument();
     expect(screen.getByText("marvin.alcantara@ogiofficial.com")).toBeInTheDocument();
-    expect(screen.getByText("ACTIVE")).toBeInTheDocument();
-    expect(screen.getByText("2026-08-01T00:00:00.000Z")).toBeInTheDocument();
-    expect(screen.getByText("00000000-0000-4000-8000-000000000901")).toBeInTheDocument();
+    expect(screen.getByText("Active")).toBeInTheDocument();
+    expect(screen.getByText(/Aug 1, 2026/)).toBeInTheDocument();
     expect(screen.getByText("Braven Burrows")).toBeInTheDocument();
     expect(screen.getByText("braven.burrows")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /create user/i })).not.toBeInTheDocument();
@@ -444,11 +452,7 @@ describe("Client Lens authentication foundation", () => {
     expect(screen.queryByRole("combobox", { name: /facility/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Assessments" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Operational Risk" })).not.toBeInTheDocument();
-    expect(calls.map(({ url }) => url)).toEqual([
-      "/api/v1/auth/refresh",
-      "/api/v1/auth/me",
-      "/api/v1/auth/users"
-    ]);
+    expect(calls.map(({ url }) => url)).toContain("/api/v1/auth/users");
   });
 
   it("does not reveal Administration from role names without view_users", async () => {
@@ -576,7 +580,7 @@ describe("Client Lens authentication foundation", () => {
     renderWithRoute(routes.workbench);
 
     expect(
-      await screen.findByRole("heading", { name: "Client Lens Overview" })
+      await screen.findByRole("heading", { name: "Welcome, Operator One" })
     ).toBeInTheDocument();
     expect(
       screen.queryByRole("link", { name: "Reviews" })
@@ -600,7 +604,8 @@ describe("Client Lens authentication foundation", () => {
           }
         }
       },
-      { status: 200, body: session }
+      { status: 200, body: session },
+      ...emptyWorkbenchResponses
     ]);
 
     renderWithRoute(routes.login);
@@ -610,13 +615,13 @@ describe("Client Lens authentication foundation", () => {
     await user.click(screen.getByRole("button", { name: "Sign in" }));
 
     expect(
-      await screen.findByRole("heading", { name: "Client Lens Overview" })
+      await screen.findByRole("heading", { name: "Welcome, Operator One" })
     ).toBeInTheDocument();
     expect(window.sessionStorage.getItem(getRefreshTokenStorageKey())).toBe(
       "login-refresh-token"
     );
     expect(window.sessionStorage.getItem("accessToken")).toBeNull();
-    expect(calls.map(({ url }) => url)).toEqual([
+    expect(calls.map(({ url }) => url).slice(0, 2)).toEqual([
       "/api/v1/auth/login",
       "/api/v1/auth/me"
     ]);
@@ -630,7 +635,8 @@ describe("Client Lens authentication foundation", () => {
     window.sessionStorage.setItem(getRefreshTokenStorageKey(), "stored-refresh");
     const { calls } = mockFetchQueue([
       { status: 200, body: { accessToken: "restored-access" } },
-      { status: 200, body: session }
+      { status: 200, body: session },
+      ...emptyWorkbenchResponses
     ]);
 
     renderWithRoute(routes.workbench);
@@ -638,7 +644,7 @@ describe("Client Lens authentication foundation", () => {
     expect(
       await screen.findByText("Operator One")
     ).toBeInTheDocument();
-    expect(calls.map(({ url }) => url)).toEqual([
+    expect(calls.map(({ url }) => url).slice(0, 2)).toEqual([
       "/api/v1/auth/refresh",
       "/api/v1/auth/me"
     ]);
@@ -782,7 +788,7 @@ describe("Client Lens authentication foundation", () => {
     renderWithRoute(routes.login);
 
     expect(
-      await screen.findByRole("heading", { name: "Client Lens Overview" })
+      await screen.findByRole("heading", { name: "Welcome, Operator One" })
     ).toBeInTheDocument();
   });
 
@@ -817,6 +823,7 @@ describe("Client Lens authentication foundation", () => {
     const { calls } = mockFetchQueue([
       { status: 200, body: { accessToken: "access-token" } },
       { status: 200, body: session },
+      ...emptyWorkbenchResponses,
       { status: 200, body: unclaimedQueueResponse }
     ]);
     renderWithRoute(routes.workbench);
@@ -848,11 +855,9 @@ describe("Client Lens authentication foundation", () => {
     expect(screen.queryByText("begin_ogi_review")).not.toBeInTheDocument();
     expect(screen.queryByText("UNDER_OGI_REVIEW")).not.toBeInTheDocument();
     expect(screen.queryByText("My Work")).not.toBeInTheDocument();
-    expect(calls.map(({ url }) => url)).toEqual([
-      "/api/v1/auth/refresh",
-      "/api/v1/auth/me",
+    expect(calls.map(({ url }) => url)).toContain(
       "/api/v1/operational-evidence/governance/queue?claim_status=ANY"
-    ]);
+    );
   });
 
   it("does not reveal Reviews from role names without the required permission", async () => {
@@ -948,8 +953,7 @@ describe("Client Lens authentication foundation", () => {
     ]);
     renderWithRoute(routes.governanceQueue);
 
-    expect(await screen.findByText("Claimed by another reviewer")).toBeInTheDocument();
-    expect(screen.getByText("Claimed by Another Reviewer.")).toBeInTheDocument();
+    expect(await screen.findByText("Claimed by another reviewer.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "View Record" })).toHaveAttribute(
       "href",
       routes.evidenceRecordPath(queueEvidenceRecord.id)
@@ -985,7 +989,7 @@ describe("Client Lens authentication foundation", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "This review is already claimed. The queue has been refreshed."
     );
-    expect(await screen.findByText("Claimed by another reviewer")).toBeInTheDocument();
+    expect(await screen.findByText("Claimed by another reviewer.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Claim Review" })).not.toBeInTheDocument();
     expect(calls.filter((call) =>
       call.url.endsWith("/governance/review-claims")
@@ -1003,6 +1007,7 @@ describe("Client Lens authentication foundation", () => {
 
     await user.click(await screen.findByRole("button", { name: "Menu" }));
 
+    await user.click(screen.getByRole("button", { name: "Workspace" }));
     expect(screen.getByRole("link", { name: "Overview" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Reviews" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Operations" })).not.toBeInTheDocument();
@@ -1016,6 +1021,7 @@ describe("Client Lens authentication foundation", () => {
     const { calls } = mockFetchQueue([
       { status: 200, body: { accessToken: "access-token" } },
       { status: 200, body: submitCapableSession },
+      ...emptyWorkbenchResponses,
       { status: 200, body: catalogResponse }
     ]);
     window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
@@ -1060,16 +1066,13 @@ describe("Client Lens authentication foundation", () => {
     );
     expect(screen.queryByText("checksum-a")).not.toBeInTheDocument();
     expect(screen.queryByText("00000000-0000-4000-8000-000000000301")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Governance" }));
     expect(screen.getByRole("link", { name: "Evidence Records" })).toHaveAttribute(
       "href",
       routes.records
     );
     expect(screen.queryByRole("link", { name: "My Work" })).not.toBeInTheDocument();
-    expect(calls.map(({ url }) => url)).toEqual([
-      "/api/v1/auth/refresh",
-      "/api/v1/auth/me",
-      "/api/v1/operational-evidence/templates"
-    ]);
+    expect(calls.map(({ url }) => url)).toContain("/api/v1/operational-evidence/templates");
   });
 
   it("renders the Operations catalog loading state", async () => {

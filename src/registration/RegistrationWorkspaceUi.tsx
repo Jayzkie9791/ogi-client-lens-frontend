@@ -196,14 +196,14 @@ export function RegistrationEditableSection({
 }) {
   return (
     <section
-      className="overflow-hidden rounded-component border border-border bg-surface shadow-sm"
+      className="cl-editable-section overflow-hidden rounded-component border"
       data-registration-section="operational"
     >
-      <div className="border-b border-l-4 border-b-border border-l-accent-red bg-elevated px-4 py-3">
+      <div className="border-b border-l-4 border-b-[var(--cl-editable-section-border)] border-l-accent-red bg-elevated px-4 py-3">
         <h3 className="text-base font-semibold text-primary-navy">{title}</h3>
         {description ? <p className="mt-1 text-sm text-text-muted">{description}</p> : null}
       </div>
-      <div className="p-4">{children}</div>
+      <div className="bg-[var(--cl-editable-section-body)] p-4">{children}</div>
     </section>
   );
 }

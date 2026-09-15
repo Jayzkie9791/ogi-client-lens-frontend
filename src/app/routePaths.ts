@@ -23,10 +23,17 @@ export const routes = {
   registrationClients: "/workbench/registration/clients",
   registrationFacilities: "/workbench/registration/facilities",
   registrationPersonnel: "/workbench/registration/personnel",
+  clientMasterlist: "/workbench/organizations/clients",
+  facilityMasterlist: "/workbench/organizations/facilities",
+  personnelMasterlist: "/workbench/workforce/personnel",
+  facilityAssessmentJourneys: "/workbench/assessments/facility-journeys",
+  personnelProfilePath: (staffMemberId: string) =>
+    `/workbench/workforce/personnel?personnel=${encodeURIComponent(staffMemberId)}`,
   registrationTraining: "/workbench/training/trainees",
   training: "/workbench/training",
   trainingTrainees: "/workbench/training/trainees",
   trainingSessions: "/workbench/training/sessions",
+  trainingRequests: "/workbench/training/requests",
   trainingRegister: "/workbench/training/register",
   trainingJourneys: "/workbench/training/journeys",
   trainingJourneyPath: (enrollmentId: string) =>
@@ -44,6 +51,7 @@ export const routes = {
   credentialCertificateDevPreview:
     "/workbench/credentials/certificates/dev-preview",
   governanceQueue: "/workbench/governance/queue",
+  auditorAppointments: "/workbench/governance/auditor-appointments",
   oetsTemplate: "/workbench/oets/:templateCode",
   oetsTemplatePath: (templateCode: string) =>
     `/workbench/oets/${encodeURIComponent(templateCode)}`,

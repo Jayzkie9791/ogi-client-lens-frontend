@@ -1,10 +1,14 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 
 import { isApiError } from "../api/errors";
+import { routes } from "../app/routePaths";
 import { useAuth } from "../auth/useAuth";
 import { Button } from "../ui/components/Button";
 import { Surface } from "../ui/components/Surface";
+import { RecordAccordion } from "../ui/components/RecordAccordion";
+import { WorkspaceShell } from "../ui/components/WorkspaceShell";
 import {
   createRegistrationClient,
   getRegistrationClient,
@@ -18,14 +22,10 @@ import {
 import { RegistrationWorkspaceShell } from "./RegistrationWorkspaceShell";
 import { formatRegistrationDateTime } from "./registrationPresentation";
 import {
-  RegistrationDirectoryItem,
-  RegistrationDirectoryPane,
   RegistrationEditableSection,
-  RegistrationEntityHeader,
   RegistrationMetadataGroup,
   RegistrationMetadataItem,
-  RegistrationStatusBadge,
-  RegistrationWorkspaceFrame
+  RegistrationStatusBadge
 } from "./RegistrationWorkspaceUi";
 
 const permissions = {
@@ -55,7 +55,7 @@ const emptyCreateForm: ClientFormState = {
   notes: ""
 };
 
-export function RegistrationClientsPage() {
+export function RegistrationClientsPage({ workspace = "masterlist" }: { workspace?: "registration" | "masterlist" }) {
   const auth = useAuth();
   const queryClient = useQueryClient();
   const canView = auth.canUsePermission(permissions.view);
@@ -63,8 +63,6 @@ export function RegistrationClientsPage() {
   const canUpdate = auth.canUsePermission(permissions.update);
   const canDeactivate = auth.canUsePermission(permissions.deactivate);
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
-  const [clientIdBeforeCreate, setClientIdBeforeCreate] = useState<string | null>(null);
-  const [isCreating, setIsCreating] = useState(false);
   const [createForm, setCreateForm] = useState<ClientFormState>(emptyCreateForm);
   const [editForm, setEditForm] = useState<ClientFormState | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -81,8 +79,8 @@ export function RegistrationClientsPage() {
   );
 
   useEffect(() => {
-    if (!selectedClientId && clients.length > 0) {
-      setSelectedClientId(clients[0].id);
+    if (selectedClientId && !clients.some((client) => client.id === selectedClientId)) {
+      setSelectedClientId(null);
     }
   }, [clients, selectedClientId]);
 
@@ -104,8 +102,6 @@ export function RegistrationClientsPage() {
     onSuccess: (client) => {
       setMessage("Client / Organization created successfully.");
       setCreateForm(emptyCreateForm);
-      setIsCreating(false);
-      setClientIdBeforeCreate(null);
       setSelectedClientId(client.id);
       void queryClient.invalidateQueries({ queryKey: ["registration-clients"] });
       queryClient.setQueryData(["registration-client", client.id], client);
@@ -149,29 +145,12 @@ export function RegistrationClientsPage() {
     updateMutation.mutate({ status: "INACTIVE" });
   }
 
-  function startCreateClient() {
+  function selectClient(clientId: string | null) {
     setMessage(null);
-    setClientIdBeforeCreate(selectedClientId);
-    setCreateForm(emptyCreateForm);
-    setIsCreating(true);
-  }
-
-  function cancelCreateClient() {
-    setMessage(null);
-    setCreateForm(emptyCreateForm);
-    setSelectedClientId(clientIdBeforeCreate);
-    setClientIdBeforeCreate(null);
-    setIsCreating(false);
-  }
-
-  function selectClient(clientId: string) {
-    setMessage(null);
-    setIsCreating(false);
-    setClientIdBeforeCreate(null);
     setSelectedClientId(clientId);
   }
 
-  if (!canView) {
+  if (workspace === "masterlist" && !canView) {
     return (
       <SafeState title="You are not authorized to view Client / Organization registration.">
         Your current session does not include Client / Organization registration authority.
@@ -179,29 +158,28 @@ export function RegistrationClientsPage() {
     );
   }
 
+  if (workspace === "registration" && !canCreate) {
+    return <SafeState title="You are not authorized to register Clients / Organizations.">Your current session does not include Client registration authority.</SafeState>;
+  }
+
+  if (workspace === "registration") {
+    return <RegistrationWorkspaceShell description="Create a new organization registration record." headingId="registration-clients-heading" title="Register Client / Organization">
+      {message ? <Surface role="status"><p className="text-sm font-semibold text-text-primary">{message}</p><Link className="mt-3 inline-flex font-semibold text-primary-blue underline" to={routes.clientMasterlist}>Open Client Masterlist</Link></Surface> : null}
+      <RegistrationErrorAlert error={createMutation.error} />
+      <ClientCreatePanel formState={createForm} isSubmitting={createMutation.isPending} onCancel={() => setCreateForm(emptyCreateForm)} onChange={setCreateForm} onSubmit={submitCreateForm} />
+    </RegistrationWorkspaceShell>;
+  }
+
   return (
-    <RegistrationWorkspaceShell
-      description="Manage organizations registered with Client Lens."
+    <WorkspaceShell
+      description="Review and maintain organizations registered with Client Lens."
       headingId="registration-clients-heading"
+      navigation={null}
+      sectionDescription="Select a Client record to review and maintain its registration details."
+      sectionTitle="Client Masterlist"
+      showSectionHeader={false}
       title="Clients / Organizations"
     >
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <p className="text-sm leading-6 text-text-muted">
-            Find existing organizations, review registration details, and maintain lifecycle information.
-          </p>
-        </div>
-        {canCreate ? (
-          <Button
-            aria-expanded={isCreating}
-            onClick={startCreateClient}
-            type="button"
-          >
-            Register Client
-          </Button>
-        ) : null}
-      </div>
-
       {message ? (
         <Surface role="status">
           <p className="text-sm font-semibold text-text-primary">{message}</p>
@@ -217,27 +195,8 @@ export function RegistrationClientsPage() {
       ) : clientsQuery.isError ? (
         <RegistrationClientsErrorState error={clientsQuery.error} />
       ) : (
-        <RegistrationWorkspaceFrame
-          directory={
-            <ClientsList
-              clients={clients}
-              onSelectClient={selectClient}
-              selectedClientId={selectedClientId}
-            />
-          }
-          workspace={
-            isCreating ? (
-              <ClientCreatePanel
-                formState={createForm}
-                isSubmitting={createMutation.isPending}
-                onCancel={cancelCreateClient}
-                onChange={setCreateForm}
-                onSubmit={submitCreateForm}
-              />
-            ) : clients.length === 0 ? (
-              <ClientEmptyDetailPanel canCreate={canCreate} />
-            ) : (
-              <ClientDetailsPanel
+        clients.length === 0 ? <ClientEmptyDetailPanel canCreate={false} /> : <div aria-label="Client / Organization records" className="space-y-4">{clients.map((client) => <RecordAccordion expanded={selectedClientId === client.id} id={`client-${client.id}`} key={client.id} onToggle={() => selectClient(selectedClientId === client.id ? null : client.id)} summary={<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-xs font-bold uppercase tracking-wide text-primary-blue">Client / Organization</p><h2 className="mt-1 text-lg font-semibold text-primary-navy">{client.organization_name}</h2><p className="mt-1 text-sm text-text-muted">{client.contact_email ?? client.country ?? "No contact details recorded"}</p></div><RegistrationStatusBadge value={client.status} /></div>}>
+          {selectedClientId === client.id ? <ClientDetailsPanel
                 canDeactivate={canDeactivate}
                 canUpdate={canUpdate}
                 client={selectedClientQuery.data ?? null}
@@ -247,69 +206,10 @@ export function RegistrationClientsPage() {
                 onDeactivate={deactivateSelectedClient}
                 onEditChange={setEditForm}
                 onSubmit={submitEditForm}
-              />
-            )
-          }
-        />
+              /> : null}
+        </RecordAccordion>)}</div>
       )}
-    </RegistrationWorkspaceShell>
-  );
-}
-
-function ClientsList({
-  clients,
-  onSelectClient,
-  selectedClientId
-}: {
-  clients: RegistrationClient[];
-  onSelectClient: (clientId: string) => void;
-  selectedClientId: string | null;
-}) {
-  return (
-    <RegistrationDirectoryPane
-      description="Select an organization to review its registration details."
-      title="Client Records"
-      emptyState={
-        <div className="rounded-component border border-dashed border-border p-4">
-          <h3 className="text-sm font-semibold text-text-primary">
-            No Clients registered yet.
-          </h3>
-          <p className="mt-2 text-sm text-text-muted">
-            Use Register Client to add the first organization when you have create authority.
-          </p>
-        </div>
-      }
-    >
-      {clients.length === 0 ? undefined : (
-        <ul aria-label="Client / Organization records" className="space-y-2">
-          {clients.map((client) => {
-            const isSelected = selectedClientId === client.id;
-
-            return (
-              <li key={client.id}>
-                <RegistrationDirectoryItem
-                  isSelected={isSelected}
-                  onSelect={() => onSelectClient(client.id)}
-                >
-                  <span className="block break-words text-sm font-semibold text-text-primary">
-                    {client.organization_name}
-                  </span>
-                  <span className="mt-2 flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-wide text-text-muted">
-                    <RegistrationStatusBadge value={client.status} />
-                    {client.country ? <span>{client.country}</span> : null}
-                  </span>
-                  {client.contact_email ? (
-                    <span className="mt-2 block break-words text-sm text-text-muted">
-                      {client.contact_email}
-                    </span>
-                  ) : null}
-                </RegistrationDirectoryItem>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </RegistrationDirectoryPane>
+    </WorkspaceShell>
   );
 }
 
@@ -351,15 +251,7 @@ function ClientDetailsPanel({
   }
 
   return (
-    <Surface>
       <div className="space-y-4">
-        <RegistrationEntityHeader
-          heading="Client / Organization Details"
-          identity={client.organization_name}
-          secondary={client.contact_email ?? "No contact email recorded"}
-          status={client.status}
-        />
-
         <RegistrationMetadataGroup description="System references and record history remain available for traceability.">
           <RegistrationMetadataItem
             label="Administrative Client ID"
@@ -404,7 +296,6 @@ function ClientDetailsPanel({
           </Button>
         ) : null}
       </div>
-    </Surface>
   );
 }
 

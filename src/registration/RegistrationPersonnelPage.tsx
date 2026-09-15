@@ -1,10 +1,16 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link, useSearchParams } from "react-router-dom";
 
 import { isApiError } from "../api/errors";
+import { routes } from "../app/routePaths";
 import { useAuth } from "../auth/useAuth";
+import { DigitalCertificateModal } from "../credentials/DigitalCertificateModal";
+import { listTrainingEnrollments, listTrainingTrainees, TrainingEnrollment } from "../training/trainingApi";
 import { Button } from "../ui/components/Button";
 import { Surface } from "../ui/components/Surface";
+import { WorkspaceShell } from "../ui/components/WorkspaceShell";
+import { RecordAccordion } from "../ui/components/RecordAccordion";
 import {
   listRegistrationClients,
   RegistrationClient
@@ -24,29 +30,21 @@ import {
 } from "./registrationPersonnelApi";
 import { RegistrationFacilityAssignmentsPanel } from "./RegistrationFacilityAssignmentsPanel";
 import { listRegistrationFacilityAssignments } from "./registrationFacilityAssignmentApi";
-import { OgiPersonnelCreatePanel } from "./OgiPersonnelCreatePanel";
-import { ClientPersonnelRegistrationWizard } from "./ClientPersonnelRegistrationWizard";
-import { getCurrentPersonnelRegistrationIntent, getPersonnelRegistrationIntent } from "./personnelRegistrationJourneyApi";
+import { getPersonnelRegistrationIntent } from "./personnelRegistrationJourneyApi";
 import { OgiOperationalAuthorityPanel } from "./OgiOperationalAuthorityPanel";
 import { OgiInstructorQualificationPanel } from "./OgiInstructorQualificationPanel";
-import { RegistrationWorkspaceShell } from "./RegistrationWorkspaceShell";
 import { formatRegistrationDate, formatRegistrationDateTime } from "./registrationPresentation";
 import {
-  RegistrationDirectoryItem,
-  RegistrationDirectoryPane,
   RegistrationEditableSection,
-  RegistrationEntityHeader,
   RegistrationMetadataGroup,
   RegistrationMetadataItem,
-  RegistrationStatusBadge,
-  RegistrationWorkspaceFrame
+  RegistrationStatusBadge
 } from "./RegistrationWorkspaceUi";
 
 const permissions = {
   viewClients: "view_client",
   viewFacilities: "view_facility",
   view: "view_staff_member",
-  create: "create_staff_member",
   update: "update_staff_member",
   deactivate: "deactivate_staff_member",
   viewFacilityAssignments: "view_facility_assignment"
@@ -57,9 +55,10 @@ const permissions = {
   ,issueCertification: "issue_certification"
   ,viewInstructorRegistry: "view_instructor_registry"
   ,manageInstructorRegistry: "manage_instructor_registry"
+  ,viewTraining: "view_training"
 } as const;
 
-type PersonnelSecondaryTab = "overview" | "facilities";
+type PersonnelSecondaryTab = "profile" | "training" | "records";
 
 interface PersonnelFormState {
   clientId: string;
@@ -71,23 +70,16 @@ interface PersonnelFormState {
   notes: string;
 }
 
-const emptyCreateForm: PersonnelFormState = {
-  clientId: "",
-  fullName: "",
-  email: "",
-  phoneNumber: "",
-  employmentStatus: "ACTIVE",
-  hireDate: "",
-  notes: ""
-};
-
 export function RegistrationPersonnelPage() {
   const auth = useAuth();
+  const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const canViewClients = auth.canUsePermission(permissions.viewClients);
   const canViewFacilities = auth.canUsePermission(permissions.viewFacilities);
   const canView = auth.canUsePermission(permissions.view);
-  const canCreate = auth.canUsePermission(permissions.create);
+  const canViewTraining = auth.canUsePermission(permissions.viewTraining);
+  const canRegisterTraining = auth.canUsePermission("create_training_enrollment");
+  const canViewPersonnelCertificates = auth.canUsePermission(permissions.viewCertification);
   const canUpdate = auth.canUsePermission(permissions.update);
   const canDeactivate = auth.canUsePermission(permissions.deactivate);
   const canViewFacilityAssignments = auth.canUsePermission(
@@ -106,17 +98,9 @@ export function RegistrationPersonnelPage() {
     RegistrationPersonnelEmploymentStatus | ""
   >("");
   const [selectedPersonnelId, setSelectedPersonnelId] = useState<string | null>(null);
-  const [personnelIdBeforeCreate, setPersonnelIdBeforeCreate] = useState<string | null>(null);
-  const [isCreating, setIsCreating] = useState(false);
-  const [isCreatingOgi, setIsCreatingOgi] = useState(false);
-  const [selectedTab, setSelectedTab] = useState<PersonnelSecondaryTab>("overview");
-  const [createForm, setCreateForm] = useState<PersonnelFormState>({
-    ...emptyCreateForm,
-    clientId: auth.session?.clientId ?? ""
-  });
+  const [selectedTab, setSelectedTab] = useState<PersonnelSecondaryTab>("profile");
   const [editForm, setEditForm] = useState<PersonnelFormState | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const currentJourneyQuery = useQuery({queryKey:["personnel-registration-intent","current"],queryFn:getCurrentPersonnelRegistrationIntent,enabled:canCreate,retry:false});
 
   const clientsQuery = useQuery({
     queryKey: ["registration-clients"],
@@ -129,12 +113,6 @@ export function RegistrationPersonnelPage() {
     [clientsQuery.data]
   );
   const clientNameById = useMemo(() => buildClientNameMap(clients), [clients]);
-
-  useEffect(() => {
-    if (!createForm.clientId && clients.length > 0) {
-      setCreateForm((current) => ({ ...current, clientId: clients[0].id }));
-    }
-  }, [clients, createForm.clientId]);
 
   const facilitiesQuery = useQuery({
     queryKey: ["registration-facilities", clientFilter],
@@ -170,22 +148,25 @@ export function RegistrationPersonnelPage() {
   );
 
   useEffect(() => {
-    if (!selectedPersonnelId && personnel.length > 0) {
-      setSelectedPersonnelId(personnel[0].id);
+    const requestedPersonnelId = searchParams.get("personnel");
+    if (requestedPersonnelId && personnel.some((staffMember) => staffMember.id === requestedPersonnelId)) {
+      setSelectedPersonnelId(requestedPersonnelId);
     }
+  }, [personnel, searchParams]);
 
+  useEffect(() => {
     if (
       selectedPersonnelId &&
       personnel.length > 0 &&
       !personnel.some((staffMember) => staffMember.id === selectedPersonnelId)
     ) {
-      setSelectedPersonnelId(personnel[0].id);
-      setSelectedTab("overview");
+      setSelectedPersonnelId(null);
+      setSelectedTab("profile");
     }
 
     if (selectedPersonnelId && personnel.length === 0) {
       setSelectedPersonnelId(null);
-      setSelectedTab("overview");
+      setSelectedTab("profile");
     }
   }, [personnel, selectedPersonnelId]);
 
@@ -236,73 +217,28 @@ export function RegistrationPersonnelPage() {
     updateMutation.mutate({ employment_status: "INACTIVE" });
   }
 
-  function startCreatePersonnel() {
-    setMessage(null);
-    setPersonnelIdBeforeCreate(selectedPersonnelId);
-    setCreateForm({
-      ...emptyCreateForm,
-      clientId:
-        clientFilter ||
-        auth.session?.clientId ||
-        createForm.clientId ||
-        clients[0]?.id ||
-        ""
-    });
-    setIsCreating(true);
-    setIsCreatingOgi(false);
-    setSelectedTab("overview");
-  }
-
-  function startCreateOgiPersonnel() {
-    setMessage(null);
-    setPersonnelIdBeforeCreate(selectedPersonnelId);
-    setIsCreating(false);
-    setIsCreatingOgi(true);
-    setSelectedTab("overview");
-  }
-
-  function cancelCreatePersonnel() {
-    setMessage(null);
-    setCreateForm({
-      ...emptyCreateForm,
-      clientId: clientFilter || auth.session?.clientId || createForm.clientId
-    });
-    setSelectedPersonnelId(personnelIdBeforeCreate);
-    setPersonnelIdBeforeCreate(null);
-    setIsCreating(false);
-    setIsCreatingOgi(false);
-    setSelectedTab("overview");
-  }
-
-  function selectPersonnel(staffMemberId: string) {
-    setIsCreating(false);
-    setIsCreatingOgi(false);
-    setPersonnelIdBeforeCreate(null);
+  function selectPersonnel(staffMemberId: string | null) {
     setSelectedPersonnelId(staffMemberId);
-    setSelectedTab("overview");
   }
 
   function changeClientFilter(value: string) {
     setClientFilter(value);
     setFacilityFilter("");
     setSelectedPersonnelId(null);
-    setSelectedTab("overview");
+    setSelectedTab("profile");
 
-    if (isCreating && value) {
-      setCreateForm((current) => ({ ...current, clientId: value }));
-    }
   }
 
   function changeFacilityFilter(value: string) {
     setFacilityFilter(value);
     setSelectedPersonnelId(null);
-    setSelectedTab("overview");
+    setSelectedTab("profile");
   }
 
   function changeStatusFilter(value: RegistrationPersonnelEmploymentStatus | "") {
     setStatusFilter(value);
     setSelectedPersonnelId(null);
-    setSelectedTab("overview");
+    setSelectedTab("profile");
   }
 
   if (!canView) {
@@ -314,28 +250,15 @@ export function RegistrationPersonnelPage() {
   }
 
   return (
-    <RegistrationWorkspaceShell
-      description="Manage personnel registered with Client Lens."
+    <WorkspaceShell
+      title="Workforce"
+      description="Review the authorized workforce masterlist, employment context, Training journeys, and issued credentials."
       headingId="registration-personnel-heading"
-      title="Personnel"
+      navigation={null}
+      sectionDescription="Select a Personnel record to review its profile, assignments, Training history, Certifications, and Credentials."
+      sectionTitle="Personnel"
+      showSectionHeader={false}
     >
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <p className="text-sm leading-6 text-text-muted">
-            Find personnel, review profile details, and manage where each person works.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">{canCreate ? (
-          <Button
-            aria-expanded={isCreating}
-            onClick={startCreatePersonnel}
-            type="button"
-          >
-            {currentJourneyQuery.data?.intent ? "Continue Registration" : "Register Personnel"}
-          </Button>
-        ) : null}{canManageOperationalAuthority ? <Button aria-expanded={isCreatingOgi} onClick={startCreateOgiPersonnel} type="button" variant="secondary">Register OGI Personnel</Button> : null}</div>
-      </div>
-
       {message ? (
         <Surface role="status">
           <p className="text-sm font-semibold text-text-primary">{message}</p>
@@ -364,44 +287,17 @@ export function RegistrationPersonnelPage() {
         </SafeState>
       ) : personnelQuery.isError ? (
         <RegistrationPersonnelErrorState error={personnelQuery.error} />
-      ) : (
-        <RegistrationWorkspaceFrame
-          directory={<PersonnelList
-            clientNameById={clientNameById}
-            onSelectPersonnel={selectPersonnel}
-            personnel={personnel}
-            selectedPersonnelId={selectedPersonnelId}
-          />}
-          workspace={isCreatingOgi ? <OgiPersonnelCreatePanel onCancel={cancelCreatePersonnel} onCreated={(staffMember) => {
-            setMessage("OGI Personnel record created successfully.");
-            setSelectedPersonnelId(staffMember.id);
-            setPersonnelIdBeforeCreate(null);
-            setIsCreatingOgi(false);
-            void queryClient.invalidateQueries({ queryKey: ["registration-personnel"] });
-            queryClient.setQueryData(["registration-personnel", staffMember.id], staffMember);
-          }} /> : isCreating ? (
-            <ClientPersonnelRegistrationWizard
-              clients={clients}
-              initialClientId={createForm.clientId}
-              onCancel={cancelCreatePersonnel}
-              onComplete={(staffMember) => {
-                setMessage("Registration completed successfully.");
-                setSelectedPersonnelId(staffMember.id);
-                setPersonnelIdBeforeCreate(null);
-                setIsCreating(false);
-                setSelectedTab("overview");
-                void queryClient.invalidateQueries({ queryKey: ["registration-personnel"] });
-                void queryClient.invalidateQueries({ queryKey: ["personnel-registration-intent"] });
-                queryClient.setQueryData(["registration-personnel", staffMember.id], staffMember);
-              }}
-            />
-          ) : personnel.length === 0 ? (
-            <PersonnelEmptyDetailPanel canCreate={canCreate} />
+      ) : personnel.length === 0 ? (
+            <PersonnelEmptyDetailPanel canCreate={false} />
           ) : (
-            <div className="space-y-4"><PersonnelDetailsPanel
+            <div aria-label="Personnel records" className="space-y-4">{personnel.map((staffMember) => <RecordAccordion expanded={selectedPersonnelId === staffMember.id} id={`personnel-${staffMember.id}`} key={staffMember.id} onToggle={() => selectPersonnel(selectedPersonnelId === staffMember.id ? null : staffMember.id)} summary={<PersonnelAccordionSummary clientNameById={clientNameById} staffMember={staffMember} />}>
+            {selectedPersonnelId === staffMember.id ? <div className="space-y-4"><PersonnelDetailsPanel
               canDeactivate={canDeactivate}
               canUpdate={canUpdate}
               canViewFacilityAssignments={canViewFacilityAssignments && (!selectedPersonnelQuery.data || personnelAffiliation(selectedPersonnelQuery.data) === "CLIENT")}
+              canViewTraining={canViewTraining}
+              canRegisterTraining={canRegisterTraining}
+              canViewPersonnelCertificates={canViewPersonnelCertificates}
               clientNameById={clientNameById}
               clients={clients}
               editForm={editForm}
@@ -415,29 +311,12 @@ export function RegistrationPersonnelPage() {
               onTabChange={setSelectedTab}
               selectedTab={selectedTab}
               staffMember={selectedPersonnelQuery.data ?? null}
+              recordsContent={selectedPersonnelQuery.data && personnelAffiliation(selectedPersonnelQuery.data) === "OGI" ? <>{canViewOperationalAuthority ? <OgiOperationalAuthorityPanel canManage={canManageOperationalAuthority} personnelId={selectedPersonnelQuery.data.id} /> : null}<OgiInstructorQualificationPanel canCreate={canCreateCertification} canIssue={canIssueCertification} canManageRegistry={canManageInstructorRegistry} canView={canViewCertification} canViewRegistry={canViewInstructorRegistry} personnelId={selectedPersonnelQuery.data.id} /></> : null}
             />
-            {selectedPersonnelQuery.data && personnelAffiliation(selectedPersonnelQuery.data) === "OGI" ? (
-              <>
-                {canViewOperationalAuthority ? (
-                  <OgiOperationalAuthorityPanel
-                    canManage={canManageOperationalAuthority}
-                    personnelId={selectedPersonnelQuery.data.id}
-                  />
-                ) : null}
-                <OgiInstructorQualificationPanel
-                  canCreate={canCreateCertification}
-                  canIssue={canIssueCertification}
-                  canManageRegistry={canManageInstructorRegistry}
-                  canView={canViewCertification}
-                  canViewRegistry={canViewInstructorRegistry}
-                  personnelId={selectedPersonnelQuery.data.id}
-                />
-              </>
-            ) : null}</div>
+            </div> : null}
+            </RecordAccordion>)}</div>
           )}
-        />
-      )}
-    </RegistrationWorkspaceShell>
+    </WorkspaceShell>
   );
 }
 
@@ -530,69 +409,21 @@ function PersonnelFilters({
   );
 }
 
-function PersonnelList({
-  clientNameById,
-  onSelectPersonnel,
-  personnel,
-  selectedPersonnelId
-}: {
-  clientNameById: Map<string, string>;
-  onSelectPersonnel: (staffMemberId: string) => void;
-  personnel: RegistrationPersonnel[];
-  selectedPersonnelId: string | null;
-}) {
-  return (
-    <RegistrationDirectoryPane
-      description="Select a person to review profile details."
-      title="Personnel Records"
-      emptyState={
-        <div className="rounded-component border border-dashed border-border p-4">
-          <h3 className="text-sm font-semibold text-text-primary">No Personnel match the current filters.</h3>
-          <p className="mt-2 text-sm text-text-muted">
-            Use Register Personnel to add a person when you have create authority.
-          </p>
-        </div>
-      }
-    >
-      {personnel.length === 0 ? (
-        undefined
-      ) : (
-        <ul aria-label="Personnel records" className="space-y-2">
-          {personnel.map((staffMember) => {
-            const isSelected = selectedPersonnelId === staffMember.id;
-
-            return (
-              <li key={staffMember.id}>
-                <RegistrationDirectoryItem isSelected={isSelected} onSelect={() => onSelectPersonnel(staffMember.id)}>
-                  <span className="block break-words text-sm font-semibold text-text-primary">
-                    {staffMember.full_name}
-                  </span>
-                  <span className="mt-2 flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-wide text-text-muted">
-                    <RegistrationStatusBadge value={staffMember.employment_status} />
-                    {staffMember.hire_date ? <span>Hired {formatRegistrationDate(staffMember.hire_date)}</span> : null}
-                  </span>
-                  <span className="mt-2 block break-words text-sm text-text-muted">
-                    {personnelAffiliation(staffMember) === "OGI" ? "Ocean Guard International" : clientLabel(staffMember.client_id, clientNameById)}
-                  </span>
-                  {staffMember.email ? (
-                    <span className="mt-2 block break-words text-sm text-text-muted">
-                      {staffMember.email}
-                    </span>
-                  ) : null}
-                </RegistrationDirectoryItem>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </RegistrationDirectoryPane>
-  );
+function PersonnelAccordionSummary({ clientNameById, staffMember }: { clientNameById: Map<string, string>; staffMember: RegistrationPersonnel }) {
+  return <div className="grid gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_auto] sm:items-center">
+    <div><p className="text-xs font-bold uppercase tracking-wide text-primary-blue">Personnel</p><h3 className="mt-1 break-words text-lg font-semibold text-primary-navy">{staffMember.full_name}</h3><p className="mt-1 break-words text-sm text-text-muted">{staffMember.email ?? "Email not specified"}</p></div>
+    <div><p className="text-sm font-semibold text-primary-navy">{personnelAffiliation(staffMember) === "OGI" ? "Ocean Guard International" : clientLabel(staffMember.client_id, clientNameById)}</p>{staffMember.hire_date ? <p className="mt-1 text-xs text-text-muted">Hired {formatRegistrationDate(staffMember.hire_date)}</p> : null}</div>
+    <RegistrationStatusBadge value={staffMember.employment_status} />
+  </div>;
 }
 
 function PersonnelDetailsPanel({
   canDeactivate,
+  canRegisterTraining,
   canUpdate,
   canViewFacilityAssignments,
+  canViewPersonnelCertificates,
+  canViewTraining,
   clientNameById,
   clients,
   editForm,
@@ -605,11 +436,15 @@ function PersonnelDetailsPanel({
   onSubmit,
   onTabChange,
   selectedTab,
-  staffMember
+  staffMember,
+  recordsContent
 }: {
   canDeactivate: boolean;
+  canRegisterTraining: boolean;
   canUpdate: boolean;
   canViewFacilityAssignments: boolean;
+  canViewPersonnelCertificates: boolean;
+  canViewTraining: boolean;
   clientNameById: Map<string, string>;
   clients: RegistrationClient[];
   editForm: PersonnelFormState | null;
@@ -623,18 +458,19 @@ function PersonnelDetailsPanel({
   onTabChange: (tab: PersonnelSecondaryTab) => void;
   selectedTab: PersonnelSecondaryTab;
   staffMember: RegistrationPersonnel | null;
+  recordsContent: ReactNode;
 }) {
   const queryClient = useQueryClient();
-  const [isContinuingRegistration, setIsContinuingRegistration] = useState(false);
+  const [profileCardIndex, setProfileCardIndex] = useState(0);
   const staffMemberId = staffMember?.id;
   const staffMemberClientId = staffMember?.client_id;
   const isClientPersonnel = staffMember ? personnelAffiliation(staffMember) === "CLIENT" : false;
   const assignmentsQuery = useQuery({queryKey:["registration-facility-assignments",staffMemberId],queryFn:()=>staffMemberId?listRegistrationFacilityAssignments(staffMemberId):Promise.reject(new Error("No Personnel record is selected.")),enabled:canViewFacilityAssignments&&Boolean(staffMemberId),retry:false});
   const journeyQuery = useQuery({queryKey:["personnel-registration-intent",staffMemberId],queryFn:()=>staffMemberId?getPersonnelRegistrationIntent(staffMemberId):Promise.reject(new Error("No Personnel record is selected.")),enabled:Boolean(staffMemberId)&&isClientPersonnel,retry:false});
   const registrationFacilitiesQuery = useQuery({queryKey:["registration-facilities","personnel-summary",staffMemberClientId],queryFn:()=>staffMemberClientId?listRegistrationFacilities({clientId:staffMemberClientId}):Promise.reject(new Error("No Client is assigned to this Personnel record.")),enabled:canViewFacilityAssignments&&Boolean(staffMemberClientId),retry:false});
-  const activeFacilityAssignment=(assignmentsQuery.data?.assignments??[]).find(assignment=>assignment.assignment_status==="ACTIVE"&&assignment.is_primary_assignment)??(assignmentsQuery.data?.assignments??[]).find(assignment=>assignment.assignment_status==="ACTIVE");
-  const journeyComplete=journeyQuery.data?.intent?.status==="COMPLETED";
-  useEffect(()=>setIsContinuingRegistration(false),[staffMember?.id]);
+  const profileCards = canViewFacilityAssignments ? ["employment", "facilities", "administrative"] as const : ["employment", "administrative"] as const;
+  const profileCard = profileCards[profileCardIndex % profileCards.length];
+  useEffect(() => setProfileCardIndex(0), [staffMember?.id]);
   if (isLoading) {
     return (
       <SafeState title="Loading Personnel details." role="status">
@@ -655,27 +491,15 @@ function PersonnelDetailsPanel({
     <div className="space-y-4">
       <Surface>
         <div className="space-y-4">
-          <RegistrationEntityHeader
-            identity={staffMember.full_name}
-            secondary={<>{personnelAffiliation(staffMember) === "OGI" ? "Ocean Guard International" : clientLabel(staffMember.client_id, clientNameById)}{staffMember.email ? ` · ${staffMember.email}` : ""}</>}
-            status={staffMember.employment_status}
-          />
-
           <PersonnelSecondaryNavigation
-            canViewFacilityAssignments={canViewFacilityAssignments}
+            canViewTraining={canViewTraining}
             onTabChange={onTabChange}
             selectedTab={selectedTab}
           />
 
-          {selectedTab === "overview" ? (
-            <><PersonnelRegistrationSummary
-              assignments={assignmentsQuery.data?.assignments ?? []}
-              clientName={clientLabel(staffMember.client_id, clientNameById)}
-              facilities={registrationFacilitiesQuery.data?.facilities ?? []}
-              intent={journeyQuery.data?.intent ?? null}
-              loading={assignmentsQuery.isLoading || journeyQuery.isLoading || registrationFacilitiesQuery.isLoading}
-              staffMember={staffMember}
-            /><PersonnelOverview
+          {selectedTab === "profile" ? <div className="flex items-center justify-between gap-3 rounded-component border border-blue-200 bg-blue-50 px-3 py-3"><Button aria-label="Previous Profile card" className="min-h-11 min-w-28 gap-2 px-4 text-sm font-bold shadow-sm" onClick={() => setProfileCardIndex((current) => (current - 1 + profileCards.length) % profileCards.length)} type="button"><span aria-hidden="true" className="text-lg">←</span><span className="hidden sm:inline">Previous</span></Button><div className="text-center"><p className="text-sm font-bold text-primary-navy">{profileCard === "employment" ? "Employment Profile" : profileCard === "facilities" ? "Facility Assignments" : "Administrative Details"}</p><p className="mt-0.5 text-xs font-semibold text-primary-blue">{profileCardIndex % profileCards.length + 1} of {profileCards.length}</p></div><Button aria-label="Next Profile card" className="min-h-11 min-w-28 gap-2 px-4 text-sm font-bold shadow-sm" onClick={() => setProfileCardIndex((current) => (current + 1) % profileCards.length)} type="button"><span className="hidden sm:inline">Next</span><span aria-hidden="true" className="text-lg">→</span></Button></div> : null}
+
+          {selectedTab === "profile" && profileCard !== "facilities" ? <PersonnelOverview
               canDeactivate={canDeactivate}
               canUpdate={canUpdate}
               clientNameById={clientNameById}
@@ -686,24 +510,24 @@ function PersonnelDetailsPanel({
               onDeactivate={onDeactivate}
               onEditChange={onEditChange}
               onSubmit={onSubmit}
+              section={profileCard}
               staffMember={staffMember}
-            /></>
-          ) : null}
+            /> : null}
         </div>
       </Surface>
 
-      {selectedTab === "facilities" && canViewFacilityAssignments ? (
+      {selectedTab === "profile" && profileCard === "facilities" && canViewFacilityAssignments ? (
         <div
-          aria-labelledby="personnel-facilities-tab"
-          id="personnel-facilities-panel"
+          aria-labelledby="personnel-profile-tab"
+          id="personnel-profile-facilities"
           role="tabpanel"
         >
           <RegistrationFacilityAssignmentsPanel staffMember={staffMember} />
         </div>
       ) : null}
 
-      {personnelAffiliation(staffMember) === "CLIENT" ? <Surface className={journeyComplete?"border-green-200 bg-green-50/60":"border-amber-200 bg-amber-50/70"}><p className={`text-xs font-bold uppercase tracking-wide ${journeyComplete?"text-green-800":"text-amber-800"}`}>{journeyComplete?"Registration complete":"Incomplete registration"}</p><h3 className="mt-1 text-lg font-semibold text-primary-navy">{journeyComplete?"Personnel Registration completed":"Continue Personnel Registration"}</h3><p className="mt-2 text-sm text-text-muted">{journeyComplete?"Client, profile, Facility assignment, access decision, and review were completed.":`Resume ${staffMember.full_name} at the first saved incomplete step.`}</p>{!journeyComplete?<Button className="mt-4" disabled={assignmentsQuery.isLoading||journeyQuery.isLoading} onClick={()=>setIsContinuingRegistration(true)} type="button">Continue Registration</Button>:null}</Surface>:null}
-      {isContinuingRegistration ? <ClientPersonnelRegistrationWizard clients={clients} existingFacilityId={activeFacilityAssignment?.facility_id} existingPersonnel={staffMember} initialClientId={staffMember.client_id??""} onCancel={()=>setIsContinuingRegistration(false)} onComplete={(personnel)=>{setIsContinuingRegistration(false);void queryClient.invalidateQueries({queryKey:["registration-facility-assignments",personnel.id]});void queryClient.invalidateQueries({queryKey:["personnel-registration-intent",personnel.id]});void queryClient.invalidateQueries({queryKey:["registration-personnel"]});}}/>:null}
+      {selectedTab === "training" && canViewTraining ? <div aria-labelledby="personnel-training-tab" id="personnel-training-panel" role="tabpanel"><PersonnelTrainingRecords canRegisterTraining={canRegisterTraining} canViewCertificates={canViewPersonnelCertificates} staffMember={staffMember} /></div> : null}
+      {selectedTab === "records" ? <div aria-labelledby="personnel-records-tab" className="space-y-4" id="personnel-records-panel" role="tabpanel">{personnelAffiliation(staffMember) === "CLIENT" ? <PersonnelRegistrationSummary assignments={assignmentsQuery.data?.assignments ?? []} clientName={clientLabel(staffMember.client_id, clientNameById)} facilities={registrationFacilitiesQuery.data?.facilities ?? []} intent={journeyQuery.data?.intent ?? null} loading={assignmentsQuery.isLoading || journeyQuery.isLoading || registrationFacilitiesQuery.isLoading} staffMember={staffMember} /> : null}{recordsContent}{!recordsContent && personnelAffiliation(staffMember) === "OGI" ? <Surface><p className="text-sm text-text-muted">No governed Personnel records are available with the current authority.</p></Surface> : null}</div> : null}
 
     </div>
   );
@@ -736,45 +560,88 @@ function PersonnelRegistrationSummary({assignments,clientName,facilities,intent,
   </section>;
 }
 
+function PersonnelTrainingRecords({ canRegisterTraining, canViewCertificates, staffMember }: { canRegisterTraining: boolean; canViewCertificates: boolean; staffMember: RegistrationPersonnel }) {
+  const [certificateIssuanceId, setCertificateIssuanceId] = useState<string | null>(null);
+  const traineesQuery = useQuery({
+    queryKey: ["training-trainees", "personnel", staffMember.id],
+    queryFn: listTrainingTrainees,
+    retry: false
+  });
+  const trainee = traineesQuery.data?.trainees.find((candidate) =>
+    candidate.staff_member_links.some((link) => link.staff_member_id === staffMember.id && link.ended_at === null)
+  );
+  const enrollmentsQuery = useQuery({
+    queryKey: ["training-enrollments", "personnel", staffMember.id, trainee?.id],
+    queryFn: () => trainee ? listTrainingEnrollments(trainee.id) : Promise.resolve({ enrollments: [] as TrainingEnrollment[] }),
+    enabled: !traineesQuery.isLoading,
+    retry: false
+  });
+  const enrollments = enrollmentsQuery.data?.enrollments ?? [];
+
+  return <><Surface>
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div><p className="text-xs font-bold uppercase tracking-wide text-primary-blue">Personnel record</p><h3 className="mt-1 text-lg font-semibold text-primary-navy">Training, Certifications, and Credentials</h3><p className="mt-1 text-sm text-text-muted">Enrollment journeys and issued authority linked to this exact Personnel identity.</p></div>
+      {canRegisterTraining ? <Button asChild variant="secondary"><Link to={routes.trainingRegister}>Register Training</Link></Button> : null}
+    </div>
+    {traineesQuery.isLoading || enrollmentsQuery.isLoading ? <p className="mt-4 text-sm text-text-muted" role="status">Loading Training records…</p> : null}
+    {traineesQuery.isError || enrollmentsQuery.isError ? <p className="mt-4 rounded-component border border-red-200 bg-red-50 p-3 text-sm text-red-900" role="alert">Training records could not be loaded with the current authority.</p> : null}
+    {!traineesQuery.isLoading && !traineesQuery.isError && !trainee ? <div className="mt-4 rounded-component border border-amber-200 bg-amber-50 p-4"><p className="font-semibold text-amber-900">No linked Trainee identity</p><p className="mt-1 text-sm text-amber-900">Link the matching Trainee record before its Training history can appear on this Personnel profile.</p><Button asChild className="mt-3" variant="secondary"><Link to={routes.trainingTrainees}>Open Trainee Reconciliation</Link></Button></div> : null}
+    {trainee && !enrollmentsQuery.isLoading && !enrollmentsQuery.isError && enrollments.length === 0 ? <p className="mt-4 rounded-component border border-dashed border-border p-4 text-sm text-text-muted">The linked Trainee has no active Training registrations.</p> : null}
+    {enrollments.length > 0 ? <ul aria-label="Personnel Training records" className="mt-4 space-y-3">{enrollments.map((enrollment) => { const issuance = enrollment.journey_progress?.certification?.digital_credential.issuance; return <li className="rounded-component border border-border p-4" key={enrollment.id}><div className="flex flex-wrap items-start justify-between gap-3"><div><h4 className="font-semibold text-primary-navy">{enrollment.program.certification_level} · {enrollment.program.display_name}</h4><p className="mt-1 text-sm text-text-muted">{enrollment.training_session?.training_title ?? "Training Session not assigned"} · Enrolled {formatRegistrationDateTime(enrollment.enrolled_at)}</p></div><RegistrationStatusBadge value={personnelTrainingStatus(enrollment)} /></div><div className="mt-3 flex flex-wrap gap-2"><Button asChild><Link to={routes.trainingJourneyPath(enrollment.id)}>{enrollment.journey_progress?.certification ? "View Training Journey" : "Continue Training Journey"}</Link></Button>{canViewCertificates && issuance ? <Button onClick={() => setCertificateIssuanceId(issuance.id)} type="button" variant="secondary">View Certificate</Button> : null}{canViewCertificates && enrollment.journey_progress?.certification && !issuance ? <Button asChild variant="secondary"><Link to={routes.certifications}>View Certification Record</Link></Button> : null}</div></li>; })}</ul> : null}
+  </Surface>{certificateIssuanceId ? <DigitalCertificateModal issuanceId={certificateIssuanceId} onClose={() => setCertificateIssuanceId(null)} /> : null}</>;
+}
+
+function personnelTrainingStatus(enrollment: TrainingEnrollment) {
+  const progress = enrollment.journey_progress;
+  if (progress?.certification?.digital_credential.issuance) return "CREDENTIAL ISSUED";
+  if (progress?.certification) return "CERTIFIED";
+  if (progress?.readiness) return "CERTIFICATION REVIEW";
+  if (progress?.knowledge_assessment) return "READINESS";
+  if (progress?.skills_assessment) return "KNOWLEDGE";
+  if (progress?.attendance) return "SKILLS";
+  return "REGISTERED";
+}
+
 function RegistrationSummaryItem({label,value}:{label:string;value:string}) {
   return <div><dt className="text-xs font-bold uppercase tracking-wide text-primary-blue/80">{label}</dt><dd className="mt-1 text-sm font-semibold leading-6 text-primary-navy">{value}</dd></div>;
 }
 
 function PersonnelSecondaryNavigation({
-  canViewFacilityAssignments,
+  canViewTraining,
   onTabChange,
   selectedTab
 }: {
-  canViewFacilityAssignments: boolean;
+  canViewTraining: boolean;
   onTabChange: (tab: PersonnelSecondaryTab) => void;
   selectedTab: PersonnelSecondaryTab;
 }) {
   return (
     <div aria-label="Personnel detail sections" className="flex flex-wrap gap-2" role="tablist">
       <button
-        aria-controls="personnel-overview-panel"
-        aria-selected={selectedTab === "overview"}
-        className={tabClassName(selectedTab === "overview")}
-        id="personnel-overview-tab"
-        onClick={() => onTabChange("overview")}
+        aria-controls="personnel-profile-panel"
+        aria-selected={selectedTab === "profile"}
+        className={tabClassName(selectedTab === "profile")}
+        id="personnel-profile-tab"
+        onClick={() => onTabChange("profile")}
         role="tab"
         type="button"
       >
-        Overview
+        Profile
       </button>
-      {canViewFacilityAssignments ? (
+      {canViewTraining ? (
         <button
-          aria-controls="personnel-facilities-panel"
-          aria-selected={selectedTab === "facilities"}
-          className={tabClassName(selectedTab === "facilities")}
-          id="personnel-facilities-tab"
-          onClick={() => onTabChange("facilities")}
+          aria-controls="personnel-training-panel"
+          aria-selected={selectedTab === "training"}
+          className={tabClassName(selectedTab === "training")}
+          id="personnel-training-tab"
+          onClick={() => onTabChange("training")}
           role="tab"
           type="button"
         >
-          Facilities
+          Training
         </button>
       ) : null}
+      <button aria-controls="personnel-records-panel" aria-selected={selectedTab === "records"} className={tabClassName(selectedTab === "records")} id="personnel-records-tab" onClick={() => onTabChange("records")} role="tab" type="button">Records</button>
     </div>
   );
 }
@@ -790,6 +657,7 @@ function PersonnelOverview({
   onDeactivate,
   onEditChange,
   onSubmit,
+  section,
   staffMember
 }: {
   canDeactivate: boolean;
@@ -802,16 +670,17 @@ function PersonnelOverview({
   onDeactivate: () => void;
   onEditChange: (formState: PersonnelFormState) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  section: "employment" | "administrative";
   staffMember: RegistrationPersonnel;
 }) {
   return (
     <div
-      aria-labelledby="personnel-overview-tab"
+      aria-labelledby="personnel-profile-tab"
       className="space-y-4"
-      id="personnel-overview-panel"
+      id="personnel-profile-panel"
       role="tabpanel"
     >
-      <RegistrationMetadataGroup description="System relationships and record history remain secondary to the employment profile.">
+      {section === "administrative" ? <RegistrationMetadataGroup description="System relationships and record history remain secondary to the employment profile.">
         <RegistrationMetadataItem label="Administrative Personnel ID" value={staffMember.id} subtle />
         <RegistrationMetadataItem label="Affiliation" value={personnelAffiliation(staffMember)} />
         <RegistrationMetadataItem label="Administrative Client ID" value={staffMember.client_id ?? "Not client-affiliated"} subtle />
@@ -822,9 +691,9 @@ function PersonnelOverview({
         />
         <RegistrationMetadataItem label="Created" value={formatRegistrationDateTime(staffMember.created_at)} />
         <RegistrationMetadataItem label="Updated" value={formatRegistrationDateTime(staffMember.updated_at)} />
-      </RegistrationMetadataGroup>
+      </RegistrationMetadataGroup> : null}
 
-      {canUpdate ? (
+      {section === "employment" && canUpdate ? (
         <RegistrationEditableSection
           description={`Employment information for ${personnelAffiliation(staffMember) === "OGI" ? "Ocean Guard International" : clientLabel(staffMember.client_id, clientNameById)}.`}
           title="Employment profile"
@@ -843,11 +712,11 @@ function PersonnelOverview({
           {mutationMessage ? <p className="mt-3 rounded-component border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-800" role="status">{mutationMessage}</p> : null}
           {mutationError ? <div className="mt-3"><RegistrationErrorAlert error={mutationError} /></div> : null}
         </RegistrationEditableSection>
-      ) : (
+      ) : section === "employment" ? (
         <PersonnelReadOnlyDetails staffMember={staffMember} />
-      )}
+      ) : null}
 
-      {canDeactivate && staffMember.employment_status !== "INACTIVE" ? (
+      {section === "employment" && canDeactivate && staffMember.employment_status !== "INACTIVE" ? (
         <Button disabled={isSubmitting} onClick={onDeactivate} variant="secondary">
           Deactivate Personnel
         </Button>

@@ -41,6 +41,15 @@
   --cl-workspace-divider: #d7e2ef;
   --cl-workspace-selected: #e4efff;
   --cl-workspace-shadow: 0 2px 8px rgb(15 45 95 / 0.06);
+  --cl-editable-section-border: #8faac8;
+  --cl-editable-section-body: #f9fbfe;
+  --cl-editable-section-shadow: 0 3px 10px rgb(15 45 95 / 0.09);
+  --cl-form-control-border: #8faac8;
+  --cl-form-control-border-hover: #1d4ed8;
+  --cl-form-control-bg: #fbfdff;
+  --cl-form-control-locked-border: #b8c8da;
+  --cl-form-control-locked-bg: #eef3f8;
+  --cl-form-control-shadow: 0 1px 3px rgb(15 45 95 / 0.1);
   /* Shared catalogue cards for forms, audits, and other governed records. */
   --cl-catalog-accent: #0f766e;
   --cl-catalog-accent-soft: #e6f4f2;
@@ -58,6 +67,9 @@
   --cl-sidebar-child-rail: #c9d8e8;
   --cl-sidebar-active: #0f766e;
   --cl-sidebar-active-bg: #e6f4f2;
+  --cl-sidebar-flyout-bg: #edf3f9;
+  --cl-sidebar-flyout-border: #afc3da;
+  --cl-sidebar-item-bg: #ffffff;
   --cl-document-title: #3730a3;
   --cl-document-title-hover: #4338ca;
   --cl-evidence-draft: #b45309;

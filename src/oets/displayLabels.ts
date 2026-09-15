@@ -7,7 +7,11 @@ interface WorkflowLabelInput {
 const lifecycleStatusLabels = new Map([
   ["DRAFT", "Draft"],
   ["SUBMITTED", "Awaiting Review"],
+  ["UNDER_REVIEW", "Under Review"],
   ["UNDER_OGI_REVIEW", "Under Review"],
+  ["RETURNED_FOR_CORRECTION", "Returned for Correction"],
+  ["GOVERNANCE_APPROVED", "Governance Approved"],
+  ["DISCARDED", "Discarded Draft"],
   ["INTAKE_APPROVED", "Audit Approved"],
   ["ROUTED_FOR_ASSESSMENT_OR_AUDIT", "Approved for Risk Assessment"],
   ["ACTIVATED_OR_CLOSED", "Completed"],
@@ -25,16 +29,27 @@ const workflowActionLabels = new Map([
   ["archive_evidence", "Archive"]
 ]);
 
-export function displayLifecycleStatus(stateCode: string) {
+export function displayLifecycleStatus(
+  stateCode: string,
+  options?: { readonly hasDeclaredOutgoingTransition?: boolean }
+) {
+  if (stateCode === "SUBMITTED" && options?.hasDeclaredOutgoingTransition === false) {
+    return "Submitted";
+  }
   return lifecycleStatusLabels.get(stateCode) ?? humanizeCode(stateCode);
 }
 
 export function displayWorkflowActionLabel(transition: WorkflowLabelInput) {
+  if (transition.to === "ARCHIVED") {
+    return "Archive Record";
+  }
   return workflowActionLabels.get(transition.trigger) ?? transition.label;
 }
 
 export function displayReviewAuthority(authorityCode: string) {
-  return authorityCode === "OGI" ? "OGI" : humanizeCode(authorityCode);
+  return humanizeCode(authorityCode)
+    .replace(/\bOets\b/g, "OETS")
+    .replace(/\bOgi\b/g, "OGI");
 }
 
 function humanizeCode(value: string) {

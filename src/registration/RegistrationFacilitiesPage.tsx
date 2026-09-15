@@ -1,10 +1,14 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 
 import { isApiError } from "../api/errors";
+import { routes } from "../app/routePaths";
 import { useAuth } from "../auth/useAuth";
 import { Button } from "../ui/components/Button";
 import { Surface } from "../ui/components/Surface";
+import { RecordAccordion } from "../ui/components/RecordAccordion";
+import { WorkspaceShell } from "../ui/components/WorkspaceShell";
 import {
   listRegistrationClients,
   RegistrationClient
@@ -24,14 +28,10 @@ import {
 import { RegistrationWorkspaceShell } from "./RegistrationWorkspaceShell";
 import { formatRegistrationDateTime } from "./registrationPresentation";
 import {
-  RegistrationDirectoryItem,
-  RegistrationDirectoryPane,
   RegistrationEditableSection,
-  RegistrationEntityHeader,
   RegistrationMetadataGroup,
   RegistrationMetadataItem,
-  RegistrationStatusBadge,
-  RegistrationWorkspaceFrame
+  RegistrationStatusBadge
 } from "./RegistrationWorkspaceUi";
 
 const permissions = {
@@ -64,7 +64,7 @@ const emptyCreateForm: FacilityFormState = {
   notes: ""
 };
 
-export function RegistrationFacilitiesPage() {
+export function RegistrationFacilitiesPage({ workspace = "masterlist" }: { workspace?: "registration" | "masterlist" }) {
   const auth = useAuth();
   const queryClient = useQueryClient();
   const canViewClients = auth.canUsePermission(permissions.viewClients);
@@ -74,8 +74,6 @@ export function RegistrationFacilitiesPage() {
   const canDeactivate = auth.canUsePermission(permissions.deactivate);
   const [clientFilter, setClientFilter] = useState("");
   const [selectedFacilityId, setSelectedFacilityId] = useState<string | null>(null);
-  const [facilityIdBeforeCreate, setFacilityIdBeforeCreate] = useState<string | null>(null);
-  const [isCreating, setIsCreating] = useState(false);
   const [createForm, setCreateForm] = useState<FacilityFormState>({
     ...emptyCreateForm,
     clientId: auth.session?.clientId ?? ""
@@ -114,16 +112,12 @@ export function RegistrationFacilitiesPage() {
   );
 
   useEffect(() => {
-    if (!selectedFacilityId && facilities.length > 0) {
-      setSelectedFacilityId(facilities[0].id);
-    }
-
     if (
       selectedFacilityId &&
       facilities.length > 0 &&
       !facilities.some((facility) => facility.id === selectedFacilityId)
     ) {
-      setSelectedFacilityId(facilities[0].id);
+      setSelectedFacilityId(null);
     }
   }, [facilities, selectedFacilityId]);
 
@@ -146,8 +140,6 @@ export function RegistrationFacilitiesPage() {
       setMessage("Facility created successfully.");
       setCreateForm({ ...emptyCreateForm, clientId: createForm.clientId });
       setSelectedFacilityId(facility.id);
-      setFacilityIdBeforeCreate(null);
-      setIsCreating(false);
       void queryClient.invalidateQueries({ queryKey: ["registration-facilities"] });
       queryClient.setQueryData(["registration-facility", facility.id], facility);
     }
@@ -190,35 +182,15 @@ export function RegistrationFacilitiesPage() {
     updateMutation.mutate({ operational_status: "INACTIVE" });
   }
 
-  function startCreateFacility() {
-    setMessage(null);
-    setFacilityIdBeforeCreate(selectedFacilityId);
-    setCreateForm({
-      ...emptyCreateForm,
-      clientId:
-        clientFilter ||
-        auth.session?.clientId ||
-        createForm.clientId ||
-        clients[0]?.id ||
-        ""
-    });
-    setIsCreating(true);
-  }
-
   function cancelCreateFacility() {
     setMessage(null);
     setCreateForm({
       ...emptyCreateForm,
       clientId: clientFilter || auth.session?.clientId || createForm.clientId
     });
-    setSelectedFacilityId(facilityIdBeforeCreate);
-    setFacilityIdBeforeCreate(null);
-    setIsCreating(false);
   }
 
-  function selectFacility(facilityId: string) {
-    setIsCreating(false);
-    setFacilityIdBeforeCreate(null);
+  function selectFacility(facilityId: string | null) {
     setSelectedFacilityId(facilityId);
   }
 
@@ -226,12 +198,10 @@ export function RegistrationFacilitiesPage() {
     setClientFilter(value);
     setSelectedFacilityId(null);
 
-    if (isCreating && value) {
-      setCreateForm((current) => ({ ...current, clientId: value }));
-    }
+    setCreateForm((current) => ({ ...current, clientId: value || current.clientId }));
   }
 
-  if (!canView) {
+  if (workspace === "masterlist" && !canView) {
     return (
       <SafeState title="You are not authorized to view Facility registration.">
         Your current session does not include Facility registration authority.
@@ -239,29 +209,28 @@ export function RegistrationFacilitiesPage() {
     );
   }
 
+  if (workspace === "registration" && !canCreate) {
+    return <SafeState title="You are not authorized to register Facilities.">Your current session does not include Facility registration authority.</SafeState>;
+  }
+
+  if (workspace === "registration") {
+    return <RegistrationWorkspaceShell description="Create a new Facility registration record." headingId="registration-facilities-heading" title="Register Facility">
+      {message ? <Surface role="status"><p className="text-sm font-semibold text-text-primary">{message}</p><Link className="mt-3 inline-flex font-semibold text-primary-blue underline" to={routes.facilityMasterlist}>Open Facility Masterlist</Link></Surface> : null}
+      <RegistrationErrorAlert error={createMutation.error} />
+      <FacilityCreatePanel clients={clients} formState={createForm} isSubmitting={createMutation.isPending} lockClientSelection={!canViewClients} onCancel={cancelCreateFacility} onChange={setCreateForm} onSubmit={submitCreateForm} />
+    </RegistrationWorkspaceShell>;
+  }
+
   return (
-    <RegistrationWorkspaceShell
-      description="Manage facilities registered with Client Lens."
+    <WorkspaceShell
+      description="Review and maintain facilities registered with Client Lens."
       headingId="registration-facilities-heading"
+      navigation={null}
+      sectionDescription="Select a Facility record to review and maintain its operational details."
+      sectionTitle="Facility Masterlist"
+      showSectionHeader={false}
       title="Facilities"
     >
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <p className="text-sm leading-6 text-text-muted">
-            Find existing facilities, review registration details, and maintain operational status.
-          </p>
-        </div>
-        {canCreate ? (
-          <Button
-            aria-expanded={isCreating}
-            onClick={startCreateFacility}
-            type="button"
-          >
-            Register Facility
-          </Button>
-        ) : null}
-      </div>
-
       {message ? (
         <Surface role="status">
           <p className="text-sm font-semibold text-text-primary">{message}</p>
@@ -286,28 +255,8 @@ export function RegistrationFacilitiesPage() {
       ) : facilitiesQuery.isError ? (
         <RegistrationFacilitiesErrorState error={facilitiesQuery.error} />
       ) : (
-        <RegistrationWorkspaceFrame
-          directory={<FacilitiesList
-            clientNameById={clientNameById}
-            facilities={facilities}
-            onSelectFacility={selectFacility}
-            selectedFacilityId={selectedFacilityId}
-            scopedToClient={Boolean(clientFilter)}
-          />}
-          workspace={isCreating ? (
-            <FacilityCreatePanel
-              clients={clients}
-              formState={createForm}
-              isSubmitting={createMutation.isPending}
-              lockClientSelection={!canViewClients}
-              onCancel={cancelCreateFacility}
-              onChange={setCreateForm}
-              onSubmit={submitCreateForm}
-            />
-          ) : facilities.length === 0 ? (
-            <FacilityEmptyDetailPanel canCreate={canCreate} scopedToClient={Boolean(clientFilter)} />
-          ) : (
-            <FacilityDetailsPanel
+        facilities.length === 0 ? <FacilityEmptyDetailPanel canCreate={false} scopedToClient={Boolean(clientFilter)} /> : <div aria-label="Facility records" className="space-y-4">{facilities.map((facility) => <RecordAccordion expanded={selectedFacilityId === facility.id} id={`facility-${facility.id}`} key={facility.id} onToggle={() => selectFacility(selectedFacilityId === facility.id ? null : facility.id)} summary={<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-xs font-bold uppercase tracking-wide text-primary-blue">Facility</p><h2 className="mt-1 text-lg font-semibold text-primary-navy">{facility.facility_name}</h2><p className="mt-1 text-sm text-text-muted">{clientLabel(facility.client_id, clientNameById)} · {displayCode(facility.facility_type)}</p></div><RegistrationStatusBadge value={facility.operational_status} /></div>}>
+          {selectedFacilityId === facility.id ? <FacilityDetailsPanel
               canDeactivate={canDeactivate}
               canUpdate={canUpdate}
               clientNameById={clientNameById}
@@ -318,11 +267,10 @@ export function RegistrationFacilitiesPage() {
               onDeactivate={deactivateSelectedFacility}
               onEditChange={setEditForm}
               onSubmit={submitEditForm}
-            />
-          )}
-        />
+            /> : null}
+        </RecordAccordion>)}</div>
       )}
-    </RegistrationWorkspaceShell>
+    </WorkspaceShell>
   );
 }
 
@@ -356,65 +304,6 @@ function ClientFilter({
         </select>
       </label>
     </Surface>
-  );
-}
-
-function FacilitiesList({
-  clientNameById,
-  facilities,
-  onSelectFacility,
-  scopedToClient,
-  selectedFacilityId
-}: {
-  clientNameById: Map<string, string>;
-  facilities: RegistrationFacility[];
-  onSelectFacility: (facilityId: string) => void;
-  scopedToClient: boolean;
-  selectedFacilityId: string | null;
-}) {
-  return (
-    <RegistrationDirectoryPane
-      description="Select a facility to review its registration details."
-      title="Facility Records"
-      emptyState={
-        <div className="rounded-component border border-dashed border-border p-4">
-          <h3 className="text-sm font-semibold text-text-primary">
-            {scopedToClient ? "No Facilities registered for this Client." : "No Facilities registered."}
-          </h3>
-          <p className="mt-2 text-sm text-text-muted">
-            Use Register Facility to add a facility when you have create authority.
-          </p>
-        </div>
-      }
-    >
-      {facilities.length === 0 ? (
-        undefined
-      ) : (
-        <ul aria-label="Facility records" className="space-y-2">
-          {facilities.map((facility) => {
-            const isSelected = selectedFacilityId === facility.id;
-
-            return (
-              <li key={facility.id}>
-                <RegistrationDirectoryItem isSelected={isSelected} onSelect={() => onSelectFacility(facility.id)}>
-                  <span className="block break-words text-sm font-semibold text-text-primary">
-                    {facility.facility_name}
-                  </span>
-                  <span className="mt-2 flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-wide text-text-muted">
-                    <span>{displayCode(facility.facility_type)}</span>
-                    <RegistrationStatusBadge value={facility.operational_status} />
-                    {facility.country ? <span>{facility.country}</span> : null}
-                  </span>
-                  <span className="mt-2 block break-words text-sm text-text-muted">
-                    {clientLabel(facility.client_id, clientNameById)}
-                  </span>
-                </RegistrationDirectoryItem>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </RegistrationDirectoryPane>
   );
 }
 
@@ -458,15 +347,7 @@ function FacilityDetailsPanel({
   }
 
   return (
-    <Surface>
       <div className="space-y-4">
-        <RegistrationEntityHeader
-          heading="Facility Details"
-          identity={facility.facility_name}
-          secondary={`${displayCode(facility.facility_type)} · ${clientLabel(facility.client_id, clientNameById)}`}
-          status={facility.operational_status}
-        />
-
         <RegistrationMetadataGroup title="Operational context">
           <RegistrationMetadataItem
             label="Client"
@@ -512,7 +393,6 @@ function FacilityDetailsPanel({
           </Button>
         ) : null}
       </div>
-    </Surface>
   );
 }
 

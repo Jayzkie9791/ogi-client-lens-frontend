@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -30,7 +30,7 @@ const clientAId = "00000000-0000-4000-8000-000000830001";
 const clientBId = "00000000-0000-4000-8000-000000830002";
 const trainingSessionAId = "00000000-0000-4000-8000-000000860001";
 
-const programAuthority: TrainingProgramAuthorityListResponse = {
+const programAuthorityBase = {
   programs: [
     { program_code: "GUARDIAN_RESPONDER", certification_level: "L1", display_name: "Guardian Responder", qualification_label: "Guardian Responder", required_training_hours: 40, required_program_coverage: ["First Aid", "CPR", "AED", "Oxygen Administration"], incremental_coverage: ["CPR - Adult, Child & Infant", "AED Operation & Application", "Basic First Aid", "Oxygen Administration", "Incident Documentation"], effective_coverage: ["CPR - Adult, Child & Infant", "AED Operation & Application", "Basic First Aid", "Oxygen Administration"], allowed_session_focuses: ["RESCUE_SKILLS", "CPR_AED", "FIRST_AID", "EAP", "COMMUNICATION_COMMAND"] },
     { program_code: "POOL_GUARDIAN", certification_level: "L2", display_name: "Pool Guardian", qualification_label: "Pool Guardian", required_training_hours: 60, required_program_coverage: [], incremental_coverage: ["Pool Surveillance & Scanning"], effective_coverage: ["Basic First Aid", "Pool Surveillance & Scanning"], allowed_session_focuses: ["RESCUE_SKILLS", "CPR_AED", "FIRST_AID", "EAP", "COMMUNICATION_COMMAND", "SPINAL_MANAGEMENT", "SCANNING_SURVEILLANCE", "WATER_ENTRY_APPROACH", "VICTIM_EXTRACTION"] },
@@ -40,6 +40,16 @@ const programAuthority: TrainingProgramAuthorityListResponse = {
     { program_code: "GUARDIAN_INSTRUCTOR", certification_level: "L6", display_name: "Guardian Instructor", qualification_label: "Guardian Instructor", required_training_hours: 210, required_program_coverage: [], incremental_coverage: ["Course Planning & Delivery"], effective_coverage: ["Basic First Aid", "Course Planning & Delivery"], allowed_session_focuses: ["RESCUE_SKILLS", "CPR_AED", "FIRST_AID", "EAP", "COMMUNICATION_COMMAND", "SPINAL_MANAGEMENT", "SCANNING_SURVEILLANCE", "WATER_ENTRY_APPROACH", "VICTIM_EXTRACTION", "OPEN_WATER_NAVIGATION", "SURF_OPERATIONS", "RIP_CURRENT_MANAGEMENT", "BOARD_RESCUE", "TECHNICAL_RESCUE"] },
     { program_code: "MASTER_GUARDIAN_INSTRUCTOR", certification_level: "L7", display_name: "Master Guardian Instructor", qualification_label: "Master Guardian Instructor", required_training_hours: 260, required_program_coverage: [], incremental_coverage: ["Master-Level Instructional Leadership"], effective_coverage: ["Basic First Aid", "Master-Level Instructional Leadership"], allowed_session_focuses: ["RESCUE_SKILLS", "CPR_AED", "FIRST_AID", "EAP", "COMMUNICATION_COMMAND", "SPINAL_MANAGEMENT", "SCANNING_SURVEILLANCE", "WATER_ENTRY_APPROACH", "VICTIM_EXTRACTION", "OPEN_WATER_NAVIGATION", "SURF_OPERATIONS", "RIP_CURRENT_MANAGEMENT", "BOARD_RESCUE", "TECHNICAL_RESCUE"] }
   ]
+} as const;
+const prerequisiteByLevel = {
+  L1: null, L2: "L1", L3: "L2", L4: "L3", L5: "L4", L6: "L5", L7: "L6"
+} as const;
+const programAuthority: TrainingProgramAuthorityListResponse = {
+  programs: programAuthorityBase.programs.map((program) => ({
+    ...program,
+    prerequisite_level: prerequisiteByLevel[program.certification_level],
+    approved_equivalent_allowed: program.certification_level !== "L1"
+  }))
 };
 
 const baseSession: AuthenticatedSession = {
@@ -71,6 +81,9 @@ const traineeA: TrainingTrainee = {
   id: traineeAId,
   student_number: null,
   full_name: "Jane Smith",
+  first_name: "Jane",
+  middle_name: null,
+  last_name: "Smith",
   email: "jane.smith@example.test",
   phone_number: "+63 900 000 1001",
   notes: "External trainee",
@@ -103,6 +116,9 @@ const traineeB: TrainingTrainee = {
   id: traineeBId,
   student_number: "OGI-STU-2026-0002",
   full_name: "John Santos",
+  first_name: "John",
+  middle_name: null,
+  last_name: "Santos",
   email: null,
   phone_number: null,
   notes: null,
@@ -116,6 +132,9 @@ const createdTrainee: TrainingTrainee = {
   id: "00000000-0000-4000-8000-000000810003",
   student_number: null,
   full_name: "New Trainee",
+  first_name: "New",
+  middle_name: null,
+  last_name: "Trainee",
   email: "new.trainee@example.test",
   phone_number: null,
   notes: null,
@@ -504,6 +523,53 @@ function workspaceRoute(
   };
 }
 
+function journeyProjection(enrollment: TrainingEnrollment) {
+  const stages = [
+    { stage: "ATTENDANCE", state: "REQUIRED", evidence_record_id: null, authority_id: null, available_actions: ["COMPLETE_F022"] },
+    { stage: "SKILLS", state: "NOT_STARTED", evidence_record_id: null, authority_id: null, available_actions: ["CREATE_DRAFT"] },
+    { stage: "KNOWLEDGE", state: "NOT_STARTED", evidence_record_id: null, authority_id: null, available_actions: ["CREATE_DRAFT"] },
+    { stage: "READINESS", state: "NOT_STARTED", evidence_record_id: null, authority_id: null, available_actions: ["CREATE_DRAFT"] },
+    { stage: "CERTIFICATION", state: "LOCKED", evidence_record_id: null, authority_id: null, available_actions: [] },
+    { stage: "F096_AUTHORITY", state: "LOCKED", evidence_record_id: null, authority_id: null, available_actions: [] },
+    { stage: "F048_CREDENTIAL", state: "LOCKED", evidence_record_id: null, authority_id: null, available_actions: [] },
+    { stage: "ISSUANCE", state: "LOCKED", evidence_record_id: null, authority_id: null, available_actions: [] }
+  ];
+  return {
+    projection_version: "TRAINING_JOURNEY_PROJECTION_V2",
+    revision: `${enrollment.id}:test`,
+    enrollment,
+    stages,
+    current_stage: "ATTENDANCE",
+    next_action: "COMPLETE_F022",
+    person_certification_authority: {
+      projection_version: "PERSON_CERTIFICATION_AUTHORITY_V1",
+      subject: { trainee_id: enrollment.trainee.id, student_number: enrollment.trainee.student_number, full_name: enrollment.trainee.full_name, staff_member_id: null },
+      scope: { client_id: enrollment.client_id, facility_id: enrollment.training_session?.facility_id ?? null },
+      certification: null,
+      assignments: [],
+      operational_authorizations: [],
+      stages,
+      blockers: ["CERTIFICATION_NOT_CREATED"],
+      source_precedence: [],
+      checksum: "a".repeat(64)
+    }
+  };
+}
+
+function journeyProjectionRoute(enrollment: TrainingEnrollment, count = 1): MockRoute {
+  return {
+    url: `/api/v1/training/enrollments/${enrollment.id}/journey-v2`,
+    responses: Array.from({ length: count }, () => ({ status: 200, body: journeyProjection(enrollment) }))
+  };
+}
+
+function trainingJourneyListRoute(enrollment: TrainingEnrollment, count = 1): MockRoute {
+  return {
+    url: "/api/v1/training/enrollments",
+    responses: Array.from({ length: count }, () => ({ status: 200, body: { enrollments: [enrollment], next_cursor: null } }))
+  };
+}
+
 function runtimeTemplateRoute(templateCode: string, templateVersionId: string): MockRoute {
   return {
     url: `/api/v1/operational-evidence/template-versions/${templateVersionId}`,
@@ -742,6 +808,24 @@ function mockFetchRoutes(routesToMock: MockRoute[]) {
       });
     }
 
+    if (!route && url === "/api/v1/training/requests" && method === "GET") {
+      return new Response(JSON.stringify({ requests: [{ id: "00000000-0000-4000-8000-000000890001", business_identifier: "OGI-TRNREQ-2026-000001", client_id: clientAId, facility_id: "00000000-0000-4000-8000-000000870001" }] }), {
+        status: 200, headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    if (!route && url === "/api/v1/training/enrollments" && method === "GET") {
+      const requestedEnrollment = routesToMock.some((candidate) =>
+        candidate.url === `/api/v1/training/enrollments/${independentEnrollmentB.id}/evidence-workspace`
+      )
+        ? independentEnrollmentB
+        : assignedEnrollmentA;
+      return new Response(JSON.stringify({ enrollments: [requestedEnrollment], next_cursor: null }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
     if (!route) {
       throw new Error(`Unexpected fetch call: ${method} ${url}`);
     }
@@ -860,6 +944,7 @@ describe("Registration Training frontend", () => {
         trainingEvidenceWorkspace(historical),
         trainingEvidenceWorkspace(historical)
       ]),
+      journeyProjectionRoute(historical, 2),
       attendanceWorkspaceRoute()
     ]);
     const { router } = renderWithRoute(routes.trainingJourneys);
@@ -871,13 +956,15 @@ describe("Registration Training frontend", () => {
     expect(screen.getByText("Next: Record attendance evidence")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Open Evaluation Journey" }));
     const journey = await screen.findByRole("dialog", { name: `Training Evaluation Journey for ${traineeA.full_name}` });
-    expect(within(journey).getByRole("button", { name: /1\. F-022 Attendance Required/ })).toHaveAttribute("aria-current", "step");
+    expect(within(journey).getByRole("button", { name: /F-022 Attendance Required/ })).toHaveAttribute("aria-current", "step");
     expect(within(journey).getByText("F-022 Session Roster")).toBeVisible();
-    await user.click(within(journey).getByRole("button", { name: /2\. F-023 Skills Not started/ }));
+    await user.click(within(journey).getByRole("button", { name: /F-023 Skills Not started/ }));
     expect(within(journey).getByRole("button", { name: "Create Draft" })).toBeVisible();
     await user.click(within(journey).getByRole("button", { name: "Close Training Evaluation Journey" }));
     expect(screen.queryByRole("dialog", { name: `Training Evaluation Journey for ${traineeA.full_name}` })).not.toBeInTheDocument();
-    await router.navigate(routes.trainingJourneyPath(historical.id));
+    await act(async () => {
+      await router.navigate(routes.trainingJourneyPath(historical.id));
+    });
     const deepLinkedJourney = await screen.findByRole("dialog", { name: `Training Evaluation Journey for ${traineeA.full_name}` });
     await user.click(within(deepLinkedJourney).getByRole("button", { name: "Close Training Evaluation Journey" }));
     const refreshedToggle = screen.getByRole("button", { name: new RegExp(traineeA.full_name) });
@@ -907,7 +994,8 @@ describe("Registration Training frontend", () => {
     expect(dialog).toHaveAttribute("aria-modal", "true");
     expect(within(dialog).getByText("Current step: Trainee")).toBeVisible();
     await user.click(within(dialog).getByRole("radio", { name: "Register New Trainee" }));
-    await user.type(within(dialog).getByLabelText("Full name"), "Guided Trainee");
+    await user.type(within(dialog).getByLabelText("First name"), "Guided");
+    await user.type(within(dialog).getByLabelText("Last name"), "Trainee");
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(confirm).toHaveBeenCalledTimes(1);
     expect(dialog).toBeVisible();
@@ -957,13 +1045,18 @@ describe("Registration Training frontend", () => {
     await user.selectOptions(within(dialog).getByLabelText("Eligible Training Session"), qualifiedSession.id);
     await user.click(within(dialog).getByRole("button", { name: "Next →" }));
     expect(within(dialog).getByText("Current step: Review")).toBeVisible();
+    await user.click(
+      within(dialog).getByRole("checkbox", {
+        name: /I have reviewed the registration summary and Program Competency Scope/i,
+      }),
+    );
     await user.click(within(dialog).getByRole("button", { name: "Complete Training Registration" }));
 
     expect(await screen.findByRole("heading", { name: `${traineeA.full_name} is registered for Guardian Responder` })).toBeVisible();
     expect(screen.getByText(`${traineeA.full_name} · Student number pending`)).toBeVisible();
     expect(screen.getByText(qualifiedSession.business_identifier)).toBeVisible();
     expect(screen.getByRole("link", { name: "Continue to Training Journey" })).toHaveAttribute("href", routes.trainingJourneyPath(completedEnrollment.id));
-    expect(screen.getByRole("link", { name: "View Trainee and Enrollment" })).toHaveAttribute("href", routes.trainingTrainees);
+    expect(screen.getByRole("link", { name: "Reconcile Trainee Identity" })).toHaveAttribute("href", routes.trainingTrainees);
     expect(screen.getByRole("link", { name: "View Training Sessions" })).toHaveAttribute("href", routes.trainingSessions);
     expect(screen.getByRole("button", { name: "Register Another Trainee" })).toBeVisible();
     expect(screen.getByText(traineeA.id)).not.toBeVisible();
@@ -1056,17 +1149,15 @@ describe("Registration Training frontend", () => {
     await user.selectOptions(within(dialog).getByLabelText(/Training Type/), "INITIAL_CERTIFICATION");
     await user.selectOptions(within(dialog).getByLabelText("Sponsoring Client (optional for an existing Session)"), clientAId);
     await user.selectOptions(within(dialog).getByLabelText("Facility (required for a new Session)"), trainingFacility.id);
-    const programCoverage = within(dialog).getByRole("region", { name: "Required Program Coverage" });
-    expect(programCoverage).toHaveTextContent("First Aid");
-    expect(programCoverage).toHaveTextContent("CPR");
-    expect(programCoverage).toHaveTextContent("AED");
-    expect(programCoverage).toHaveTextContent("Oxygen Administration");
-    expect(programCoverage).not.toHaveTextContent("Incident Documentation");
+    const programRequirements = within(dialog).getByRole("region", { name: "Selected Program Requirements" });
+    expect(programRequirements).toHaveTextContent("40 hours");
+    expect(programRequirements).toHaveTextContent("Prerequisite");
+    expect(programRequirements).toHaveTextContent("None");
     await user.click(within(dialog).getByRole("button", { name: "Next →" }));
     await user.click(within(dialog).getByRole("radio", { name: "Create New Training Session" }));
     await user.click(within(dialog).getByRole("button", { name: "Next →" }));
     await user.type(within(dialog).getByLabelText("Session title"), "Governed L1 cohort");
-    expect(within(dialog).queryByRole("region", { name: "Required Program Coverage" })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("region", { name: "Selected Program Requirements" })).not.toBeInTheDocument();
     await user.type(within(dialog).getByLabelText("Start date"), "2026-09-01T08:00");
     await user.click(within(dialog).getByRole("button", { name: "Next →" }));
 
@@ -1079,7 +1170,28 @@ describe("Registration Training frontend", () => {
     await user.click(within(dialog).getByRole("button", { name: "Next →" }));
     expect(within(dialog).getByText("Conducting user")).toBeVisible();
     expect(within(dialog).getAllByText("Braven Burrows").length).toBeGreaterThan(0);
-    await user.click(within(dialog).getByRole("button", { name: "Complete Training Registration" }));
+    const competencyScope = within(dialog).getByText("Review Program Competency Scope");
+    expect(competencyScope).toBeVisible();
+    await user.click(competencyScope);
+    expect(within(dialog).getByText("Competencies introduced at this level")).toBeVisible();
+    const completeRegistration = within(dialog).getByRole("button", {
+      name: "Complete Training Registration",
+    });
+    expect(completeRegistration).toBeDisabled();
+    expect(
+      calls.some(
+        (call) =>
+          call.url === "/api/v1/training/sessions" &&
+          call.init?.method === "POST",
+      ),
+    ).toBe(false);
+    await user.click(
+      within(dialog).getByRole("checkbox", {
+        name: /I have reviewed the registration summary and Program Competency Scope/i,
+      }),
+    );
+    expect(completeRegistration).toBeEnabled();
+    await user.click(completeRegistration);
     await waitFor(() => {
       expect(calls.some((call) => call.url === "/api/v1/training/sessions" && call.init?.method === "POST")).toBe(true);
     });
@@ -1100,7 +1212,7 @@ describe("Registration Training frontend", () => {
 
     await user.click(await screen.findByRole("button", { name: "Menu" }));
     await user.click(screen.getByRole("button", { name: "Training" }));
-    await user.click(await screen.findByRole("link", { name: "Trainees" }));
+    await user.click(await screen.findByRole("link", { name: "Trainee Reconciliation" }));
 
     expect(
       await screen.findByRole("heading", { name: "Trainees" })
@@ -1249,7 +1361,7 @@ describe("Registration Training frontend", () => {
       })
     );
 
-    renderWithRoute(routes.registrationTraining);
+    renderWithRoute(routes.trainingTrainees);
 
     expect(
       await screen.findByText(
@@ -1266,7 +1378,7 @@ describe("Registration Training frontend", () => {
   it("renders Trainee list and detail with human identity before technical metadata", async () => {
     mockFetchRoutes(standardRoutes());
 
-    renderWithRoute(routes.registrationTraining);
+    renderWithRoute(routes.trainingTrainees);
 
     expect(await screen.findByText("Jane Smith")).toBeInTheDocument();
     expect(screen.getAllByText("John Santos").length).toBeGreaterThan(0);
@@ -1310,14 +1422,15 @@ describe("Registration Training frontend", () => {
       }
     ]);
 
-    renderWithRoute(routes.registrationTraining);
+    renderWithRoute(routes.trainingTrainees);
 
     await user.click(await screen.findByRole("button", { name: "Register Trainee" }));
     expect(screen.queryByLabelText(/Student Number/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/^Client$/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/StaffMember/i)).not.toBeInTheDocument();
 
-    await user.type(screen.getByLabelText("Full name"), "New Trainee");
+    await user.type(screen.getByLabelText("First name"), "New");
+    await user.type(screen.getByLabelText("Last name"), "Trainee");
     await user.type(screen.getByLabelText("Email"), "new.trainee@example.test");
     await user.click(screen.getByRole("button", { name: "Create Trainee" }));
 
@@ -1330,6 +1443,9 @@ describe("Registration Training frontend", () => {
 
     expect(JSON.parse(String(createCall?.init?.body))).toEqual({
       full_name: "New Trainee",
+      first_name: "New",
+      middle_name: null,
+      last_name: "Trainee",
       email: "new.trainee@example.test",
       phone_number: null,
       notes: null
@@ -1340,10 +1456,10 @@ describe("Registration Training frontend", () => {
     const user = userEvent.setup();
     const { calls } = mockFetchRoutes(standardRoutes());
 
-    renderWithRoute(routes.registrationTraining);
+    renderWithRoute(routes.trainingTrainees);
 
     await user.click(await screen.findByRole("button", { name: "Register Trainee" }));
-    await user.type(screen.getByLabelText("Full name"), "Cancelled Trainee");
+    await user.type(screen.getByLabelText("First name"), "Cancelled");
     await user.click(screen.getByRole("button", { name: "Cancel" }));
 
     expect(screen.queryByRole("form", { name: "Create Trainee" })).not.toBeInTheDocument();
@@ -1386,7 +1502,7 @@ describe("Registration Training frontend", () => {
       }
     ]);
 
-    renderWithRoute(routes.registrationTraining);
+    renderWithRoute(routes.trainingTrainees);
 
     await user.click(await screen.findByRole("button", { name: "Link Personnel" }));
     expect(screen.queryByLabelText(/uuid/i)).not.toBeInTheDocument();
@@ -1449,7 +1565,7 @@ describe("Registration Training frontend", () => {
       }
     ]);
 
-    renderWithRoute(routes.registrationTraining);
+    renderWithRoute(routes.trainingTrainees);
 
     expect(await screen.findByText("L3 - Open Water Guardian")).toBeInTheDocument();
     expect(screen.getAllByText("Ocean Guard International").length).toBeGreaterThan(0);
@@ -1533,7 +1649,7 @@ describe("Registration Training frontend", () => {
       }
     ]);
 
-    renderWithRoute(routes.registrationTraining);
+    renderWithRoute(routes.trainingTrainees);
 
     expect(
       await screen.findByText("No training enrollments recorded.")
@@ -1559,6 +1675,7 @@ describe("Registration Training frontend", () => {
   });
 
   it("renders independent Training Evidence context without client or facility selectors", async () => {
+    const user = userEvent.setup();
     mockFetchRoutes([
       ...authRoutes(),
       {
@@ -1573,10 +1690,13 @@ describe("Registration Training frontend", () => {
         url: `/api/v1/training/trainees/${traineeBId}/enrollments`,
         responses: [{ status: 200, body: { enrollments: [independentEnrollmentB] } }]
       },
+      trainingJourneyListRoute(independentEnrollmentB),
+      journeyProjectionRoute(independentEnrollmentB, 10),
       workspaceRoute(independentEnrollmentB)
     ]);
 
-    renderWithRoute(routes.registrationTraining);
+    renderWithRoute(routes.trainingJourneyPath(independentEnrollmentB.id));
+    await user.click(await screen.findByTitle(/^F-023/));
 
     expect(await screen.findByText("Skills, Knowledge, and Readiness")).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "Skills Assessment" })).toBeInTheDocument();
@@ -1585,11 +1705,8 @@ describe("Registration Training frontend", () => {
     expect(screen.getAllByText("L1 - Guardian Responder").length).toBeGreaterThan(0);
     expect(screen.getByText("OGI Direct / Independent")).toBeInTheDocument();
     expect(screen.getByText("No Training Session assigned")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Create Draft" })).toHaveLength(3);
+    expect(screen.getAllByRole("button", { name: "Create Draft" })).toHaveLength(1);
     expect(screen.getByText("Template: OGI F-023")).toBeInTheDocument();
-    expect(screen.getByText("Template: OGI F-024")).toBeInTheDocument();
-    expect(screen.getByText("Template: OGI F-025")).toBeInTheDocument();
-    expect(screen.getByText("F-022 Session Roster")).toBeInTheDocument();
     expect(screen.queryByLabelText(/^Client$/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/^Facility$/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/StaffMember/i)).not.toBeInTheDocument();
@@ -1628,6 +1745,8 @@ describe("Registration Training frontend", () => {
         url: `/api/v1/training/trainees/${traineeBId}/enrollments`,
         responses: [{ status: 200, body: { enrollments: [independentEnrollmentB] } }]
       },
+      trainingJourneyListRoute(independentEnrollmentB),
+      journeyProjectionRoute(independentEnrollmentB, 10),
       workspaceRoute(independentEnrollmentB, [
         trainingEvidenceWorkspace(independentEnrollmentB),
         trainingEvidenceWorkspace(independentEnrollmentB),
@@ -1658,7 +1777,8 @@ describe("Registration Training frontend", () => {
       }
     ]);
 
-    const { router } = renderWithRoute(routes.registrationTraining);
+    renderWithRoute(routes.trainingJourneyPath(independentEnrollmentB.id));
+    await user.click(await screen.findByTitle(/^F-023/));
 
     const request = draftRequests[0];
     const slotHeading = await screen.findByRole("heading", {
@@ -1670,11 +1790,7 @@ describe("Registration Training frontend", () => {
       })
     );
 
-    await waitFor(() =>
-      expect(router.state.location.pathname).toBe(
-        routes.evidenceRecordPath(request.evidenceRecordId)
-      )
-    );
+    await waitFor(() => expect(calls.some((call) => call.url.endsWith("/evidence-drafts"))).toBe(true));
 
     const draftCalls = calls.filter((call) => call.url.endsWith("/evidence-drafts"));
 
@@ -1747,6 +1863,8 @@ describe("Registration Training frontend", () => {
           url: `/api/v1/training/trainees/${traineeBId}/enrollments`,
           responses: [{ status: 200, body: { enrollments: [independentEnrollmentB] } }]
         },
+        trainingJourneyListRoute(independentEnrollmentB),
+        journeyProjectionRoute(independentEnrollmentB, 10),
         workspaceRoute(independentEnrollmentB),
         {
           method: "POST",
@@ -1776,7 +1894,9 @@ describe("Registration Training frontend", () => {
         runtimeTemplateRoute(templateCode, templateVersionId)
       ]);
 
-      const { router } = renderWithRoute(routes.registrationTraining);
+      renderWithRoute(routes.trainingJourneyPath(independentEnrollmentB.id));
+      const journeyForm = templateCode.includes("F023") ? "F-023" : templateCode.includes("F024") ? "F-024" : "F-025";
+      await user.click(await screen.findByTitle(new RegExp(`^${journeyForm}`)));
 
       const slotHeading = await screen.findByRole("heading", { name: title });
       await user.click(
@@ -1785,11 +1905,6 @@ describe("Registration Training frontend", () => {
         })
       );
 
-      await waitFor(() =>
-        expect(router.state.location.pathname).toBe(
-          routes.evidenceRecordPath(evidenceRecordId)
-        )
-      );
       expect(await screen.findByRole("heading", { name: "Draft Evidence" })).toBeInTheDocument();
       expect(screen.queryByText("Record Detail")).not.toBeInTheDocument();
       expect(screen.queryByText("Read only")).not.toBeInTheDocument();
@@ -1845,6 +1960,8 @@ describe("Registration Training frontend", () => {
         url: `/api/v1/training/trainees/${traineeBId}/enrollments`,
         responses: [{ status: 200, body: { enrollments: [independentEnrollmentB] } }]
       },
+      trainingJourneyListRoute(independentEnrollmentB),
+      journeyProjectionRoute(independentEnrollmentB, 10),
       workspaceRoute(independentEnrollmentB, [
         trainingEvidenceWorkspace(independentEnrollmentB, [
           trainingEvidenceSlot("SKILLS", independentEnrollmentB, {
@@ -1860,13 +1977,10 @@ describe("Registration Training frontend", () => {
       runtimeTemplateRoute("OGI_F023_OPERATIONAL_SKILLS_ASSESSMENT", "template-version-skills")
     ]);
 
-    const { router } = renderWithRoute(routes.registrationTraining);
+    renderWithRoute(routes.trainingJourneyPath(independentEnrollmentB.id));
+    await user.click(await screen.findByTitle(/^F-023/));
 
-    await user.click((await screen.findAllByRole("link", { name: "Open Draft" }))[0]);
-
-    await waitFor(() =>
-      expect(router.state.location.pathname).toBe(routes.evidenceRecordPath(skillsDraftId))
-    );
+    await user.click((await screen.findAllByRole("button", { name: "Open Draft" }))[0]);
     expect(await screen.findByRole("heading", { name: "Draft Evidence" })).toBeInTheDocument();
     expect(screen.queryByText("Read only")).not.toBeInTheDocument();
     expect(screen.getByText("Training Context")).toBeInTheDocument();
@@ -1875,7 +1989,7 @@ describe("Registration Training frontend", () => {
 
   it.each([
     ["SUBMITTED", "Submitted Evidence"],
-    ["GOVERNANCE_APPROVED", "Submitted Evidence"]
+    ["GOVERNANCE_APPROVED", "Governance Approved Evidence"]
   ] as const)(
     "keeps Training-scoped %s evidence immutable",
     async (lifecycleState, heading) => {
@@ -2012,6 +2126,8 @@ describe("Registration Training frontend", () => {
         url: `/api/v1/training/trainees/${traineeAId}/enrollments`,
         responses: [{ status: 200, body: { enrollments: [assignedEnrollmentA] } }]
       },
+      trainingJourneyListRoute(assignedEnrollmentA),
+      journeyProjectionRoute(assignedEnrollmentA, 10),
       workspaceRoute(assignedEnrollmentA, [
         trainingEvidenceWorkspace(assignedEnrollmentA, [
           trainingEvidenceSlot("SKILLS", assignedEnrollmentA, {
@@ -2029,22 +2145,16 @@ describe("Registration Training frontend", () => {
       ])
     ]);
 
-    renderWithRoute(routes.registrationTraining);
+    const user = userEvent.setup();
+    renderWithRoute(routes.trainingJourneyPath(assignedEnrollmentA.id));
+    await user.click(await screen.findByTitle(/^F-023/));
 
-    expect(await screen.findByText("Open Water Guardian Cohort A")).toBeInTheDocument();
+    expect((await screen.findAllByText("Open Water Guardian Cohort A")).length).toBeGreaterThan(0);
     expect(await screen.findByRole("heading", { name: "Skills Assessment" })).toBeInTheDocument();
     expect(screen.getByText("Assigned training facility")).toBeInTheDocument();
     expect(screen.getAllByText("OGI F-023").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("OGI F-024").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("OGI F-025").length).toBeGreaterThan(0);
-    expect(screen.getAllByRole("link", { name: "Open Draft" })[0]).toHaveAttribute(
-      "href",
-      routes.evidenceRecordPath(skillsDraftId)
-    );
-    expect(screen.getByText("Linked to Enrollment")).toBeInTheDocument();
-    expect(screen.getAllByText("Not yet linked").length).toBeGreaterThan(0);
-    expect(screen.getByText("Knowledge result: Competent")).toBeInTheDocument();
-    expect(screen.getByText("Readiness: Ready For Certification Review")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Open Draft" })[0]).toBeVisible();
+    expect(screen.getByText("Not yet linked")).toBeInTheDocument();
     expect(screen.queryByText(assignedEnrollmentA.id)).not.toBeInTheDocument();
     expect(screen.queryByText(trainingSessionAId)).not.toBeInTheDocument();
     expect(screen.queryByText(clientAId)).not.toBeInTheDocument();
@@ -2067,6 +2177,8 @@ describe("Registration Training frontend", () => {
         url: `/api/v1/training/trainees/${traineeBId}/enrollments`,
         responses: [{ status: 200, body: { enrollments: [independentEnrollmentB] } }]
       },
+      trainingJourneyListRoute(independentEnrollmentB),
+      journeyProjectionRoute(independentEnrollmentB, 10),
       workspaceRoute(independentEnrollmentB, [
         trainingEvidenceWorkspace(independentEnrollmentB),
         trainingEvidenceWorkspace(independentEnrollmentB, [
@@ -2091,7 +2203,8 @@ describe("Registration Training frontend", () => {
       }
     ]);
 
-    renderWithRoute(routes.registrationTraining);
+    renderWithRoute(routes.trainingJourneyPath(independentEnrollmentB.id));
+    await user.click(await screen.findByTitle(/^F-023/));
 
     const skillsCard = await screen.findByRole("heading", {
       name: "Skills Assessment"
@@ -2103,10 +2216,7 @@ describe("Registration Training frontend", () => {
     );
 
     expect(await screen.findByText("An active draft already exists. Workspace refreshed.")).toBeInTheDocument();
-    expect((await screen.findAllByRole("link", { name: "Open Draft" }))[0]).toHaveAttribute(
-      "href",
-      routes.evidenceRecordPath(skillsDraftId)
-    );
+    expect((await screen.findAllByRole("button", { name: "Open Draft" }))[0]).toBeVisible();
   });
 
   it("assigns an initial Training Session to an existing Enrollment through the governed action", async () => {
@@ -2141,7 +2251,7 @@ describe("Registration Training frontend", () => {
       }
     ]);
 
-    renderWithRoute(routes.registrationTraining);
+    renderWithRoute(routes.trainingTrainees);
 
     expect(await screen.findByText("L3 - Open Water Guardian")).toBeInTheDocument();
     expect(screen.getByText("None")).toBeInTheDocument();
@@ -2207,11 +2317,11 @@ describe("Registration Training frontend", () => {
       attendanceWorkspaceRoute()
     ]);
 
-    renderWithRoute(routes.registrationTraining);
+    renderWithRoute(routes.trainingSessions);
 
     await screen.findByText("F-022 Session Roster");
     await user.selectOptions(
-      screen.getByLabelText("Attendance Training Session"),
+      await screen.findByLabelText("Attendance Training Session"),
       trainingSessionAId
     );
 
@@ -2240,7 +2350,7 @@ describe("Registration Training frontend", () => {
       ])
     ]);
 
-    renderWithRoute(routes.registrationTraining);
+    renderWithRoute(routes.trainingSessions);
     await user.selectOptions(await screen.findByLabelText("Attendance Training Session"), trainingSessionAId);
     await user.selectOptions(
       await screen.findByLabelText(`Training Type for ${historicalEnrollment.trainee.full_name}`),
@@ -2308,7 +2418,7 @@ describe("Registration Training frontend", () => {
       }
     ]);
 
-    renderWithRoute(routes.registrationTraining);
+    renderWithRoute(routes.trainingSessions);
 
     await user.selectOptions(
       await screen.findByLabelText("Attendance Training Session"),
@@ -2362,7 +2472,7 @@ describe("Registration Training frontend", () => {
       }
     ]);
 
-    renderWithRoute(routes.registrationTraining);
+    renderWithRoute(routes.trainingSessions);
     await user.selectOptions(await screen.findByLabelText("Attendance Training Session"), trainingSessionAId);
     await user.click(await screen.findByRole("button", { name: "Replace with Current Version" }));
 
@@ -2430,7 +2540,7 @@ describe("Registration Training frontend", () => {
       }
     ]);
 
-    renderWithRoute(routes.registrationTraining);
+    renderWithRoute(routes.trainingSessions);
 
     await user.selectOptions(
       await screen.findByLabelText("Attendance Training Session"),
@@ -2477,12 +2587,12 @@ describe("Registration Training frontend", () => {
       ])
     ]);
 
-    renderWithRoute(routes.registrationTraining);
+    renderWithRoute(routes.trainingSessions);
     const user = userEvent.setup();
     await user.selectOptions(await screen.findByLabelText("Attendance Training Session"), trainingSessionAId);
 
     expect(await screen.findByText("Historical only — replaced records do not complete attendance.")).toBeVisible();
-    expect(screen.getByRole("button", { name: "View Replaced Record" })).toBeVisible();
+    expect(screen.getByRole("link", { name: "View Replaced Record" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Link Attendance Evidence" })).not.toBeInTheDocument();
   });
 
@@ -2543,7 +2653,7 @@ describe("Registration Training frontend", () => {
       }
     ]);
 
-    renderWithRoute(routes.registrationTraining);
+    renderWithRoute(routes.trainingSessions);
 
     await user.selectOptions(
       await screen.findByLabelText("Attendance Training Session"),
@@ -2585,7 +2695,7 @@ describe("Registration Training frontend", () => {
       )
     );
 
-    renderWithRoute(routes.registrationTraining);
+    renderWithRoute(routes.trainingJourneys);
 
     expect(await screen.findByText("Jane Smith")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Register Trainee" })).not.toBeInTheDocument();

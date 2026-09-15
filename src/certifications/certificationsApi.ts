@@ -150,6 +150,13 @@ export function addCertificationEndorsement(
   ).then((response) => response.data);
 }
 
+export function retireCertification(certificationId:string,reason:string,idempotencyKey:string){
+  return apiRequest<{readonly success:true;readonly data:CertificationCommandRecord&{readonly event_id:string;readonly replayed:boolean}}>(`/api/v1/certifications/${encodeURIComponent(certificationId)}/retirement`,{
+    method:"POST",body:{reason},headers:{"Idempotency-Key":idempotencyKey},
+    validate:(value):value is {readonly success:true;readonly data:CertificationCommandRecord&{readonly event_id:string;readonly replayed:boolean}}=>isRecord(value)&&value.success===true&&isRecord(value.data)&&isCertificationCommandRecord(value.data)&&"event_id" in value.data&&typeof value.data.event_id==="string"&&"replayed" in value.data&&typeof value.data.replayed==="boolean"
+  }).then(response=>response.data);
+}
+
 function isCertificationCommandResponse(
   value: unknown
 ): value is CertificationCommandResponse {

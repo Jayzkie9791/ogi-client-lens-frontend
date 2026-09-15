@@ -207,9 +207,10 @@ export function getCredentialIssuance(issuanceId: string) {
   );
 }
 
-export function getCredentialIssuanceCertificate(issuanceId: string) {
+export function getCredentialIssuanceCertificate(issuanceId: string, fresh = false) {
   return apiBlobRequest(
-    `/api/v1/credentials/issuances/${encodeURIComponent(issuanceId)}/certificate`
+    `/api/v1/credentials/issuances/${encodeURIComponent(issuanceId)}/certificate`,
+    fresh ? { cache: "no-store" } : undefined
   );
 }
 

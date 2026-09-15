@@ -49,6 +49,8 @@ export interface TrainingProgramAuthority {
   readonly display_name: string;
   readonly qualification_label: string;
   readonly required_training_hours: number;
+  readonly prerequisite_level: CertificationLevel | null;
+  readonly approved_equivalent_allowed: boolean;
   readonly required_program_coverage: readonly string[];
   readonly incremental_coverage: readonly string[];
   readonly effective_coverage: readonly string[];
@@ -79,6 +81,9 @@ export interface TrainingTrainee {
   readonly id: string;
   readonly student_number: string | null;
   readonly full_name: string;
+  readonly first_name: string | null;
+  readonly middle_name: string | null;
+  readonly last_name: string | null;
   readonly email: string | null;
   readonly phone_number: string | null;
   readonly notes: string | null;
@@ -94,6 +99,9 @@ export interface TrainingTraineeListResponse {
 
 export interface CreateTrainingTraineeRequest {
   readonly full_name: string;
+  readonly first_name: string;
+  readonly middle_name?: string | null;
+  readonly last_name: string;
   readonly email?: string | null;
   readonly phone_number?: string | null;
   readonly notes?: string | null;
@@ -218,6 +226,7 @@ export type TrainingOperationalSkill =
   (typeof trainingOperationalSkills)[number];
 
 export interface CreateTrainingSessionRequest {
+  readonly training_request_id: string;
   readonly training_title: string;
   readonly operational_skill: TrainingOperationalSkill;
   readonly training_start_date: string;
@@ -232,6 +241,34 @@ export interface CreateTrainingSessionRequest {
   readonly target_program_codes: readonly TrainingProgramCode[];
   readonly training_notes?: string | null;
 }
+
+export interface ApprovedTrainingRequest { readonly id: string; readonly business_identifier: string; readonly client_id: string; readonly facility_id: string | null; }
+export interface ApprovedTrainingRequestListResponse { readonly requests: readonly ApprovedTrainingRequest[]; }
+
+export interface ClientTrainingRequestContext {
+  readonly client: { readonly id:string; readonly business_identifier:string; readonly organization_name:string; readonly status:string } | null;
+  readonly clients: readonly { readonly id:string; readonly business_identifier:string; readonly organization_name:string; readonly status:string }[];
+  readonly facilities: readonly { readonly id:string; readonly business_identifier:string; readonly facility_name:string; readonly facility_type:string }[];
+  readonly request_mode:"CLIENT_SELF_SERVICE"|"OGI_ASSISTED";
+  readonly facility_scope: { readonly mode:"EXPLICIT"|"CLIENT_WIDE"|null; readonly facility_ids:readonly string[] };
+}
+export interface ClientTrainingRequestInput {
+  readonly client_id?:string; readonly received_via?:"PHONE"|"EMAIL"|"MEETING"|"CONTRACT_NEGOTIATION"|"OTHER"; readonly external_requester_name?:string; readonly external_requester_role?:string;
+  readonly facility_id:string; readonly primary_contact_person:string; readonly position:string; readonly telephone:string; readonly email:string;
+  readonly secondary_contact_person:string; readonly secondary_position:string; readonly secondary_telephone:string; readonly secondary_email:string;
+  readonly requested_start_date:string; readonly requested_completion_date:string; readonly training_location:"Client Facility"|"OGI Training Center"|"Hybrid"|"Virtual";
+  readonly number_of_participants:number; readonly requested_programs:readonly string[]; readonly reasons_for_request:readonly string[];
+  readonly risk_driver_number:string; readonly related_audit_number:string; readonly related_incident_number:string; readonly related_corrective_action_number:string;
+  readonly operational_risk_level?:"Low"|"Moderate"|"High"|"Critical"; readonly risk_exposure_description:string;
+  readonly participant_types:readonly string[]; readonly average_experience_level?:"Entry Level"|"Intermediate"|"Advanced"|"Expert";
+  readonly current_operational_status?:"Operationally Ready"|"Restricted Duty"|"Remediation Required"|"Not Assessed";
+  readonly readiness:Record<string,boolean|undefined>; readonly language_requirements:string; readonly accessibility_requirements:string;
+  readonly medical_considerations:string; readonly security_requirements:string; readonly operational_restrictions:string; readonly additional_requirements:string;
+  readonly attached_document_types:readonly string[]; readonly reference_numbers:string; readonly expected_outcomes:readonly string[];
+  readonly authorizer_position:string; readonly authorization_confirmed:boolean;
+}
+export interface ClientTrainingRequest { readonly id:string; readonly training_request_number:string; readonly client_id:string; readonly facility_id:string; readonly facility_name:string|null; readonly status:string; readonly request_origin:"CLIENT_SELF_SERVICE"|"OGI_ASSISTED"; readonly received_via:string|null; readonly external_requester_name:string|null; readonly external_requester_role:string|null; readonly requested_by_user_id:string; readonly created_at:string; readonly updated_at:string; readonly details:Record<string,unknown>; }
+export interface ClientTrainingRequestListResponse { readonly requests:readonly ClientTrainingRequest[]; }
 
 export interface EligibleTrainingInstructor {
   readonly personnel_id: string;
@@ -288,8 +325,13 @@ export interface TrainingEnrollment {
   };
   readonly client: TrainingEnrollmentClientSummary | null;
   readonly training_session: TrainingEnrollmentSessionSummary | null;
-  readonly journey_progress?: {readonly attendance:boolean;readonly skills_assessment:string|null;readonly knowledge_assessment:string|null;readonly readiness:string|null;readonly certification:{readonly id:string;readonly business_identifier:string;readonly certification_number:string;readonly certification_level:string;readonly certification_status:string;readonly digital_credential:{readonly f048_evidence:{readonly evidence_record_id:string;readonly lifecycle_state:string;readonly submitted_at:string;readonly association_status:"BOUND"|"REVIEW_REQUIRED"}|null;readonly issuance:{readonly id:string;readonly issued_at:string}|null}}|null;readonly next_action:"RECORD_ATTENDANCE"|"RECORD_SKILLS_ASSESSMENT"|"RECORD_KNOWLEDGE_ASSESSMENT"|"RECORD_READINESS_DECISION"|"CERTIFICATION_REVIEW"|"BEGIN_F048"|"COMPLETE_F048_REVIEW"|"CREDENTIAL_ASSOCIATION_REVIEW"|"ISSUE_DIGITAL_CREDENTIAL"|"DIGITAL_CREDENTIAL_ISSUED"}|null;
+  readonly journey_progress?: {readonly attendance:boolean;readonly skills_assessment:string|null;readonly knowledge_assessment:string|null;readonly readiness:string|null;readonly certification:{readonly id:string;readonly business_identifier:string;readonly certification_number:string;readonly certification_level:string;readonly certification_status:string;readonly commercial_evaluation_recorded:boolean;readonly readiness_authority:{readonly f096_evidence:{readonly evidence_record_id:string;readonly lifecycle_state:string;readonly submitted_at:string}|null};readonly digital_credential:{readonly f048_evidence:{readonly evidence_record_id:string;readonly lifecycle_state:string;readonly submitted_at:string;readonly association_status:"BOUND"|"REVIEW_REQUIRED"}|null;readonly issuance:{readonly id:string;readonly issued_at:string}|null}}|null;readonly next_action:"RECORD_ATTENDANCE"|"RECORD_SKILLS_ASSESSMENT"|"RECORD_KNOWLEDGE_ASSESSMENT"|"RECORD_READINESS_DECISION"|"CERTIFICATION_REVIEW"|"BEGIN_F048"|"COMPLETE_F048_REVIEW"|"CREDENTIAL_ASSOCIATION_REVIEW"|"ISSUE_DIGITAL_CREDENTIAL"|"DIGITAL_CREDENTIAL_ISSUED"}|null;
 }
+
+export type TrainingJourneyStageKey = "ATTENDANCE"|"SKILLS"|"KNOWLEDGE"|"READINESS"|"CERTIFICATION"|"F096_AUTHORITY"|"F048_CREDENTIAL"|"ISSUANCE";
+export interface TrainingJourneyStageProjection { readonly stage:TrainingJourneyStageKey; readonly state:string; readonly evidence_record_id:string|null; readonly authority_id:string|null; readonly available_actions:readonly string[]; }
+export interface PersonCertificationAuthorityProjection { readonly projection_version:"PERSON_CERTIFICATION_AUTHORITY_V1"; readonly subject:{readonly trainee_id:string;readonly student_number:string|null;readonly full_name:string;readonly staff_member_id:string|null};readonly scope:{readonly client_id:string|null;readonly facility_id:string|null};readonly certification:null|{readonly id:string;readonly business_identifier:string;readonly certification_number:string;readonly level:string;readonly status:string;readonly issue_date:string;readonly expiry_date:string};readonly assignments:readonly {readonly id:string;readonly facility_id:string;readonly status:string;readonly assigned_from:string;readonly assigned_to:string|null;readonly primary:boolean}[];readonly operational_authorizations:readonly {readonly id:string;readonly authorization_number:string;readonly status:string;readonly level:string;readonly issue_date:string;readonly expiry_date:string}[];readonly stages:readonly TrainingJourneyStageProjection[];readonly blockers:readonly string[];readonly source_precedence:readonly string[];readonly checksum:string;}
+export interface TrainingJourneyProjectionV2 { readonly projection_version:"TRAINING_JOURNEY_PROJECTION_V2"; readonly revision:string; readonly enrollment:TrainingEnrollment; readonly stages:readonly TrainingJourneyStageProjection[]; readonly current_stage:TrainingJourneyStageKey; readonly next_action:string; readonly person_certification_authority:PersonCertificationAuthorityProjection; }
 
 export type TrainingEvidenceDraftTemplateCode =
   | "OGI_F023_OPERATIONAL_SKILLS_ASSESSMENT"
@@ -577,6 +619,12 @@ export function listRecentTrainingRegistrations() {
   );
 }
 
+export function getTrainingJourneyProjectionV2(enrollmentId:string) {
+  return apiRequest<TrainingJourneyProjectionV2>(`/api/v1/training/enrollments/${encodeURIComponent(enrollmentId)}/journey-v2`, {
+    validate: isTrainingJourneyProjectionV2
+  });
+}
+
 export function createTrainingEnrollment(
   traineeId: string,
   request: CreateTrainingEnrollmentRequest
@@ -605,11 +653,31 @@ export function confirmTrainingEnrollmentType(
   );
 }
 
+export function transitionTrainingEnrollmentLifecycle(enrollmentId:string,action:"CANCELLED"|"WITHDRAWN",reason:string,idempotencyKey:string){
+  return apiRequest<TrainingEnrollment>(`/api/v1/training/enrollments/${encodeURIComponent(enrollmentId)}/lifecycle`,{
+    method:"POST",headers:{"idempotency-key":idempotencyKey},body:{action,reason},validate:isTrainingEnrollment
+  });
+}
+
 export function listTrainingSessions() {
   return apiRequest<TrainingSessionListResponse>("/api/v1/training/sessions", {
     validate: isTrainingSessionListResponse
   });
 }
+
+export function listApprovedTrainingRequests() {
+  return apiRequest<ApprovedTrainingRequestListResponse>("/api/v1/training/requests", {
+    validate: (value): value is ApprovedTrainingRequestListResponse => isRecord(value) && Array.isArray(value.requests) && value.requests.every((item) => isRecord(item) && typeof item.id === "string" && typeof item.business_identifier === "string" && typeof item.client_id === "string" && (item.facility_id === null || typeof item.facility_id === "string"))
+  });
+}
+
+export function getClientTrainingRequestContext(clientId?:string){const query=clientId?`?client_id=${encodeURIComponent(clientId)}`:"";return apiRequest<ClientTrainingRequestContext>(`/api/v1/training/client-requests/context${query}`,{validate:(v):v is ClientTrainingRequestContext=>isRecord(v)&&(v.client===null||isRecord(v.client))&&Array.isArray(v.clients)&&Array.isArray(v.facilities)});}
+export function listClientTrainingRequests(){return apiRequest<ClientTrainingRequestListResponse>("/api/v1/training/client-requests",{validate:(v):v is ClientTrainingRequestListResponse=>isRecord(v)&&Array.isArray(v.requests)});}
+export function createClientTrainingRequest(body:ClientTrainingRequestInput,idempotencyKey:string){return apiRequest<ClientTrainingRequest>("/api/v1/training/client-requests",{method:"POST",headers:{"idempotency-key":idempotencyKey},body,validate:isClientTrainingRequest});}
+export function updateClientTrainingRequest(id:string,body:ClientTrainingRequestInput){return apiRequest<ClientTrainingRequest>(`/api/v1/training/client-requests/${encodeURIComponent(id)}`,{method:"PUT",body,validate:isClientTrainingRequest});}
+export function submitClientTrainingRequest(id:string,idempotencyKey:string){return apiRequest<ClientTrainingRequest>(`/api/v1/training/client-requests/${encodeURIComponent(id)}/submit`,{method:"POST",headers:{"idempotency-key":idempotencyKey},body:{authorization_confirmed:true},validate:isClientTrainingRequest});}
+
+function isClientTrainingRequest(v:unknown):v is ClientTrainingRequest{return isRecord(v)&&typeof v.id==="string"&&typeof v.training_request_number==="string"&&typeof v.status==="string"&&isRecord(v.details);}
 
 export function listTrainingPrograms() {
   return apiRequest<TrainingProgramAuthorityListResponse>(
@@ -850,6 +918,9 @@ function isTrainingTrainee(value: unknown): value is TrainingTrainee {
     typeof value.id === "string" &&
     isNullableString(value.student_number) &&
     typeof value.full_name === "string" &&
+    isNullableString(value.first_name) &&
+    isNullableString(value.middle_name) &&
+    isNullableString(value.last_name) &&
     isNullableString(value.email) &&
     isNullableString(value.phone_number) &&
     isNullableString(value.notes) &&
@@ -922,6 +993,13 @@ function isTrainingEnrollment(value: unknown): value is TrainingEnrollment {
       isTrainingEnrollmentSessionSummary(value.training_session))
   );
 }
+
+function isTrainingJourneyProjectionV2(value:unknown):value is TrainingJourneyProjectionV2 {
+  return isRecord(value) && value.projection_version === "TRAINING_JOURNEY_PROJECTION_V2" && typeof value.revision === "string" && isTrainingEnrollment(value.enrollment) && Array.isArray(value.stages) && value.stages.every(isTrainingJourneyStage) && typeof value.current_stage === "string" && typeof value.next_action === "string" && isPersonCertificationAuthority(value.person_certification_authority);
+}
+
+function isTrainingJourneyStage(stage:unknown):stage is TrainingJourneyStageProjection { return isRecord(stage) && typeof stage.stage === "string" && typeof stage.state === "string" && isNullableString(stage.evidence_record_id) && isNullableString(stage.authority_id) && Array.isArray(stage.available_actions) && stage.available_actions.every((action) => typeof action === "string"); }
+function isPersonCertificationAuthority(value:unknown):value is PersonCertificationAuthorityProjection { return isRecord(value) && value.projection_version === "PERSON_CERTIFICATION_AUTHORITY_V1" && isRecord(value.subject) && typeof value.subject.trainee_id === "string" && isNullableString(value.subject.student_number) && typeof value.subject.full_name === "string" && isNullableString(value.subject.staff_member_id) && isRecord(value.scope) && isNullableString(value.scope.client_id) && isNullableString(value.scope.facility_id) && (value.certification === null || isRecord(value.certification)) && Array.isArray(value.assignments) && Array.isArray(value.operational_authorizations) && Array.isArray(value.stages) && value.stages.every(isTrainingJourneyStage) && Array.isArray(value.blockers) && value.blockers.every((item)=>typeof item === "string") && Array.isArray(value.source_precedence) && value.source_precedence.every((item)=>typeof item === "string") && typeof value.checksum === "string"; }
 
 function isTrainingType(value: unknown): value is TrainingType {
   return typeof value === "string" && (trainingTypes as readonly string[]).includes(value);
@@ -1252,6 +1330,9 @@ function isTrainingProgramAuthority(
     typeof value.display_name === "string" &&
     typeof value.qualification_label === "string" &&
     typeof value.required_training_hours === "number" &&
+    (value.prerequisite_level === null ||
+      isCertificationLevel(value.prerequisite_level)) &&
+    typeof value.approved_equivalent_allowed === "boolean" &&
     Array.isArray(value.required_program_coverage) &&
     value.required_program_coverage.every((item) => typeof item === "string") &&
     Array.isArray(value.incremental_coverage) &&

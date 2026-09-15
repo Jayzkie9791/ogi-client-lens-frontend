@@ -7,7 +7,7 @@ interface AuthRuntime {
 }
 
 interface ApiRequestOptions<T> {
-  method?: "GET" | "PATCH" | "POST";
+  method?: "GET" | "PATCH" | "POST" | "PUT" | "DELETE";
   body?: unknown;
   auth?: boolean;
   headers?: Readonly<Record<string, string>>;
@@ -16,6 +16,7 @@ interface ApiRequestOptions<T> {
 
 interface ApiBlobRequestOptions {
   auth?: boolean;
+  cache?: RequestCache;
 }
 
 export interface ApiBlobResponse {
@@ -95,7 +96,8 @@ async function blobRequestOnce(
 ): Promise<ApiBlobResponse> {
   const response = await fetch(buildUrl(path), {
     method: "GET",
-    headers: buildBlobHeaders(options)
+    headers: buildBlobHeaders(options),
+    cache: options.cache
   });
 
   if (

@@ -33,6 +33,7 @@ import {
   getTrainingTrainee,
   linkTrainingTraineeStaffMember,
   listEligibleTrainingInstructors,
+  listApprovedTrainingRequests,
   listTrainingEnrollments,
   listTrainingPrograms,
   listTrainingSessions,
@@ -57,6 +58,9 @@ interface WizardState {
   traineeMode: TraineeMode;
   traineeId: string;
   fullName: string;
+  firstName: string;
+  middleName: string;
+  lastName: string;
   email: string;
   phoneNumber: string;
   notes: string;
@@ -67,6 +71,7 @@ interface WizardState {
   facilityId: string;
   sessionMode: SessionMode;
   sessionId: string;
+  trainingRequestId: string;
   conductedByUserId: string;
   instructorStaffMemberId: string;
   qualificationCertificationId: string;
@@ -99,6 +104,9 @@ const initialState: WizardState = {
   traineeMode: "EXISTING",
   traineeId: "",
   fullName: "",
+  firstName: "",
+  middleName: "",
+  lastName: "",
   email: "",
   phoneNumber: "",
   notes: "",
@@ -109,6 +117,7 @@ const initialState: WizardState = {
   facilityId: "",
   sessionMode: "EXISTING",
   sessionId: "",
+  trainingRequestId: "",
   conductedByUserId: "",
   instructorStaffMemberId: "",
   qualificationCertificationId: "",
@@ -157,6 +166,7 @@ export function RegisterTrainingWizard({
   const [step, setStep] = useState<Step>("TRAINEE");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [reviewConfirmed, setReviewConfirmed] = useState(false);
   const traineesQuery = useQuery({
     queryKey: ["training-trainees", "register-wizard"],
     queryFn: listTrainingTrainees,
@@ -179,6 +189,7 @@ export function RegisterTrainingWizard({
     queryFn: listTrainingSessions,
     retry: false,
   });
+  const requestsQuery = useQuery({ queryKey: ["approved-training-requests", "register-wizard"], queryFn: listApprovedTrainingRequests, retry: false });
   const programsQuery = useQuery({
     queryKey: ["training-programs"],
     queryFn: listTrainingPrograms,
@@ -228,6 +239,10 @@ export function RegisterTrainingWizard({
       facility.operational_status === "ACTIVE" &&
       (!state.clientId || facility.client_id === state.clientId),
   );
+  const approvedRequests = (requestsQuery.data?.requests ?? []).filter((request) => request.client_id === state.clientId && (!request.facility_id || request.facility_id === state.facilityId));
+  useEffect(() => {
+    if (state.sessionMode === "NEW" && !state.trainingRequestId && approvedRequests.length === 1) update({ trainingRequestId: approvedRequests[0]!.id });
+  }, [approvedRequests, state.sessionMode, state.trainingRequestId]);
   const personnel = (personnelQuery.data?.personnel ?? []).filter(
     (person) =>
       person.employment_status === "ACTIVE" &&
@@ -370,25 +385,27 @@ export function RegisterTrainingWizard({
   }
   function next() {
     if (!validStep(step, state)) return;
-    setStep(
-      required(
-        steps[Math.min(index + 1, steps.length - 1)],
-        "The next registration step is unavailable.",
-      ),
+    const nextStep = required(
+      steps[Math.min(index + 1, steps.length - 1)],
+      "The next registration step is unavailable.",
     );
+    if (nextStep === "REVIEW") setReviewConfirmed(false);
+    setStep(nextStep);
   }
   function back() {
-    if (index > 0)
+    if (index > 0) {
+      if (step === "REVIEW") setReviewConfirmed(false);
       setStep(
         required(
           steps[index - 1],
           "The previous registration step is unavailable.",
         ),
       );
+    }
   }
   async function complete(event: FormEvent) {
     event.preventDefault();
-    if (step !== "REVIEW" || pending) return;
+    if (step !== "REVIEW" || pending || !reviewConfirmed) return;
     const frozen = intentRef.current ?? {
       ...state,
       traineeIdsBefore: trainees.map((trainee) => trainee.id),
@@ -444,7 +461,11 @@ export function RegisterTrainingWizard({
           </Button>
         ) : null}
         <Button
-          disabled={pending || !validStep(step, state)}
+          disabled={
+            pending ||
+            !validStep(step, state) ||
+            (step === "REVIEW" && !reviewConfirmed)
+          }
           onClick={step === "REVIEW" ? undefined : next}
           type={step === "REVIEW" ? "submit" : "button"}
         >
@@ -505,6 +526,8 @@ export function RegisterTrainingWizard({
             loading={sessionsQuery.isLoading}
             failed={sessionsQuery.isError}
             canCreateSession={canCreateSession}
+            requests={approvedRequests}
+            requestsLoading={requestsQuery.isLoading}
             changeMode={changeSessionMode}
             update={update}
           />
@@ -546,6 +569,8 @@ export function RegisterTrainingWizard({
             sessions={eligibleSessions}
             personnel={personnel}
             instructors={eligibleInstructors}
+            reviewConfirmed={reviewConfirmed}
+            setReviewConfirmed={setReviewConfirmed}
           />
         ) : null}
         {error ? (
@@ -670,6 +695,9 @@ async function createOrReconcileTrainee(
   try {
     return await createTrainingTrainee({
       full_name: intent.fullName.trim(),
+      first_name: intent.firstName.trim(),
+      middle_name: intent.middleName.trim() || null,
+      last_name: intent.lastName.trim(),
       email: intent.email.trim() || null,
       phone_number: intent.phoneNumber.trim() || null,
       notes: intent.notes.trim() || null,
@@ -724,6 +752,7 @@ async function reconcileEnrollment(
 
 function buildSession(state: WizardState) {
   return {
+    training_request_id: required(state.trainingRequestId, "An approved Training Request is required."),
     training_title: state.title.trim(),
     operational_skill: state.operationalSkill,
     training_start_date: toIsoDateTime(state.startDate),
@@ -797,7 +826,7 @@ function validStep(step: Step, state: WizardState) {
   if (step === "SESSION")
     return state.sessionMode === "EXISTING"
       ? Boolean(state.sessionId)
-      : Boolean(state.facilityId);
+      : Boolean(state.facilityId && state.trainingRequestId);
   if (step === "TRAINER")
     return Boolean(
       state.conductedByUserId &&
@@ -898,13 +927,16 @@ function TraineeStep({
         </Field>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Full name">
+          <Field label="First name">
             <input
               className={control}
-              onChange={(e) => update({ fullName: e.target.value })}
-              value={state.fullName}
+              onChange={(e) => update({ firstName: e.target.value, fullName:[e.target.value,state.middleName,state.lastName].filter(Boolean).join(" ") })}
+              required
+              value={state.firstName}
             />
           </Field>
+          <Field label="Middle name"><input className={control} onChange={(e) => update({ middleName:e.target.value,fullName:[state.firstName,e.target.value,state.lastName].filter(Boolean).join(" ") })} value={state.middleName}/></Field>
+          <Field label="Last name"><input className={control} onChange={(e) => update({ lastName:e.target.value,fullName:[state.firstName,state.middleName,e.target.value].filter(Boolean).join(" ") })} required value={state.lastName}/></Field>
           <Field label="Email">
             <input
               className={control}
@@ -1060,7 +1092,7 @@ function ProgramStep({
           remains unavailable.
         </p>
       ) : null}
-      {selected ? <ProgramCoverage program={selected} /> : null}
+      {selected ? <ProgramFacts program={selected} /> : null}
     </div>
   );
 }
@@ -1070,6 +1102,8 @@ function SessionStep({
   loading,
   failed,
   canCreateSession,
+  requests,
+  requestsLoading,
   changeMode,
   update,
 }: {
@@ -1078,6 +1112,8 @@ function SessionStep({
   loading: boolean;
   failed: boolean;
   canCreateSession: boolean;
+  requests: readonly { readonly id: string; readonly business_identifier: string }[];
+  requestsLoading: boolean;
   changeMode: (mode: SessionMode) => void;
   update: (patch: Partial<WizardState>) => void;
 }) {
@@ -1170,10 +1206,12 @@ function SessionStep({
           ) : null}
         </>
       ) : state.facilityId ? (
-        <p className="rounded-component border border-blue-100 bg-blue-50 p-4 text-sm text-text-muted">
-          The new Session will be created only when you complete the reviewed
-          registration.
-        </p>
+        <Field label="Approved Training Request">
+          <select className={control} disabled={requestsLoading} onChange={(event) => update({ trainingRequestId: event.currentTarget.value })} value={state.trainingRequestId}>
+            <option value="">{requestsLoading ? "Loading approved requests…" : "Select an approved F020 request"}</option>
+            {requests.map((request) => <option key={request.id} value={request.id}>{request.business_identifier}</option>)}
+          </select>
+        </Field>
       ) : (
         <p
           className="rounded-component border border-accent-red/30 bg-red-50 p-4 text-sm font-medium text-red-800"
@@ -1452,31 +1490,28 @@ function ScheduleStep({
     </div>
   );
 }
-function ProgramCoverage({ program }: { program: TrainingProgramAuthority }) {
+function ProgramFacts({ program }: { program: TrainingProgramAuthority }) {
   return (
     <section
-      aria-label="Required Program Coverage"
+      aria-label="Selected Program Requirements"
       className="rounded-component border border-blue-200 bg-blue-50 p-4"
     >
       <h3 className="font-semibold text-primary-navy">
-        Required Program Coverage
+        Selected Program Requirements
       </h3>
-      <p className="mt-1 text-sm text-text-muted">
-        Governed course coverage for {program.certification_level} ·{" "}
-        {program.display_name}. This does not record attendance, assessment,
-        readiness, or completion.
+      <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+        <Summary
+          label="Required training"
+          value={`${program.required_training_hours} hours`}
+        />
+        <Summary
+          label="Prerequisite"
+          value={formatProgramPrerequisite(program)}
+        />
+      </dl>
+      <p className="mt-3 text-xs text-text-muted">
+        You can review the complete governed competency scope before completing registration.
       </p>
-      {program.required_program_coverage.length > 0 ? (
-        <ul className="mt-3 grid gap-x-6 gap-y-1 text-sm text-text-primary sm:grid-cols-2">
-          {program.required_program_coverage.map((item) => (
-            <li key={item}>• {item}</li>
-          ))}
-        </ul>
-      ) : (
-        <p className="mt-3 text-sm text-text-muted">
-          Course coverage has not yet been published for this Program.
-        </p>
-      )}
     </section>
   );
 }
@@ -1489,6 +1524,8 @@ function Review({
   sessions,
   personnel,
   instructors,
+  reviewConfirmed,
+  setReviewConfirmed,
 }: {
   state: WizardState;
   programs: readonly TrainingProgramAuthority[];
@@ -1498,6 +1535,8 @@ function Review({
   sessions: readonly TrainingSession[];
   personnel: readonly RegistrationPersonnel[];
   instructors: readonly EligibleTrainingInstructor[];
+  reviewConfirmed: boolean;
+  setReviewConfirmed: (confirmed: boolean) => void;
 }) {
   const trainee = trainees.find((x) => x.id === state.traineeId),
     program = programs.find((x) => x.program_code === state.programCode),
@@ -1509,7 +1548,8 @@ function Review({
         x.qualification.certification_id === state.qualificationCertificationId,
     );
   return (
-    <dl className="grid gap-3 rounded-component bg-elevated p-4 text-sm sm:grid-cols-2">
+    <div className="space-y-4">
+      <dl className="grid gap-3 rounded-component bg-elevated p-4 text-sm sm:grid-cols-2">
       <Summary
         label="Trainee"
         value={
@@ -1529,6 +1569,14 @@ function Review({
       <Summary
         label="Training Type"
         value={formatTrainingType(state.trainingType)}
+      />
+      <Summary
+        label="Required training"
+        value={program ? `${program.required_training_hours} hours` : ""}
+      />
+      <Summary
+        label="Prerequisite"
+        value={program ? formatProgramPrerequisite(program) : ""}
       />
       <Summary
         label="Primary Session Focus"
@@ -1581,9 +1629,72 @@ function Review({
         label="Enrollment"
         value="A new governed Enrollment will be created and assigned to this Session."
       />
-    </dl>
+      </dl>
+      {program ? <ProgramCompetencyScope program={program} /> : null}
+      <label className="flex cursor-pointer items-start gap-3 rounded-component border border-blue-200 bg-blue-50 p-4 text-sm text-primary-navy">
+        <input
+          checked={reviewConfirmed}
+          className="mt-0.5 h-4 w-4 shrink-0"
+          onChange={(event) => setReviewConfirmed(event.currentTarget.checked)}
+          type="checkbox"
+        />
+        <span>
+          I have reviewed the registration summary and Program Competency
+          Scope.
+        </span>
+      </label>
+    </div>
   );
 }
+
+function ProgramCompetencyScope({
+  program,
+}: {
+  program: TrainingProgramAuthority;
+}) {
+  const introduced = new Set(program.incremental_coverage);
+  const inherited = program.effective_coverage.filter((item) => !introduced.has(item));
+  return (
+    <details className="rounded-component border border-blue-200 bg-blue-50 p-4">
+      <summary className="cursor-pointer font-semibold text-primary-navy">
+        Review Program Competency Scope
+      </summary>
+      <p className="mt-2 text-sm text-text-muted">
+        Governed competency scope for {program.certification_level} ·{" "}
+        {program.display_name}. This review does not record attendance,
+        assessment, readiness, or completion.
+      </p>
+      <h3 className="mt-4 text-sm font-semibold text-primary-navy">
+        Competencies introduced at this level
+      </h3>
+      <ul className="mt-2 grid gap-x-6 gap-y-1 text-sm text-text-primary sm:grid-cols-2">
+        {program.incremental_coverage.map((item) => (
+          <li key={item}>• {item}</li>
+        ))}
+      </ul>
+      {inherited.length > 0 ? (
+        <>
+          <h3 className="mt-4 text-sm font-semibold text-primary-navy">
+            Inherited prerequisite competencies
+          </h3>
+          <ul className="mt-2 grid gap-x-6 gap-y-1 text-sm text-text-primary sm:grid-cols-2">
+            {inherited.map((item) => (
+              <li key={item}>• {item}</li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+    </details>
+  );
+}
+
+function formatProgramPrerequisite(program: TrainingProgramAuthority) {
+  if (!program.prerequisite_level) return "None";
+  return program.approved_equivalent_allowed
+    ? `${program.prerequisite_level} or approved equivalent`
+    : program.prerequisite_level;
+}
+
 function Summary({ label: term, value }: { label: string; value: string }) {
   return (
     <div>

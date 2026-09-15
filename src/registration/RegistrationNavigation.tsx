@@ -5,31 +5,31 @@ import { useAuth } from "../auth/useAuth";
 
 export function RegistrationNavigation() {
   const auth = useAuth();
-  const canViewClients = auth.canUsePermission("view_client");
-  const canViewFacilities = auth.canUsePermission("view_facility");
-  const canViewPersonnel = auth.canUsePermission("view_staff_member");
+  const canRegisterClients = auth.canUsePermission("create_client");
+  const canRegisterFacilities = auth.canUsePermission("create_facility");
+  const canRegisterPersonnel = auth.canUsePermission("create_staff_member") || auth.canUsePermission("manage_personnel_operational_authorization");
 
   return (
     <nav aria-label="Registration resource tabs">
       <ul className="flex flex-wrap gap-2">
-        {canViewClients ? (
+        {canRegisterClients ? (
           <li>
             <NavLink className={childNavigationClassName} end to={routes.registrationClients}>
-              Clients
+              Register Client
             </NavLink>
           </li>
         ) : null}
-        {canViewFacilities ? (
+        {canRegisterFacilities ? (
           <li>
             <NavLink className={childNavigationClassName} end to={routes.registrationFacilities}>
-              Facilities
+              Register Facility
             </NavLink>
           </li>
         ) : null}
-        {canViewPersonnel ? (
+        {canRegisterPersonnel ? (
           <li>
             <NavLink className={childNavigationClassName} end to={routes.registrationPersonnel}>
-              Personnel
+              Register Personnel
             </NavLink>
           </li>
         ) : null}

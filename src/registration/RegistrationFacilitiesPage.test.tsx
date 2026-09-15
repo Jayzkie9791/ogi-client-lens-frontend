@@ -216,34 +216,23 @@ describe("Registration Facilities frontend", () => {
     renderWithRoute(routes.workbench);
 
     await user.click(await screen.findByRole("button", { name: "Menu" }));
-    await user.click(screen.getByRole("button", { name: "Registration" }));
-    await user.click(screen.getByRole("link", { name: "Clients" }));
+    await user.click(screen.getByRole("button", { name: "Organizations" }));
+    await user.click(screen.getByRole("link", { name: "Client Masterlist" }));
 
     expect(
       await screen.findByRole("heading", { name: "Clients / Organizations" })
     ).toBeInTheDocument();
-    expect(within(screen.getByRole("navigation", { name: "Registration resource tabs" })).getByRole("link", { name: "Facilities" })).toHaveAttribute(
-      "href",
-      routes.registrationFacilities
-    );
-
-    await user.click(within(screen.getByRole("navigation", { name: "Primary navigation" })).getByRole("link", { name: "Facilities" }));
+    await user.click(screen.getByRole("button", { name: "Organizations" }));
+    await user.click(screen.getByRole("link", { name: "Facility Masterlist" }));
 
     expect(await screen.findByRole("heading", { name: "Facilities" })).toBeInTheDocument();
-    expect(within(screen.getByRole("navigation", { name: "Registration resource tabs" })).getByRole("link", { name: "Clients" })).toHaveAttribute(
-      "href",
-      routes.registrationClients
-    );
-    expect(within(screen.getByRole("navigation", { name: "Registration resource tabs" })).getByRole("link", { name: "Facilities" })).toHaveAttribute(
-      "aria-current",
-      "page"
-    );
+    expect(screen.getByRole("heading", { name: "Facilities" })).toBeInTheDocument();
     expect(await screen.findByText("Makati Training Pool")).toBeInTheDocument();
     expect(screen.getByText("Bluewater Beach Zone")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Register Facility" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Register Facility" })).not.toBeInTheDocument();
     expect(screen.queryByRole("form", { name: "Create Facility" })).not.toBeInTheDocument();
     expect(
-      within(screen.getByRole("list", { name: "Facility records" })).queryByText(facilityA.id)
+      within(screen.getByLabelText("Facility records")).queryByText(facilityA.id)
     ).not.toBeInTheDocument();
     expect(screen.queryByText("Personnel")).not.toBeInTheDocument();
     expect(calls.some((call) => call.url.includes("/registration/personnel"))).toBe(false);
@@ -264,13 +253,10 @@ describe("Registration Facilities frontend", () => {
       ])
     ]);
 
-    renderWithRoute(routes.registrationFacilities);
+    renderWithRoute(routes.facilityMasterlist);
 
     await screen.findByRole("heading", { name: "Facilities" });
-    expect(within(screen.getByRole("navigation", { name: "Registration resource tabs" })).getByRole("link", { name: "Facilities" })).toHaveAttribute(
-      "aria-current",
-      "page"
-    );
+    expect(screen.getByRole("heading", { name: "Facilities" })).toBeInTheDocument();
     const clientFilter = screen.getByLabelText("Client filter");
     await within(clientFilter).findByRole("option", { name: "Bluewater Resorts" });
     await user.selectOptions(clientFilter, clientB.id);
@@ -281,33 +267,16 @@ describe("Registration Facilities frontend", () => {
     );
   });
 
-  it("opens explicit Register Facility mode with the active Client filter preselected", async () => {
-    const user = userEvent.setup();
+  it("opens the dedicated Register Facility workspace with authoritative Client options", async () => {
     const { calls } = mockFetchRoutes([
-      ...standardRoutes([
-        {
-          url: `/api/v1/registration/facilities?clientId=${clientB.id}`,
-          responses: [{ status: 200, body: { facilities: [facilityB] } }]
-        },
-        {
-          url: `/api/v1/registration/facilities/${facilityB.id}`,
-          responses: [{ status: 200, body: facilityB }]
-        }
-      ])
+      ...authRoutes(),
+      { url: "/api/v1/registration/clients", responses: [{ status: 200, body: { clients: [clientA, clientB] } }] }
     ]);
 
     renderWithRoute(routes.registrationFacilities);
 
-    const clientFilter = await screen.findByLabelText("Client filter");
-    await within(clientFilter).findByRole("option", { name: "Bluewater Resorts" });
-    await user.selectOptions(clientFilter, clientB.id);
-    await screen.findByText("Bluewater Beach Zone");
-    await user.click(screen.getByRole("button", { name: "Register Facility" }));
-
     const createForm = await screen.findByRole("form", { name: "Create Facility" });
-
-    expect(within(createForm).getByLabelText("Client")).toHaveValue(clientB.id);
-    expect(screen.getByLabelText("Client filter")).toHaveValue(clientB.id);
+    expect(await within(createForm).findByRole("option", { name: "Bluewater Resorts" })).toBeInTheDocument();
     expect(
       calls.some(
         (call) =>
@@ -316,7 +285,7 @@ describe("Registration Facilities frontend", () => {
     ).toBe(false);
   });
 
-  it("cancels Register Facility mode without mutation and restores the prior selection", async () => {
+  it("cancels Register Facility input without mutation", async () => {
     const user = userEvent.setup();
     const { calls } = mockFetchRoutes([
       ...authRoutes(),
@@ -324,35 +293,14 @@ describe("Registration Facilities frontend", () => {
         url: "/api/v1/registration/clients",
         responses: [{ status: 200, body: { clients: [clientA, clientB] } }]
       },
-      {
-        url: "/api/v1/registration/facilities",
-        responses: [{ status: 200, body: { facilities: [facilityA, facilityB] } }]
-      },
-      {
-        url: `/api/v1/registration/facilities/${facilityA.id}`,
-        responses: [{ status: 200, body: facilityA }]
-      },
-      {
-        url: `/api/v1/registration/facilities/${facilityB.id}`,
-        responses: [{ status: 200, body: facilityB }]
-      }
     ]);
 
     renderWithRoute(routes.registrationFacilities);
 
-    await user.click(await screen.findByRole("button", { name: /Bluewater Beach Zone/ }));
-    await screen.findByDisplayValue("Bluewater Beach Zone");
-    await user.click(screen.getByRole("button", { name: "Register Facility" }));
-    await user.type(
-      within(await screen.findByRole("form", { name: "Create Facility" })).getByLabelText(
-        "Facility name"
-      ),
-      "Canceled facility"
-    );
-    await user.click(screen.getByRole("button", { name: "Cancel" }));
-
-    expect(await screen.findByDisplayValue("Bluewater Beach Zone")).toBeInTheDocument();
-    expect(screen.queryByRole("form", { name: "Create Facility" })).not.toBeInTheDocument();
+    const createForm = await screen.findByRole("form", { name: "Create Facility" });
+    await user.type(within(createForm).getByLabelText("Facility name"), "Canceled facility");
+    await user.click(within(createForm).getByRole("button", { name: "Cancel" }));
+    expect(within(createForm).getByLabelText("Facility name")).toHaveValue("");
     expect(
       calls.some(
         (call) =>
@@ -372,28 +320,18 @@ describe("Registration Facilities frontend", () => {
       country: "Canada",
       timezone: "America/Toronto"
     };
-    const { calls } = mockFetchRoutes(standardRoutes([
-      {
-        url: "/api/v1/registration/facilities",
-        responses: [
-          { status: 200, body: { facilities: [facilityA, facilityB] } },
-          { status: 200, body: { facilities: [createdFacility, facilityA, facilityB] } }
-        ]
-      },
+    const { calls } = mockFetchRoutes([
+      ...authRoutes(),
+      { url: "/api/v1/registration/clients", responses: [{ status: 200, body: { clients: [clientA, clientB] } }] },
       {
         method: "POST",
         url: "/api/v1/registration/facilities",
         responses: [{ status: 201, body: createdFacility }]
       },
-      {
-        url: `/api/v1/registration/facilities/${createdFacility.id}`,
-        responses: [{ status: 200, body: createdFacility }]
-      }
-    ]));
+    ]);
 
     renderWithRoute(routes.registrationFacilities);
 
-    await user.click(await screen.findByRole("button", { name: "Register Facility" }));
     const createForm = await screen.findByRole("form", { name: "Create Facility" });
     await within(createForm).findByRole("option", { name: "Bluewater Resorts" });
     await user.selectOptions(within(createForm).getByLabelText("Client"), clientB.id);
@@ -404,8 +342,7 @@ describe("Registration Facilities frontend", () => {
     await user.click(within(createForm).getByRole("button", { name: "Create Facility" }));
 
     expect(await screen.findByText("Facility created successfully.")).toBeInTheDocument();
-    expect(screen.queryByRole("form", { name: "Create Facility" })).not.toBeInTheDocument();
-    expect(await screen.findByDisplayValue("North Shore Waterpark")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open Facility Masterlist" })).toHaveAttribute("href", routes.facilityMasterlist);
     const createCall = calls.find(
       (call) => call.url === "/api/v1/registration/facilities" && call.init?.method === "POST"
     );
@@ -425,11 +362,10 @@ describe("Registration Facilities frontend", () => {
 
   it("prevents invalid create submission before required Facility fields are supplied", async () => {
     const user = userEvent.setup();
-    mockFetchRoutes(standardRoutes());
+    mockFetchRoutes([...authRoutes(), { url: "/api/v1/registration/clients", responses: [{ status: 200, body: { clients: [clientA, clientB] } }] }]);
 
     renderWithRoute(routes.registrationFacilities);
 
-    await user.click(await screen.findByRole("button", { name: "Register Facility" }));
     const createForm = await screen.findByRole("form", { name: "Create Facility" });
 
     expect(
@@ -453,8 +389,9 @@ describe("Registration Facilities frontend", () => {
       }
     ]));
 
-    renderWithRoute(routes.registrationFacilities);
+    renderWithRoute(routes.facilityMasterlist);
 
+    await user.click(await screen.findByRole("button", { name: /Makati Training Pool/ }));
     const editForm = await screen.findByRole("form", { name: "Save Facility" });
     await user.clear(within(editForm).getByLabelText("Facility name"));
     await user.type(within(editForm).getByLabelText("Facility name"), "Makati Training Pool Updated");
@@ -522,8 +459,9 @@ describe("Registration Facilities frontend", () => {
       }
     ]);
 
-    renderWithRoute(routes.registrationFacilities);
+    renderWithRoute(routes.facilityMasterlist);
 
+    await user.click(await screen.findByRole("button", { name: /Makati Training Pool/ }));
     const editForm = await screen.findByRole("form", { name: "Save Facility" });
     await user.selectOptions(within(editForm).getByLabelText("Operational status"), "INACTIVE");
     await user.click(within(editForm).getByRole("button", { name: "Save Facility" }));
@@ -541,18 +479,18 @@ describe("Registration Facilities frontend", () => {
     });
     await waitFor(() =>
       expect(
-        within(screen.getByRole("list", { name: "Facility records" })).getByText("Inactive")
-      ).toBeInTheDocument()
+        within(screen.getByLabelText("Facility records")).getAllByText("Inactive").length
+      ).toBeGreaterThan(0)
     );
     expect(within(editForm).getByLabelText("Operational status")).toHaveValue("INACTIVE");
     expect(screen.queryByRole("button", { name: "Deactivate Facility" })).not.toBeInTheDocument();
 
     const bluewaterListItem = screen.getByRole("button", {
       name: /Bluewater Beach Zone/
-    }).closest("li");
+    }).closest("article");
     const makatiListItem = screen.getByRole("button", {
       name: /Makati Training Pool/
-    }).closest("li");
+    }).closest("article");
 
     if (!bluewaterListItem || !makatiListItem) {
       throw new Error("Expected Facility list items to render.");
@@ -602,8 +540,9 @@ describe("Registration Facilities frontend", () => {
       }
     ]);
 
-    renderWithRoute(routes.registrationFacilities);
+    renderWithRoute(routes.facilityMasterlist);
 
+    await user.click(await screen.findByRole("button", { name: /Makati Training Pool/ }));
     const editForm = await screen.findByRole("form", { name: "Save Facility" });
     const statusSelect = within(editForm).getByLabelText("Operational status");
 
@@ -642,8 +581,9 @@ describe("Registration Facilities frontend", () => {
       }
     ]));
 
-    renderWithRoute(routes.registrationFacilities);
+    renderWithRoute(routes.facilityMasterlist);
 
+    await user.click(await screen.findByRole("button", { name: /Makati Training Pool/ }));
     await user.click(await screen.findByRole("button", { name: "Deactivate Facility" }));
 
     expect(await screen.findByText("Facility updated successfully.")).toBeInTheDocument();
@@ -671,13 +611,11 @@ describe("Registration Facilities frontend", () => {
       }
     ]);
 
-    renderWithRoute(routes.registrationFacilities);
+    renderWithRoute(routes.facilityMasterlist);
 
     expect(await screen.findByText("Loading Facility records.")).toBeInTheDocument();
     expect(
-      await screen.findByRole("heading", {
-        name: "No Facilities registered."
-      })
+      await screen.findByRole("heading", { name: "No Facility selected." })
     ).toBeInTheDocument();
 
     vi.unstubAllGlobals();
@@ -700,7 +638,7 @@ describe("Registration Facilities frontend", () => {
       }
     ]);
 
-    renderWithRoute(routes.registrationFacilities);
+    renderWithRoute(routes.facilityMasterlist);
 
     expect(
       await screen.findByRole("heading", {
@@ -709,21 +647,13 @@ describe("Registration Facilities frontend", () => {
     ).toBeInTheDocument();
   });
 
-  it("surfaces Facility detail and mutation API errors without exposing unrelated capabilities", async () => {
+  it("surfaces Facility creation errors without exposing unrelated capabilities", async () => {
     const user = userEvent.setup();
     mockFetchRoutes([
       ...authRoutes(),
       {
         url: "/api/v1/registration/clients",
         responses: [{ status: 200, body: { clients: [clientA] } }]
-      },
-      {
-        url: "/api/v1/registration/facilities",
-        responses: [{ status: 200, body: { facilities: [facilityA] } }]
-      },
-      {
-        url: `/api/v1/registration/facilities/${facilityA.id}`,
-        responses: [{ status: 404, body: { error: { code: "NOT_FOUND", message: "Not found" } } }]
       },
       {
         method: "POST",
@@ -744,7 +674,6 @@ describe("Registration Facilities frontend", () => {
 
     renderWithRoute(routes.registrationFacilities);
 
-    await user.click(await screen.findByRole("button", { name: "Register Facility" }));
     const createForm = await screen.findByRole("form", { name: "Create Facility" });
     await user.type(within(createForm).getByLabelText("Facility name"), "Makati Training Pool");
     await user.click(within(createForm).getByRole("button", { name: "Create Facility" }));
@@ -777,11 +706,11 @@ describe("Registration Facilities frontend", () => {
     renderWithRoute(routes.workbench);
 
     await user.click(await screen.findByRole("button", { name: "Menu" }));
-    await user.click(screen.getByRole("button", { name: "Registration" }));
-    await user.click(within(screen.getByRole("navigation", { name: "Primary navigation" })).getByRole("link", { name: "Facilities" }));
+    await user.click(screen.getByRole("button", { name: "Organizations" }));
+    await user.click(within(screen.getByRole("navigation", { name: "Primary navigation" })).getByRole("link", { name: "Facility Masterlist" }));
 
     expect(await screen.findByRole("heading", { name: "Facilities" })).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Clients" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Client Masterlist" })).not.toBeInTheDocument();
     expect(calls.some((call) => call.url === "/api/v1/registration/clients")).toBe(false);
   });
 });

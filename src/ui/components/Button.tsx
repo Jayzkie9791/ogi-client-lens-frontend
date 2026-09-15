@@ -56,7 +56,7 @@ function buttonClasses(variant: ButtonVariant, className: string) {
     primary:
       "bg-primary-blue text-text-inverse hover:bg-primary-navy active:bg-primary-navy",
     secondary:
-      "border border-border bg-surface text-text-primary hover:bg-elevated"
+      "border border-primary-blue bg-blue-50 text-primary-blue hover:bg-blue-100 active:bg-blue-200"
   };
 
   return [base, variants[variant], className].filter(Boolean).join(" ");

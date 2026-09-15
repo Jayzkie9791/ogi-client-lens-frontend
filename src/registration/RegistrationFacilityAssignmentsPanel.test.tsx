@@ -291,7 +291,8 @@ function assignmentRoutes(assignments: RegistrationFacilityAssignment[]) {
 }
 
 async function openFacilitiesTab(user: UserEvent) {
-  await user.click(await screen.findByRole("tab", { name: "Facilities" }));
+  await user.click(await screen.findByRole("button", { name: /Ana Santos/ }));
+  await user.click(await screen.findByRole("button", { name: "Next Profile card" }));
 }
 
 beforeEach(() => {
@@ -307,13 +308,15 @@ afterEach(() => {
 
 describe("Registration Facility Assignment frontend", () => {
   it("hides Facility Assignment history without view_facility_assignment", async () => {
+    const user = userEvent.setup();
     const { calls } = mockFetchRoutes(standardRoutesForSession(baseSession));
 
-    renderWithRoute(routes.registrationPersonnel);
+    renderWithRoute(routes.personnelMasterlist);
 
     expect(await screen.findByText("Ana Santos")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Ana Santos/ }));
     expect(await screen.findByRole("heading", { name: "Ana Santos" })).toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "Facilities" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Facility Assignments")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Facility assignment")).not.toBeInTheDocument();
     expect(
       calls.some((call) => call.url.includes("facility-assignments"))
@@ -329,7 +332,7 @@ describe("Registration Facility Assignment frontend", () => {
       completedAssignment
     ])));
 
-    renderWithRoute(routes.registrationPersonnel);
+    renderWithRoute(routes.personnelMasterlist);
     await openFacilitiesTab(user);
 
     expect(await screen.findByRole("heading", { name: "Facility Assignments" })).toBeInTheDocument();
@@ -382,7 +385,7 @@ describe("Registration Facility Assignment frontend", () => {
       }
     ]));
 
-    renderWithRoute(routes.registrationPersonnel);
+    renderWithRoute(routes.personnelMasterlist);
     await openFacilitiesTab(user);
 
     const addForm = await screen.findByRole("form", {
@@ -452,7 +455,7 @@ describe("Registration Facility Assignment frontend", () => {
       }
     ]));
 
-    renderWithRoute(routes.registrationPersonnel);
+    renderWithRoute(routes.personnelMasterlist);
     await openFacilitiesTab(user);
 
     const addForm = await screen.findByRole("form", {
@@ -506,7 +509,7 @@ describe("Registration Facility Assignment frontend", () => {
       }
     ]));
 
-    renderWithRoute(routes.registrationPersonnel);
+    renderWithRoute(routes.personnelMasterlist);
     await openFacilitiesTab(user);
 
     const addForm = await screen.findByRole("form", {
@@ -556,7 +559,7 @@ describe("Registration Facility Assignment frontend", () => {
       }
     ]));
 
-    renderWithRoute(routes.registrationPersonnel);
+    renderWithRoute(routes.personnelMasterlist);
     await openFacilitiesTab(user);
 
     const primaryRow = await screen.findByLabelText(
@@ -607,7 +610,7 @@ describe("Registration Facility Assignment frontend", () => {
       }
     ]));
 
-    renderWithRoute(routes.registrationPersonnel);
+    renderWithRoute(routes.personnelMasterlist);
     await openFacilitiesTab(user);
 
     const activeRow = await screen.findByLabelText("Facility Assignment Makati Training Pool");
@@ -674,7 +677,7 @@ describe("Registration Facility Assignment frontend", () => {
       }
     ]));
 
-    renderWithRoute(routes.registrationPersonnel);
+      renderWithRoute(routes.personnelMasterlist);
     await openFacilitiesTab(user);
 
     const secondaryRow = await screen.findByLabelText(

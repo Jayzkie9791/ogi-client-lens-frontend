@@ -582,6 +582,7 @@ const issuancePreparation: CredentialIssuancePreparationResponse = {
   },
   eligible_f048_evidence: [f048EvidenceCandidate],
   evidence_binding_candidates: [],
+  pending_evidence_binding_review: null,
   operational_authorization_options: [
     {
       id: operationalAuthorizationId,
@@ -2285,6 +2286,51 @@ describe("Certification workspace frontend", () => {
     expect(await screen.findByText("No eligible F-048 evidence is currently available for binding review.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Request Governance Review" })).not.toBeInTheDocument();
     expect(calls.some((call) => call.url.endsWith("/evidence-bindings/reviews"))).toBe(false);
+  });
+
+  it("reconnects an existing pending F-048 association review after reload", async () => {
+    const user = userEvent.setup();
+    const reviewId = "00000000-0000-4000-8000-000000810201";
+    const pendingPreparation: CredentialIssuancePreparationResponse = {
+      ...issuancePreparation,
+      eligible_f048_evidence: [],
+      evidence_binding_candidates: [f048GovernanceCandidate],
+      pending_evidence_binding_review: {
+        review_id: reviewId,
+        source_evidence_record_id: sourceEvidenceRecordId,
+        requested_by_user_id: "00000000-0000-4000-8000-000000810202",
+        actor_can_decide: true
+      },
+      remediation_actions: [{
+        blocker_code: "F048_GOVERNED_ASSOCIATION_REVIEW_PENDING",
+        authority_owner: "CREDENTIAL_GOVERNANCE",
+        remediation_class: "GOVERNANCE_REMEDIATION_REQUIRED",
+        action_code: "COMPLETE_CREDENTIAL_EVIDENCE_BINDING_REVIEW",
+        action_available: true,
+        actor_can_act: true,
+        message: "Complete the existing F-048 association review.",
+        business_reference: reviewId
+      }]
+    };
+    const { calls } = mockFetchRoutes([
+      ...certificationRoutes(anaDetail, credentialIssuanceSession),
+      issuancePreparationRoute([{ status: 200, body: pendingPreparation }]),
+      {
+        method: "POST",
+        url: `/api/v1/governed-reviews/${reviewId}/decision`,
+        responses: [{ status: 200, body: { review: { id: reviewId }, replayed: false } }]
+      }
+    ]);
+
+    renderWithRoute(routes.certifications);
+    await user.click(await screen.findByRole("button", { name: "View Certificate Details" }));
+    await user.click(await screen.findByRole("button", { name: "Issue Credential" }));
+
+    expect(await screen.findByText(new RegExp(reviewId))).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Request Governance Review" })).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText("Association approval rationale"), "Independent review complete");
+    await user.click(screen.getByRole("button", { name: "Approve F-048 Association" }));
+    expect(calls.some((call) => call.url === `/api/v1/governed-reviews/${reviewId}/decision`)).toBe(true);
   });
 
   it("displays every returned governance candidate without selecting by order", async () => {

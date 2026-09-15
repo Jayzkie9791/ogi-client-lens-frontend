@@ -1,8 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { useParams } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { isApiError } from "../api/errors";
+import { routes } from "../app/routePaths";
 import { useAuth } from "../auth/useAuth";
 import { Button } from "../ui/components/Button";
 import { Surface } from "../ui/components/Surface";
@@ -15,17 +17,18 @@ import {
 } from "./displayLabels";
 import {
   getOperationalEvidenceRecord,
+  createOperationalEvidenceCorrectionDraft,
+  createOperationalEvidenceRevisionDraft,
+  discardOperationalEvidenceDraft,
   OperationalEvidenceRecord,
   transitionOperationalEvidenceRecord,
   updateDraftOperationalEvidencePayload
 } from "./evidenceSubmissionApi";
 
-import { resolveGovernanceAuthorityCode } from "./governanceAuthorityResolver";
 import {
   claimGovernanceReview,
-  GovernanceQueueItem,
+  getEvidenceRecordActionProjection,
   GovernanceReviewClaim,
-  listGovernanceQueue,
   releaseGovernanceReviewClaim
 } from "./governanceApi";
 import {
@@ -40,12 +43,16 @@ import {
 } from "./reviewConclusionApi";
 
 import { OetsFieldVisibilityPolicy, OetsRenderer } from "./OetsRenderer";
+import { OetsContextFieldPolicy } from "./contextApi";
 import { mapBackendValidationDetails } from "./evidenceValidation";
 import { getRuntimeTemplateVersion } from "./runtimeTemplateApi";
+import { evidenceReturnDestination, evidenceReturnLabel, readEvidenceReturnContext } from "./evidenceReturnContext";
+import { resolveGovernanceAuthorityCode } from "./governanceAuthorityResolver";
 import { OetsDefinition, OetsEvidencePayload, OetsFieldValue } from "./types";
 import {
   createEvidenceAttestation,
   CreateEvidenceAttestationRequest,
+  EvidenceAttestation,
   listEvidenceAttestations
 } from "./attestationApi";
 
@@ -134,6 +141,7 @@ interface GovernanceWorkflowTransition extends WorkflowTransition {
 interface GovernanceReviewActionState {
   transition: GovernanceWorkflowTransition;
   activeClaim: GovernanceReviewClaim | null;
+  claimedByName: string | null;
 }
 
 interface ReviewConclusionContextState {
@@ -148,25 +156,48 @@ interface ClaimedReviewConclusionInput {
 }
 
 export function OperationalEvidenceRecordPage({
-  embeddedRecordId
+  embeddedRecordId,
+  onDirtyChange,
+  actionPortalId = "training-journey-record-actions"
 }: {
   readonly embeddedRecordId?: string;
+  readonly onDirtyChange?: (dirty: boolean) => void;
+  readonly actionPortalId?: string;
 } = {}) {
+  const location = useLocation();
   const [draftDirty, setDraftDirty] = useState(false);
+  const [embeddedActionTarget, setEmbeddedActionTarget] = useState<HTMLElement | null>(null);
   const { recordId: routeRecordId } = useParams();
   const recordId = embeddedRecordId ?? routeRecordId;
+  const durableReturnContext = !embeddedRecordId ? readEvidenceReturnContext(location.search) : null;
+  const legacyReturnDestination = !embeddedRecordId && !durableReturnContext &&
+    (location.state?.returnTo === routes.facilityAssessmentJourneys || location.state?.returnTo === routes.registrationTraining)
+    ? (location.state.returnTo as typeof routes.facilityAssessmentJourneys | typeof routes.registrationTraining)
+    : null;
   const auth = useAuth();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [rationaleByTransitionKey, setRationaleByTransitionKey] = useState<
     Record<string, string>
   >({});
   const [selectedConclusionId, setSelectedConclusionId] = useState<string | null>(null);
+  useEffect(() => {
+    setEmbeddedActionTarget(
+      embeddedRecordId ? document.getElementById(actionPortalId) : null
+    );
+  }, [actionPortalId, embeddedRecordId]);
   const recordQuery = useQuery({
     enabled: Boolean(recordId),
     queryKey: ["operational-evidence-record", recordId],
     queryFn: () => getOperationalEvidenceRecord(recordId ?? "")
   });
   const record = recordQuery.data;
+  const actionProjectionQueryKey = ["operational-evidence-record-actions", record?.id] as const;
+  const actionProjectionQuery = useQuery({
+    enabled: Boolean(record?.id),
+    queryKey: actionProjectionQueryKey,
+    queryFn: () => getEvidenceRecordActionProjection(record?.id ?? "")
+  });
   const templateVersionId = record?.template_provenance.template_version_id;
   const templateQuery = useQuery({
     enabled: Boolean(templateVersionId),
@@ -181,59 +212,71 @@ export function OperationalEvidenceRecordPage({
       ? findAvailableTransitions(narrowing.definition, record.lifecycle_state)
       : [];
 
-  const directTransitions = (record?.lifecycle_state === "DRAFT" && availableTransitions.length === 0
-    ? [{ from: "DRAFT", to: String((narrowing?.definition?.workflow as { initial_state?: string } | undefined)?.initial_state ?? ""), trigger: "FINALIZE_DRAFT", label: "Submit Evidence" }]
-    : availableTransitions).filter(
-    (transition) => !resolveGovernanceAuthorityCode(transition.to)
+  const directTransitions = (actionProjectionQuery.data?.actions ?? [])
+    .filter((action) => action.action === "TRANSITION" && action.transition_trigger && action.target_state)
+    .map((action) => {
+      // Availability is exclusively backend-authorized. The matching template
+      // transition contributes presentation metadata only, because the action
+      // projection intentionally contains governed identity rather than UI copy.
+      const declared = availableTransitions.find((transition) =>
+        transition.trigger === action.transition_trigger &&
+        transition.to === action.target_state
+      );
+      return {
+        from: record?.lifecycle_state ?? "",
+        to: action.target_state!,
+        trigger: action.transition_trigger!,
+        label: declared?.label ?? action.transition_trigger!
+      };
+    });
+  const correctionAction = (actionProjectionQuery.data?.actions ?? []).find((action) =>
+    action.action === "CREATE_CORRECTION_DRAFT" || action.action === "CONTINUE_CORRECTION_DRAFT"
   );
-  const governanceTransitions = availableTransitions.flatMap((transition) => {
-    const governanceAuthorityCode = resolveGovernanceAuthorityCode(
-      transition.to
+  const revisionAction = (actionProjectionQuery.data?.actions ?? []).find((action) =>
+    action.action === "CREATE_REVISION_DRAFT" || action.action === "CONTINUE_REVISION_DRAFT"
+  );
+  const correctionMutation = useMutation({
+    mutationFn: () => {
+      if (!record) throw new Error("Returned evidence is required.");
+      return createOperationalEvidenceCorrectionDraft(record.id);
+    },
+    onSuccess: (draft) => navigate({ pathname: routes.evidenceRecordPath(draft.id), search: location.search }, { state: location.state })
+  });
+  const revisionMutation = useMutation({
+    mutationFn: () => {
+      if (!record) throw new Error("Submitted F-100 evidence is required.");
+      return createOperationalEvidenceRevisionDraft(record.id);
+    },
+    onSuccess: (draft) => navigate({ pathname: routes.evidenceRecordPath(draft.id), search: location.search }, { state: location.state })
+  });
+  const governanceTransitions = Array.from(new Map(
+    (actionProjectionQuery.data?.actions ?? [])
+      .filter((action) => action.governance_authority_code && action.transition_trigger && action.target_state)
+      .map((action) => {
+        const transition: GovernanceWorkflowTransition = {
+          from: record?.lifecycle_state ?? "",
+          to: action.target_state!,
+          trigger: action.transition_trigger!,
+          label: action.transition_trigger!,
+          governanceAuthorityCode: action.governance_authority_code!
+        };
+        return [`${transition.governanceAuthorityCode}:${transition.trigger}`, transition] as const;
+      })
+  ).values());
+  const governanceActionStates = governanceTransitions.map((transition) => {
+    const projected = actionProjectionQuery.data?.actions.find((action) =>
+      action.governance_authority_code === transition.governanceAuthorityCode &&
+      action.transition_trigger === transition.trigger
     );
-
-    return governanceAuthorityCode
-      ? [{ ...transition, governanceAuthorityCode }]
-      : [];
-  });
-  const governanceClaimQueryKey = [
-    "operational-evidence-governance-claim-state",
-    record?.id,
-    record?.lifecycle_state,
-    governanceTransitions.map((transition) => [
-      transition.governanceAuthorityCode,
-      transition.trigger,
-      transition.to
-    ])
-  ] as const;
-  const governanceQueueQuery = useQuery({
-    enabled: Boolean(record && governanceTransitions.length > 0),
-    queryKey: governanceClaimQueryKey,
-    queryFn: () => {
-      if (!record) {
-        throw new Error("Audit record is required before loading review assignments.");
-      }
-
-      return listGovernanceQueue({
-        claim_status: "ANY",
-        client_id: record.client_id ?? undefined,
-        facility_id: record.facility_id ?? undefined,
-        governance_authority_code:
-          governanceTransitions.length === 1
-            ? governanceTransitions[0].governanceAuthorityCode
-            : undefined,
-        lifecycle_state: record.lifecycle_state
-      });
-    }
-  });
-  const governanceActionStates = governanceTransitions.map((transition) => ({
-    transition,
-    activeClaim:
-      findQueueItemForTransition(
-        governanceQueueQuery.data ?? [],
-        record?.id,
-        transition
-      )?.active_claim ?? null
-  }));
+    return {
+      transition,
+      activeClaim: projected?.review_claim ?? null,
+      claimedByName: projected?.claimed_by_name ?? null
+    };
+  }).filter(() => !actionProjectionQuery.isError && Boolean(actionProjectionQuery.data));
+  const governanceClaimOwnedByAnother = governanceActionStates.some(
+    ({ activeClaim }) => activeClaim && activeClaim.claimed_by_user_id !== auth.session?.id
+  );
   const reviewConclusionContext =
     record && narrowing?.definition
       ? findReviewConclusionContext(narrowing.definition, record)
@@ -306,6 +349,21 @@ export function OperationalEvidenceRecordPage({
       void queryClient.invalidateQueries({
         queryKey: ["operational-evidence-record", recordId]
       });
+      void queryClient.invalidateQueries({ queryKey: ["operational-evidence-record-actions", recordId] });
+    }
+  });
+  const discardMutation = useMutation({
+    mutationFn: () => {
+      if (!record) throw new Error("Draft record is unavailable.");
+      return discardOperationalEvidenceDraft(record.id, {
+        expected_payload_checksum: record.payload_checksum,
+        idempotency_key: `discard:${record.id}:${record.payload_checksum}`
+      });
+    },
+    onSuccess(discarded) {
+      queryClient.setQueryData(["operational-evidence-record", recordId], discarded);
+      void queryClient.invalidateQueries({ queryKey: ["operational-evidence-record", recordId] });
+      void queryClient.invalidateQueries({ queryKey: ["operational-evidence-record-actions", recordId] });
     }
   });
   const attestationQueryKey = [
@@ -326,6 +384,8 @@ export function OperationalEvidenceRecordPage({
     mutationFn: (payload: OetsEvidencePayload) =>
       updateDraftOperationalEvidencePayload(recordId ?? "", { payload }),
     onSuccess(updatedRecord) {
+      setDraftDirty(false);
+      onDirtyChange?.(false);
       queryClient.setQueryData(
         ["operational-evidence-record", recordId],
         updatedRecord
@@ -333,6 +393,7 @@ export function OperationalEvidenceRecordPage({
       void queryClient.invalidateQueries({
         queryKey: ["operational-evidence-attestations", updatedRecord.id]
       });
+      void queryClient.invalidateQueries({ queryKey: ["operational-evidence-record-actions", updatedRecord.id] });
     }
   });
   const attestationMutation = useMutation({
@@ -351,6 +412,7 @@ export function OperationalEvidenceRecordPage({
       void queryClient.invalidateQueries({
         queryKey: ["operational-evidence-attestations", recordId]
       });
+      void queryClient.invalidateQueries({ queryKey: ["operational-evidence-record-actions", recordId] });
     }
   });
 
@@ -368,30 +430,18 @@ export function OperationalEvidenceRecordPage({
     },
     onError(error) {
       if (isApiError(error) && error.status === 409) {
-        void queryClient.invalidateQueries({
-          queryKey: governanceClaimQueryKey
-        });
+        void queryClient.invalidateQueries({ queryKey: actionProjectionQueryKey });
       }
     },
-    onSuccess(claim) {
-      setClaimStateInCache(
-        queryClient,
-        governanceClaimQueryKey,
-        record?.id,
-        claim
-      );
+    onSuccess() {
+      void queryClient.invalidateQueries({ queryKey: actionProjectionQueryKey });
     }
   });
   const releaseClaimMutation = useMutation({
     mutationFn: (claim: GovernanceReviewClaim) =>
       releaseGovernanceReviewClaim(claim.id),
-    onSuccess(claim) {
-      setClaimStateInCache(
-        queryClient,
-        governanceClaimQueryKey,
-        record?.id,
-        claim
-      );
+    onSuccess() {
+      void queryClient.invalidateQueries({ queryKey: actionProjectionQueryKey });
     }
   });
   const claimedTransitionMutation = useMutation({
@@ -444,7 +494,7 @@ export function OperationalEvidenceRecordPage({
         queryKey: ["operational-evidence-record", recordId]
       });
       void queryClient.invalidateQueries({
-        queryKey: governanceClaimQueryKey
+        queryKey: actionProjectionQueryKey
       });
     }
   });
@@ -509,22 +559,157 @@ export function OperationalEvidenceRecordPage({
   }
 
   const isDraftRecord = record.lifecycle_state === "DRAFT";
-  const renderedDefinition = markTrainingAssessmentNumberReadonly(
-    narrowing.definition,
-    record
+  const isDiscardedRecord = record.lifecycle_state === "DISCARDED";
+  const renderedDefinition = applyExistingContextFieldPolicy(
+    markTrainingAssessmentNumberReadonly(narrowing.definition, record),
+    record.context?.field_policy
   );
   const fieldVisibilityPolicy = trainingContextualFieldVisibilityPolicy(record);
   const canEditDraft =
     isDraftRecord &&
+    (record.template_provenance.template_code !==
+      "OGI_F002_FACILITY_PROFILE_BASELINE_INTELLIGENCE_ASSESSMENT" ||
+      record.created_by_user_id === auth.session?.id) &&
     (auth.canUsePermission("submit_operational_evidence") ||
       canEditOwnTrainingScopedDraft(record, auth));
+  const isF002 = record.template_provenance.template_code ===
+    "OGI_F002_FACILITY_PROFILE_BASELINE_INTELLIGENCE_ASSESSMENT";
+  const f002ReadinessIssues = isF002
+    ? readF002ReadinessIssues(record.payload, attestationQuery.data?.attestations ?? [], draftDirty)
+    : [];
+  const visibleDirectTransitions = isF002 && f002ReadinessIssues.length > 0
+    ? directTransitions.filter((transition) => transition.trigger !== "FINALIZE_DRAFT")
+    : directTransitions;
+  const canAttestDraft =
+    isDraftRecord && auth.canUsePermission("submit_operational_evidence");
+  const canDiscardDraft = isDraftRecord && (
+    record.created_by_user_id === auth.session?.id ||
+    auth.canUsePermission("transition_operational_evidence")
+  );
   const evidenceHeadingId = isDraftRecord
     ? "draft-evidence-heading"
     : "submitted-evidence-heading";
+  const hasDeclaredOutgoingTransition = availableTransitions.length > 0;
+  const lifecycleLabel = displayLifecycleStatus(record.lifecycle_state, {
+    hasDeclaredOutgoingTransition
+  });
+  const evidenceHeading = isDraftRecord
+    ? "Draft Evidence"
+    : `${lifecycleLabel} Evidence`;
+  const headerTransitions = draftDirty || draftPayloadMutation.isPending
+    ? []
+    : governanceClaimOwnedByAnother
+      ? []
+      : visibleDirectTransitions;
+  const governanceReviewActions = (
+    <GovernanceReviewActions
+      actionStates={governanceActionStates}
+      claimError={claimMutation.error}
+      claimPending={claimMutation.isPending}
+      claimedTransitionError={claimedTransitionMutation.error}
+      claimedTransitionPending={claimedTransitionMutation.isPending}
+      currentUserId={auth.session?.id ?? null}
+      isLoadingClaimState={actionProjectionQuery.isLoading}
+      loadClaimStateError={actionProjectionQuery.error}
+      onClaim={(transition) => claimMutation.mutate(transition)}
+      onRelease={(claim) => releaseClaimMutation.mutate(claim)}
+      canSubmitConclusion={canSubmitReviewConclusion}
+      currentConclusion={currentReviewConclusionQuery.data?.conclusion ?? null}
+      onRationaleChange={(transition, rationale) =>
+        setRationaleByTransitionKey((existing) => ({
+          ...existing,
+          [transitionKey(transition)]: rationale
+        }))
+      }
+      onTransition={(claim, transition, rationale) =>
+        claimedTransitionMutation.mutate({ claim, transition, rationale })
+      }
+      rationaleByTransitionKey={rationaleByTransitionKey}
+      releaseError={releaseClaimMutation.error}
+      releasePending={releaseClaimMutation.isPending}
+    />
+  );
+  const standaloneReturnDestination = durableReturnContext
+    ? evidenceReturnDestination(durableReturnContext)
+    : legacyReturnDestination;
+  const standaloneReturnLabel = durableReturnContext
+    ? evidenceReturnLabel(durableReturnContext)
+    : legacyReturnDestination === routes.registrationTraining
+      ? "Back to Training"
+      : "Back to Facility Assessment Journey";
 
   return (
     <div className="space-y-4">
+      {standaloneReturnDestination && (!draftPayloadMutation.isSuccess || draftDirty) ? <div><Button onClick={() => { if (draftDirty && !window.confirm("Leave this evidence record with unsaved changes?")) return; navigate(standaloneReturnDestination); }} type="button" variant="secondary">← {standaloneReturnLabel}</Button></div> : null}
+      {embeddedActionTarget ? createPortal(
+        <>
+          <span className={`inline-flex min-h-10 items-center rounded-component border px-3 text-sm font-semibold ${record.lifecycle_state === "GOVERNANCE_APPROVED" ? "border-green-300 bg-green-50 text-green-800" : "border-blue-200 bg-blue-50 text-primary-navy"}`}>
+            {lifecycleLabel}
+          </span>
+          {headerTransitions.map((transition) => (
+            <Button
+              disabled={transitionMutation.isPending}
+              key={`${transition.from}:${transition.trigger}:${transition.to}:header`}
+              onClick={() => transitionMutation.mutate(transition)}
+              variant={transition.to === "ARCHIVED" ? "secondary" : "primary"}
+            >
+              {transitionMutation.isPending ? "Updating…" : displayWorkflowActionLabel(transition)}
+            </Button>
+          ))}
+          {correctionAction ? (
+            <Button disabled={correctionMutation.isPending} onClick={() => correctionMutation.mutate()} variant="primary">
+              {correctionMutation.isPending ? "Opening…" : correctionAction.action === "CONTINUE_CORRECTION_DRAFT" ? "Continue correction draft" : "Create correction draft"}
+            </Button>
+          ) : null}
+          {revisionAction ? (
+            <Button disabled={revisionMutation.isPending} onClick={() => revisionMutation.mutate()} variant="primary">
+              {revisionMutation.isPending ? "Opening…" : revisionAction.action === "CONTINUE_REVISION_DRAFT" ? "Continue plan revision" : "Create plan revision"}
+            </Button>
+          ) : null}
+          {governanceActionStates.length > 0 ? (
+            <Button
+              onClick={() => document.getElementById("embedded-governance-actions")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+              variant="primary"
+            >
+              Review Actions ↓
+            </Button>
+          ) : null}
+        </>,
+        embeddedActionTarget
+      ) : null}
       {!embeddedRecordId ? <RecordIdentityPanel record={record} /> : null}
+      {!embeddedRecordId && correctionAction ? (
+        <Surface className="border-amber-300 bg-amber-50/60">
+          <p className="font-semibold text-primary-navy">Correction successor required</p>
+          <p className="mt-1 text-sm text-text-muted">This returned submission remains immutable. Continue in an editable correction draft.</p>
+          <Button className="mt-3" disabled={correctionMutation.isPending} onClick={() => correctionMutation.mutate()}>
+            {correctionMutation.isPending ? "Opening…" : correctionAction.action === "CONTINUE_CORRECTION_DRAFT" ? "Continue correction draft" : "Create correction draft"}
+          </Button>
+          {correctionMutation.error ? <p className="mt-2 text-sm text-red-700">{correctionMutation.error instanceof Error ? correctionMutation.error.message : "Correction draft could not be created."}</p> : null}
+        </Surface>
+      ) : null}
+      {!embeddedRecordId && revisionAction ? (
+        <Surface className="border-blue-300 bg-blue-50/60">
+          <p className="font-semibold text-primary-navy">Plan revision available</p>
+          <p className="mt-1 text-sm text-text-muted">The submitted F-100 remains immutable. Revise it in a linked Draft that preserves its governed Emergency Plan identity.</p>
+          <Button className="mt-3" disabled={revisionMutation.isPending} onClick={() => revisionMutation.mutate()}>
+            {revisionMutation.isPending ? "Opening…" : revisionAction.action === "CONTINUE_REVISION_DRAFT" ? "Continue plan revision" : "Create plan revision"}
+          </Button>
+          {revisionMutation.error ? <p className="mt-2 text-sm text-red-700">{revisionMutation.error instanceof Error ? revisionMutation.error.message : "Plan revision could not be created."}</p> : null}
+        </Surface>
+      ) : null}
+      {!embeddedRecordId && record.lifecycle_state === "SUBMITTED" && record.template_provenance.template_code === "OGI_F100_EMERGENCY_PREPAREDNESS_OPERATIONAL_CONTINUITY_PLAN" ? (
+        <Surface className="border-teal-300 bg-teal-50/60">
+          <p className="font-semibold text-primary-navy">F-100 evidence is ready for assessment</p>
+          <p className="mt-1 text-sm text-text-muted">Submission preserves the plan as evidence. The Emergency Preparedness Form Assessment and category final remain separate governed steps.</p>
+          <Button asChild className="mt-3"><Link to={routes.facilityAssessmentJourneys}>Continue to Emergency Preparedness assessment →</Link></Button>
+        </Surface>
+      ) : null}
+      {embeddedRecordId && governanceActionStates.length > 0 ? (
+        <div className="scroll-mt-28" id="embedded-governance-actions">
+          {governanceReviewActions}
+        </div>
+      ) : null}
 
       <section aria-labelledby={evidenceHeadingId} className="space-y-4">
         <div>
@@ -537,19 +722,55 @@ export function OperationalEvidenceRecordPage({
             className={`${embeddedRecordId ? "" : "mt-1"} text-xl font-semibold text-text-primary`}
             id={evidenceHeadingId}
           >
-            {isDraftRecord ? "Draft Evidence" : "Submitted Evidence"}
+            {evidenceHeading}
           </h2>
           {!embeddedRecordId ? (
             <p className="mt-2 max-w-3xl text-sm leading-6 text-text-muted">
               {isDraftRecord
                 ? "This Draft Operational Evidence record can be edited until it is submitted."
-                : "This read-only view presents the evidence payload submitted for this Operational Evidence record."}
+                : isDiscardedRecord
+                  ? "This discarded Draft is preserved as read-only audit history and cannot be submitted or restored."
+                  : "This read-only view presents the evidence payload submitted for this Operational Evidence record."}
             </p>
           ) : null}
         </div>
 
-        {record.scope_kind === "TRAINING_SCOPED" && record.training_context ? (
+        {record.context ? <ExistingEvidenceContextBanner context={record.context} /> : null}
+        {!record.context && record.scope_kind === "TRAINING_SCOPED" && record.training_context ? (
           <TrainingEvidenceContextBanner record={record} />
+        ) : null}
+
+        {isDraftRecord ? (
+          <div aria-live="polite" className={`rounded-component border px-4 py-3 text-sm ${
+            draftPayloadMutation.isError
+              ? "border-red-300 bg-red-50 text-red-800"
+              : draftDirty
+                ? "border-amber-300 bg-amber-50 text-amber-900"
+                : "border-blue-200 bg-blue-50 text-primary-navy"
+          }`} data-testid="draft-save-state" role="status">
+            {draftPayloadMutation.isPending
+              ? "Saving Draft… Finalization is unavailable until the server confirms this save."
+              : draftPayloadMutation.isError
+                ? "Draft save failed. Your changes remain unsaved; correct the error and try again."
+                : draftDirty
+                  ? "Unsaved changes. Save Draft before finalizing."
+                  : draftPayloadMutation.isSuccess
+                    ? "Draft saved. No unsaved changes."
+                    : "No unsaved changes."}
+          </div>
+        ) : null}
+
+        {isDraftRecord && actionProjectionQuery.isLoading ? (
+          <p className="text-sm text-text-muted" role="status">Loading available lifecycle actions…</p>
+        ) : null}
+        {isDraftRecord && actionProjectionQuery.isError ? (
+          <div className="rounded-component border border-red-300 bg-red-50 p-3 text-sm text-red-800" role="alert">
+            <p>Available lifecycle actions could not be loaded.</p>
+            <Button className="mt-2" onClick={() => actionProjectionQuery.refetch()} variant="secondary">Retry actions</Button>
+          </div>
+        ) : null}
+        {isDraftRecord && !draftDirty && !draftPayloadMutation.isPending && !actionProjectionQuery.isLoading && !actionProjectionQuery.isError && visibleDirectTransitions.length === 0 ? (
+          <p className="rounded-component border border-border bg-elevated px-4 py-3 text-sm text-text-muted">No lifecycle action is currently available for this Draft and your authority.</p>
         ) : null}
 
         <OetsRenderer
@@ -570,7 +791,7 @@ export function OperationalEvidenceRecordPage({
           attestationPending={attestationMutation.isPending}
           attestations={attestationQuery.data?.attestations ?? []}
           embedded={Boolean(embeddedRecordId)}
-          actionPortalId={embeddedRecordId ? "training-journey-record-actions" : undefined}
+          actionPortalId={embeddedRecordId ? actionPortalId : undefined}
           definition={renderedDefinition}
           backendValidation={
             draftPayloadMutation.error &&
@@ -589,73 +810,75 @@ export function OperationalEvidenceRecordPage({
           fieldVisibilityPolicy={fieldVisibilityPolicy}
           isSubmitting={draftPayloadMutation.isPending}
           onSubmit={canEditDraft ? (payload) => draftPayloadMutation.mutate(payload) : undefined}
-          onAttest={canEditDraft && !draftDirty && !draftPayloadMutation.isPending ? (request) => attestationMutation.mutateAsync(request) : undefined}
-          onDirtyChange={setDraftDirty}
+          onAttest={canAttestDraft && !draftDirty && !draftPayloadMutation.isPending ? (request) => attestationMutation.mutateAsync(request) : undefined}
+          onDirtyChange={(dirty) => { setDraftDirty(dirty); onDirtyChange?.(dirty); }}
           readOnly={!canEditDraft}
           runtimeTemplate={templateQuery.data}
           submitHelpText="Save Draft changes before submitting this Operational Evidence record."
+          submitDisabledReason={!draftDirty ? "No unsaved changes." : null}
           submitLabel="Save Draft"
           submittingLabel="Saving..."
           submitSuccess={
-            draftPayloadMutation.isSuccess
+            isDraftRecord && draftPayloadMutation.isSuccess
               ? {
                   evidenceRecordId: record.id,
                   lifecycleState: record.lifecycle_state,
-                  payloadChecksum: record.payload_checksum
+                  payloadChecksum: record.payload_checksum,
+                  ...(standaloneReturnDestination && !draftDirty ? { recordHref: standaloneReturnDestination } : {})
                 }
               : null
           }
           submitSuccessMessage="Draft evidence saved."
+          submitSuccessLinkLabel={`← ${standaloneReturnLabel}`}
         />
       </section>
+      {isF002 && isDraftRecord ? <F002ReadinessPanel issues={f002ReadinessIssues} loadingAttestations={attestationQuery.isLoading} /> : null}
+      {isF002 && !isDraftRecord ? <F002LifecyclePanel lifecycleState={record.lifecycle_state} /> : null}
       <WorkflowActions
         error={transitionMutation.error}
         isPending={transitionMutation.isPending}
         onTransition={(transition) => transitionMutation.mutate(transition)}
 
-        transitions={draftDirty || draftPayloadMutation.isPending ? [] : directTransitions}
+        transitions={embeddedRecordId ? [] : headerTransitions}
       />
-
-      <GovernanceReviewActions
-        actionStates={governanceActionStates}
-        claimError={claimMutation.error}
-        claimPending={claimMutation.isPending}
-        claimedTransitionError={claimedTransitionMutation.error}
-        claimedTransitionPending={claimedTransitionMutation.isPending}
-        currentUserId={auth.session?.id ?? null}
-        isLoadingClaimState={governanceQueueQuery.isLoading}
-        loadClaimStateError={governanceQueueQuery.error}
-        onClaim={(transition) => claimMutation.mutate(transition)}
-        onRelease={(claim) => releaseClaimMutation.mutate(claim)}
-        canSubmitConclusion={canSubmitReviewConclusion}
-        currentConclusion={currentReviewConclusionQuery.data?.conclusion ?? null}
-        onRationaleChange={(transition, rationale) =>
-          setRationaleByTransitionKey((existing) => ({
-            ...existing,
-            [transitionKey(transition)]: rationale
-          }))
-        }
-        onTransition={(claim, transition, rationale) =>
-          claimedTransitionMutation.mutate({ claim, transition, rationale })
-        }
-        rationaleByTransitionKey={rationaleByTransitionKey}
-        releaseError={releaseClaimMutation.error}
-        releasePending={releaseClaimMutation.isPending}
-      />
-
-      <ReviewConclusionPanel
-        context={reviewConclusionContext}
-        currentConclusion={currentReviewConclusionQuery.data?.conclusion ?? null}
-        currentError={currentReviewConclusionQuery.error}
-        history={reviewConclusionHistoryQuery.data?.conclusions ?? []}
-        historyError={reviewConclusionHistoryQuery.error}
-        isLoadingCurrent={currentReviewConclusionQuery.isLoading}
-        isLoadingHistory={reviewConclusionHistoryQuery.isLoading}
-        onSelectConclusion={setSelectedConclusionId}
-        selectedConclusion={selectedReviewConclusionQuery.data ?? null}
-        selectedError={selectedReviewConclusionQuery.error}
-        selectedId={selectedConclusionId}
-      />
+      {canDiscardDraft ? (
+        <Surface>
+          <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">Draft management</p>
+          <p className="mt-1 text-sm text-text-muted">Discard this unsubmitted Draft without deleting its audit history.</p>
+          <Button
+            className="mt-3"
+            disabled={draftDirty || draftPayloadMutation.isPending || discardMutation.isPending}
+            onClick={() => {
+              if (window.confirm("Discard this Draft? This preserves the record as read-only history and cannot be undone.")) {
+                discardMutation.mutate();
+              }
+            }}
+            type="button"
+            variant="secondary"
+          >
+            {discardMutation.isPending ? "Discarding…" : "Discard Draft"}
+          </Button>
+          {discardMutation.isError ? <p className="mt-2 text-sm text-red-700" role="alert">Draft could not be discarded. Reload it and try again.</p> : null}
+        </Surface>
+      ) : null}
+      <div className="scroll-mt-28" id={embeddedRecordId ? undefined : "embedded-governance-actions"}>
+        {!embeddedRecordId ? governanceReviewActions : null}
+        {shouldLoadReviewConclusions ? (
+          <ReviewConclusionPanel
+            context={reviewConclusionContext}
+            currentConclusion={currentReviewConclusionQuery.data?.conclusion ?? null}
+            currentError={currentReviewConclusionQuery.error}
+            history={reviewConclusionHistoryQuery.data?.conclusions ?? []}
+            historyError={reviewConclusionHistoryQuery.error}
+            isLoadingCurrent={currentReviewConclusionQuery.isLoading}
+            isLoadingHistory={reviewConclusionHistoryQuery.isLoading}
+            onSelectConclusion={setSelectedConclusionId}
+            selectedConclusion={selectedReviewConclusionQuery.data ?? null}
+            selectedError={selectedReviewConclusionQuery.error}
+            selectedId={selectedConclusionId}
+          />
+        ) : null}
+      </div>
 
       {isOetsDeveloperDiagnosticsEnabled() && narrowing.warnings.length > 0 ? (
         <Surface className="border-state-warning">
@@ -718,6 +941,50 @@ function TrainingEvidenceContextBanner({
       />
     </Surface>
   );
+}
+
+function ExistingEvidenceContextBanner({
+  context
+}: {
+  context: NonNullable<OperationalEvidenceRecord["context"]>;
+}) {
+  return (
+    <Surface className="space-y-3 border-primary-blue">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-primary-blue">Evidence Context</p>
+        <h3 className="mt-1 text-lg font-semibold text-text-primary">{context.summary.primary_label}</h3>
+        <p className="mt-1 text-sm text-text-muted">{context.summary.secondary_label}</p>
+      </div>
+      <MetadataGrid entries={[
+        ["Context kind", humanizeCode(context.context_kind)],
+        ["Selection", "Locked to this evidence record"],
+        ["Snapshot source", "Evidence binding and payload"]
+      ]} />
+    </Surface>
+  );
+}
+
+function applyExistingContextFieldPolicy(
+  definition: OetsDefinition,
+  policy: Record<string, OetsContextFieldPolicy> | undefined
+) {
+  if (!policy) return definition;
+  return {
+    ...definition,
+    sections: definition.sections.map((section) => ({
+      ...section,
+      fields: section.fields.map((field) => {
+        const authority = policy[`${section.section_code}.${field.field_code}`] ?? policy[field.field_code];
+        return {
+          ...field,
+          readonly: field.readonly || authority === "READ_ONLY_DERIVED" || authority === "UNAVAILABLE_POST_ISSUANCE",
+          description: authority === "UNAVAILABLE_POST_ISSUANCE"
+            ? "Unavailable after governed issuance."
+            : field.description
+        };
+      })
+    }))
+  };
 }
 
 function canEditOwnTrainingScopedDraft(
@@ -814,54 +1081,6 @@ function RecordProvenanceDisclosure({
   );
 }
 
-function findQueueItemForTransition(
-  items: GovernanceQueueItem[],
-  evidenceRecordId: string | undefined,
-  transition: GovernanceWorkflowTransition
-) {
-  if (!evidenceRecordId) {
-    return undefined;
-  }
-
-  return items.find(
-    (item) =>
-      item.evidence_record.id === evidenceRecordId &&
-      item.governance_authority_code === transition.governanceAuthorityCode &&
-      item.lifecycle_state === transition.from &&
-      item.transition_trigger === transition.trigger
-  );
-}
-
-function setClaimStateInCache(
-  queryClient: ReturnType<typeof useQueryClient>,
-  queryKey: readonly unknown[],
-  evidenceRecordId: string | undefined,
-  claim: GovernanceReviewClaim
-) {
-  queryClient.setQueryData<GovernanceQueueItem[]>(queryKey, (items) => {
-    if (!items || !evidenceRecordId) {
-      return items;
-    }
-
-    return items.map((item) => {
-      const isClaimScope =
-        item.evidence_record.id === evidenceRecordId &&
-        item.governance_authority_code === claim.governance_authority_code &&
-        item.lifecycle_state === claim.lifecycle_state &&
-        item.transition_trigger === claim.transition_trigger;
-
-      if (!isClaimScope) {
-        return item;
-      }
-
-      return {
-        ...item,
-        active_claim: claim.claim_status === "ACTIVE" ? claim : null
-      };
-    });
-  });
-}
-
 function transitionKey(transition: GovernanceWorkflowTransition) {
   return `${transition.from}:${transition.trigger}:${transition.to}`;
 }
@@ -900,6 +1119,98 @@ function reviewConclusionContextKeyPart(context: ReviewConclusionQueryContext) {
     context.target_lifecycle_state
   ] as const;
 }
+
+function F002ReadinessPanel({
+  issues,
+  loadingAttestations
+}: {
+  issues: readonly string[];
+  loadingAttestations: boolean;
+}) {
+  const ready = !loadingAttestations && issues.length === 0;
+  return (
+    <Surface className={`border-l-4 ${ready ? "border-l-state-success bg-green-50/40" : "border-l-state-warning bg-amber-50/40"}`}>
+      <p className="text-xs font-bold uppercase tracking-wide text-primary-blue">F002 submission readiness</p>
+      <h2 className="mt-1 text-base font-semibold text-primary-navy">
+        {ready ? "Ready for governed finalization" : "Draft requirements remain"}
+      </h2>
+      {loadingAttestations ? (
+        <p className="mt-2 text-sm text-text-muted" role="status">Checking governed attestations…</p>
+      ) : ready ? (
+        <p className="mt-2 text-sm text-text-muted">Minimum assessment evidence and both current attestations are present.</p>
+      ) : (
+        <ul className="mt-2 grid gap-1 text-sm text-text-muted sm:grid-cols-2">
+          {issues.map((issue) => <li key={issue}>• {issue}</li>)}
+        </ul>
+      )}
+    </Surface>
+  );
+}
+
+function F002LifecyclePanel({ lifecycleState }: { lifecycleState: string }) {
+  const approved = lifecycleState === "GOVERNANCE_APPROVED";
+  return (
+    <Surface className={`border-l-4 ${approved ? "border-l-state-success bg-green-50/40" : "border-l-primary-blue bg-blue-50/40"}`}>
+      <p className="text-xs font-bold uppercase tracking-wide text-primary-blue">F002 governed lifecycle</p>
+      <h2 className="mt-1 text-base font-semibold text-primary-navy">
+        {approved ? "Governed approval complete" : displayLifecycleStatus(lifecycleState)}
+      </h2>
+      <p className="mt-2 text-sm text-text-muted">
+        {approved
+          ? "This evidence is immutable and approved. Archiving is an optional post-approval retention action."
+          : "This evidence has left Draft and is read-only while its governed workflow continues."}
+      </p>
+    </Surface>
+  );
+}
+
+function readF002ReadinessIssues(
+  payload: Pick<OetsEvidencePayload, "sections">,
+  attestations: readonly EvidenceAttestation[],
+  dirty: boolean
+) {
+  const requirements = [
+    ["FACILITY_IDENTIFICATION", "CLIENT_ID", "Client ID"],
+    ["FACILITY_IDENTIFICATION", "FACILITY_ID", "Facility ID"],
+    ["FACILITY_IDENTIFICATION", "FACILITY_NAME", "Facility Name"],
+    ["FACILITY_IDENTIFICATION", "ORGANIZATION_NAME", "Organization Name"],
+    ["FACILITY_IDENTIFICATION", "FACILITY_TYPE", "Facility Type"],
+    ["FACILITY_IDENTIFICATION", "ASSESSMENT_DATE", "Assessment Date"],
+    ["FACILITY_IDENTIFICATION", "ASSESSOR", "Appointed Assessor"],
+    ["BASELINE_ARMAA_ASSESSMENT", "GOVERNANCE_MATURITY", "Governance Maturity"],
+    ["BASELINE_ARMAA_ASSESSMENT", "DOCUMENTATION_INTEGRITY", "Documentation Integrity"],
+    ["BASELINE_ARMAA_ASSESSMENT", "COMPLIANCE_MANAGEMENT", "Compliance Management"],
+    ["BASELINE_ARMAA_ASSESSMENT", "TRAINING_ADMINISTRATION", "Training Administration"],
+    ["BASELINE_ARMAA_ASSESSMENT", "CORRECTIVE_ACTION_MANAGEMENT", "Corrective Action Management"],
+    ["BASELINE_ARMAA_ASSESSMENT", "RISK_MANAGEMENT_SYSTEMS", "Risk Management Systems"],
+    ["BASELINE_ARMAA_ASSESSMENT", "ACCOUNTABILITY_AND_OVERSIGHT", "Accountability & Oversight"],
+    ["BASELINE_ARMAA_ASSESSMENT", "ADMINISTRATIVE_RISK_SCORE", "Administrative Risk Score"],
+    ["BASELINE_ARMAA_ASSESSMENT", "ADMINISTRATIVE_CLASSIFICATION", "Administrative Classification"]
+  ] as const;
+  const issues: string[] = requirements.flatMap(([sectionCode, fieldCode, label]) => {
+    const section = payload.sections[sectionCode];
+    const value = section && !Array.isArray(section) ? section[fieldCode] : undefined;
+    return hasF002ReadinessValue(value) ? [] : [label];
+  });
+  for (const [signatureCode, label] of [
+    ["ASSESSOR_NAME_SIGNATURE", "Current assessor attestation"],
+    ["REVIEWING_MANAGER_SIGNATURE", "Current reviewing-manager attestation"]
+  ] as const) {
+    if (!attestations.some((item) => item.status === "CURRENT" && item.signature_field_code_snapshot === signatureCode)) {
+      issues.push(label);
+    }
+  }
+  if (dirty) issues.unshift("Save the current draft changes");
+  return [...new Set(issues)];
+}
+
+function hasF002ReadinessValue(value: OetsFieldValue | undefined) {
+  if (value === null || value === undefined) return false;
+  if (typeof value === "string") return value.trim().length > 0;
+  if (Array.isArray(value)) return value.length > 0;
+  return true;
+}
+
 function WorkflowActions({
   error,
   isPending,
@@ -932,11 +1243,7 @@ function WorkflowActions({
               disabled={isPending}
               key={`${transition.from}:${transition.trigger}:${transition.to}`}
               onClick={() => onTransition(transition)}
-              variant={
-                transition.trigger === "FINALIZE_DRAFT" || /submit/i.test(transition.trigger)
-                  ? "primary"
-                  : "secondary"
-              }
+              variant="primary"
             >
               {isPending ? "Updating..." : displayWorkflowActionLabel(transition)}
             </Button>
@@ -1041,7 +1348,7 @@ function GovernanceReviewActions({
         </div>
       ) : (
         <div className="space-y-4">
-          {actionStates.map(({ transition, activeClaim }) => {
+          {actionStates.map(({ transition, activeClaim, claimedByName }) => {
             const actionKey = transitionKey(transition);
             const authorityLabel = displayReviewAuthority(
               transition.governanceAuthorityCode
@@ -1062,7 +1369,9 @@ function GovernanceReviewActions({
                       lifecycleLabel={displayLifecycleStatus(transition.from)}
                     />
                     <p className="rounded-component border border-border bg-canvas px-3 py-2 text-sm text-text-muted">
-                      {authorityLabel} review is already claimed by another reviewer.
+                      {claimedByName
+                        ? `${authorityLabel} review is claimed by ${claimedByName}. That reviewer must release the claim before another authorized reviewer can claim and approve it.`
+                        : `${authorityLabel} review is already claimed by another reviewer.`}
                     </p>
                   </div>
                 );
@@ -1123,7 +1432,7 @@ function GovernanceReviewActions({
                         onClick={() =>
                           onTransition(activeClaim, transition, rationale.trim())
                         }
-                        variant="secondary"
+                        variant="primary"
                       >
                         {claimedTransitionPending
                           ? "Submitting Review Conclusion..."
@@ -1157,7 +1466,7 @@ function GovernanceReviewActions({
                   <Button
                     disabled={claimPending}
                     onClick={() => onClaim(transition)}
-                    variant="secondary"
+                    variant="primary"
                   >
                     {claimPending ? "Claiming Review..." : "Claim Review"}
                   </Button>
@@ -1557,7 +1866,7 @@ function reviewConclusionErrorMessage(error: Error) {
 function draftPayloadErrorMessage(error: Error) {
   if (isApiError(error)) {
     if ([401, 403].includes(error.status)) {
-      return "You are not authorized to edit this Draft Operational Evidence record.";
+      return error.message || "You are not authorized to edit this Draft Operational Evidence record.";
     }
 
     if (error.status === 409) {
@@ -1697,6 +2006,50 @@ function markTrainingAssessmentNumberReadonly(
   definition: OetsDefinition,
   record: OperationalEvidenceRecord
 ) {
+  if (
+    record.template_provenance.template_code ===
+    "OGI_F002_FACILITY_PROFILE_BASELINE_INTELLIGENCE_ASSESSMENT"
+  ) {
+    const inputs = new Set([
+      "GOVERNANCE_MATURITY",
+      "DOCUMENTATION_INTEGRITY",
+      "COMPLIANCE_MANAGEMENT",
+      "TRAINING_ADMINISTRATION",
+      "CORRECTIVE_ACTION_MANAGEMENT",
+      "RISK_MANAGEMENT_SYSTEMS",
+      "ACCOUNTABILITY_AND_OVERSIGHT"
+    ]);
+    const outputs = new Set([
+      "ADMINISTRATIVE_RISK_SCORE",
+      "ADMINISTRATIVE_CLASSIFICATION",
+      "ODIS_SCORE",
+      "DEFENSIBILITY_CLASSIFICATION",
+      "ADMINISTRATIVE_RISK",
+      "DEFENSIBILITY",
+      "INSURANCE_READINESS",
+      "ARI_SCORE",
+      "ARI_CLASSIFICATION",
+      "CLASSIFICATION"
+    ]);
+    const intelligenceInputs = new Set([
+      "GOVERNANCE_SCORE", "DOCUMENTATION_INTEGRITY_SCORE", "OPERATIONAL_CONTROL_SCORE",
+      "COMPETENCY_ASSURANCE_SCORE", "EMERGENCY_READINESS_SCORE", "CORRECTIVE_ACTION_EFFECTIVENESS_SCORE",
+      "OPERATIONAL_RISK", "EMERGENCY_PREPAREDNESS", "TRAINING_AND_COMPETENCY", "INSURANCE_READINESS_INDEX"
+    ]);
+    return {
+      ...definition,
+      sections: definition.sections.map((section) => ({
+        ...section,
+        fields: section.fields.map((field) => ({
+          ...field,
+          readonly: field.readonly || outputs.has(field.field_code) || ["ASSESSOR", "ASSESSMENT_DATE", "DATE", "DATE_2"].includes(field.field_code),
+          validation: inputs.has(field.field_code) || intelligenceInputs.has(field.field_code)
+            ? { ...field.validation, minimum: 0, maximum: 100 }
+            : field.validation
+        }))
+      }))
+    };
+  }
   if (
     record.scope_kind !== "TRAINING_SCOPED" ||
     !trainingAssessmentNumberTemplateCodes.has(

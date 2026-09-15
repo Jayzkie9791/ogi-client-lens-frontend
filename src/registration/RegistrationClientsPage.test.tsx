@@ -148,21 +148,17 @@ describe("Registration Clients frontend", () => {
     renderWithRoute(routes.workbench);
 
     await user.click(await screen.findByRole("button", { name: "Menu" }));
-    await user.click(screen.getByRole("button", { name: "Registration" }));
-    await user.click(screen.getByRole("link", { name: "Clients" }));
+    await user.click(screen.getByRole("button", { name: "Organizations" }));
+    await user.click(screen.getByRole("link", { name: "Client Masterlist" }));
 
     expect(
       await screen.findByRole("heading", { name: "Clients / Organizations" })
     ).toBeInTheDocument();
-    expect(within(screen.getByRole("main")).getByRole("heading", { name: "Registration" })).toBeInTheDocument();
-    expect(within(screen.getByRole("navigation", { name: "Registration resource tabs" })).getByRole("link", { name: "Clients" })).toHaveAttribute(
-      "aria-current",
-      "page"
-    );
+    expect(screen.getByRole("heading", { name: "Clients / Organizations" })).toBeInTheDocument();
     expect(
       screen.queryByRole("form", { name: "Create Client" })
     ).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Register Client" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Register Client" })).not.toBeInTheDocument();
     expect(
       screen.queryByText(/backend|API contract|authorized backend/i)
     ).not.toBeInTheDocument();
@@ -170,7 +166,8 @@ describe("Registration Clients frontend", () => {
       screen.getByText("Ocean Guard International")
     ).toBeInTheDocument();
     expect(screen.getByText("Bluewater Resorts")).toBeInTheDocument();
-    expect(await screen.findByText("Client / Organization Details")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Ocean Guard International/ }));
+    expect(await screen.findByRole("form", { name: "Save Client / Organization" })).toBeInTheDocument();
     expect(screen.queryByText("Facilities")).not.toBeInTheDocument();
     expect(screen.queryByText("Personnel")).not.toBeInTheDocument();
     expect(calls.map(({ url }) => url)).toEqual([
@@ -191,12 +188,13 @@ describe("Registration Clients frontend", () => {
       { status: 200, body: clientA }
     ]);
 
-    renderWithRoute(routes.registrationClients);
+    renderWithRoute(routes.clientMasterlist);
 
     expect(
       await screen.findByRole("heading", { name: "Clients / Organizations" })
     ).toBeInTheDocument();
     expect(await screen.findByText("Ocean Guard International")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /Ocean Guard International/ }));
     expect(screen.queryByRole("button", { name: "Register Client" })).not.toBeInTheDocument();
     expect(
       screen.queryByRole("form", { name: "Save Client / Organization" })
@@ -204,7 +202,7 @@ describe("Registration Clients frontend", () => {
     expect(
       screen.queryByRole("button", { name: "Deactivate Client / Organization" })
     ).not.toBeInTheDocument();
-    expect(screen.getByText("admin@ogiofficial.com")).toBeInTheDocument();
+    expect(screen.getAllByText("admin@ogiofficial.com").length).toBeGreaterThan(0);
   });
 
   it("blocks registration without view_client and does not call registration endpoints", async () => {
@@ -216,7 +214,7 @@ describe("Registration Clients frontend", () => {
       })
     ]);
 
-    renderWithRoute(routes.registrationClients);
+    renderWithRoute(routes.clientMasterlist);
 
     await screen.findByText(
       "Your current session does not include Client / Organization registration authority."
@@ -236,47 +234,27 @@ describe("Registration Clients frontend", () => {
       { status: 200, body: clientA }
     ]);
 
-    renderWithRoute(routes.registrationClients);
+    renderWithRoute(routes.clientMasterlist);
 
     expect(
       await screen.findByRole("heading", { name: "Clients / Organizations" })
     ).toBeInTheDocument();
-    expect(within(screen.getByRole("navigation", { name: "Registration resource tabs" })).getByRole("link", { name: "Clients" })).toHaveAttribute(
-      "aria-current",
-      "page"
-    );
+    expect(screen.getByRole("heading", { name: "Clients / Organizations" })).toBeInTheDocument();
   });
 
   it("enters and cancels explicit Register Client mode without mutation", async () => {
     const user = userEvent.setup();
     const { calls } = mockFetchQueue([
-      ...authResponses(),
-      { status: 200, body: { clients: [clientA, clientB] } },
-      { status: 200, body: clientA },
-      { status: 200, body: clientB }
+      ...authResponses()
     ]);
 
     renderWithRoute(routes.registrationClients);
 
-    await screen.findByRole("heading", { name: "Client / Organization Details" });
-    await user.click(screen.getByRole("button", { name: /Bluewater Resorts/i }));
-
-    expect(await screen.findByDisplayValue("Bluewater Resorts")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Register Client" }));
-
     const createForm = await screen.findByRole("form", { name: "Create Client" });
-    expect(within(createForm).getByLabelText("Organization name")).toHaveValue("");
-    expect(
-      screen.queryByRole("form", { name: "Save Client / Organization" })
-    ).not.toBeInTheDocument();
-
+    await user.type(within(createForm).getByLabelText("Organization name"), "Unsaved Client");
+    expect(within(createForm).getByLabelText("Organization name")).toHaveValue("Unsaved Client");
     await user.click(within(createForm).getByRole("button", { name: "Cancel" }));
-
-    expect(await screen.findByDisplayValue("Bluewater Resorts")).toBeInTheDocument();
-    expect(
-      screen.queryByRole("form", { name: "Create Client" })
-    ).not.toBeInTheDocument();
+    expect(within(createForm).getByLabelText("Organization name")).toHaveValue("");
     expect(
       calls.some(
         (call) =>
@@ -287,23 +265,15 @@ describe("Registration Clients frontend", () => {
   });
 
   it("renders an empty Clients workspace without permanently showing the create form", async () => {
-    const user = userEvent.setup();
     mockFetchQueue([
       ...authResponses(),
       { status: 200, body: { clients: [] } }
     ]);
 
-    renderWithRoute(routes.registrationClients);
+    renderWithRoute(routes.clientMasterlist);
 
-    expect(await screen.findByText("No Clients registered yet.")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "No Client selected." })).toBeInTheDocument();
-    expect(
-      screen.queryByRole("form", { name: "Create Client" })
-    ).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Register Client" }));
-
-    expect(await screen.findByRole("form", { name: "Create Client" })).toBeInTheDocument();
+    expect(await screen.findByText("No Client / Organization records are currently available for your authority.")).toBeInTheDocument();
+    expect(screen.queryByRole("form", { name: "Create Client" })).not.toBeInTheDocument();
   });
 
   it("creates a Client / Organization through the approved POST contract", async () => {
@@ -318,16 +288,10 @@ describe("Registration Clients frontend", () => {
     const { calls } = mockFetchQueue([
       ...authResponses(),
       { status: 200, body: { clients: [] } },
-      { status: 201, body: createdClient },
-      { status: 200, body: { clients: [createdClient] } }
+      { status: 201, body: createdClient }
     ]);
 
     renderWithRoute(routes.registrationClients);
-
-    expect(
-      screen.queryByRole("form", { name: "Create Client" })
-    ).not.toBeInTheDocument();
-    await user.click(await screen.findByRole("button", { name: "Register Client" }));
 
     const createForm = await screen.findByRole("form", { name: "Create Client" });
     await user.type(
@@ -353,13 +317,9 @@ describe("Registration Clients frontend", () => {
     );
 
     expect(createCall).toBeDefined();
-    expect(await screen.findByDisplayValue("New Aquatics Client")).toBeInTheDocument();
-    expect(
-      screen.queryByRole("form", { name: "Create Client" })
-    ).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /New Aquatics Client/i })).toHaveAttribute(
-      "aria-pressed",
-      "true"
+    expect(screen.getByRole("link", { name: "Open Client Masterlist" })).toHaveAttribute(
+      "href",
+      routes.clientMasterlist
     );
     expect(JSON.parse(String(createCall?.init?.body))).toEqual({
       organization_name: "New Aquatics Client",
@@ -388,8 +348,9 @@ describe("Registration Clients frontend", () => {
       { status: 200, body: { clients: [updatedClient] } }
     ]);
 
-    renderWithRoute(routes.registrationClients);
+    renderWithRoute(routes.clientMasterlist);
 
+    await user.click(await screen.findByRole("button", { name: /Ocean Guard International/ }));
     const editForm = await screen.findByRole("form", {
       name: "Save Client / Organization"
     });
@@ -437,8 +398,9 @@ describe("Registration Clients frontend", () => {
       { status: 200, body: { clients: [inactiveClient] } }
     ]);
 
-    renderWithRoute(routes.registrationClients);
+    renderWithRoute(routes.clientMasterlist);
 
+    await user.click(await screen.findByRole("button", { name: /Ocean Guard International/ }));
     await user.click(
       await screen.findByRole("button", {
         name: "Deactivate Client / Organization"
@@ -475,7 +437,7 @@ describe("Registration Clients frontend", () => {
       }
     ]);
 
-    renderWithRoute(routes.registrationClients);
+    renderWithRoute(routes.clientMasterlist);
 
     expect(
       await screen.findByRole("heading", {

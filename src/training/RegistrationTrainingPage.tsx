@@ -1,14 +1,19 @@
 import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
 import { isApiError } from "../api/errors";
 import { routes } from "../app/routePaths";
 import { useAuth } from "../auth/useAuth";
 import { createCertificationFromReadiness } from "../certifications/certificationsApi";
 import { OperationalEvidenceRecordPage } from "../oets/OperationalEvidenceRecordPage";
-import { getOperationalEvidenceRecord } from "../oets/evidenceSubmissionApi";
+import {
+  discardOperationalEvidenceDraft,
+  getOperationalEvidenceRecord,
+  OperationalEvidenceRecord
+} from "../oets/evidenceSubmissionApi";
 import { RuntimeTemplatePage } from "../oets/RuntimeTemplatePage";
+import { evidencePathWithReturn } from "../oets/evidenceReturnContext";
 import {
   listRegistrationClients,
   RegistrationClient
@@ -38,12 +43,14 @@ import {
   assignTrainingEnrollmentSession,
   createTrainingSession,
   createTrainingAttendanceEvidenceDraft,
+  transitionTrainingEnrollmentLifecycle,
   createTrainingEvidenceDraft,
   createTrainingEnrollment,
   confirmTrainingEnrollmentType,
   createTrainingTrainee,
   getTrainingAttendanceEvidenceWorkspace,
   getTrainingEvidenceWorkspace,
+  getTrainingJourneyProjectionV2,
   linkTrainingAttendanceEvidence,
   replaceTrainingAttendanceEvidenceDraft,
   linkTrainingEnrollmentEvidence,
@@ -53,6 +60,7 @@ import {
   listTrainingEnrollments,
   listRecentTrainingRegistrations,
   listTrainingPrograms,
+  listApprovedTrainingRequests,
   listTrainingSessions,
   listTrainingTrainees,
   recordTrainingAssessment,
@@ -66,6 +74,7 @@ import {
   TrainingEvidenceWorkspaceRecord,
   TrainingEvidenceWorkspaceSlot,
   TrainingEvidenceWorkspaceSlotKey,
+  TrainingJourneyProjectionV2,
   TrainingProgramCode,
   TrainingProgramAuthority,
   TrainingOperationalSkill,
@@ -97,6 +106,9 @@ const permissions = {
 
 interface TraineeFormState {
   fullName: string;
+  firstName: string;
+  middleName: string;
+  lastName: string;
   email: string;
   phoneNumber: string;
   notes: string;
@@ -111,6 +123,7 @@ interface EnrollmentFormState {
 }
 
 interface SessionFormState {
+  trainingRequestId: string;
   title: string;
   targetProgramCode: TrainingProgramCode | "";
   operationalSkill: TrainingOperationalSkill;
@@ -125,6 +138,9 @@ interface SessionFormState {
 
 const emptyTraineeForm: TraineeFormState = {
   fullName: "",
+  firstName: "",
+  middleName: "",
+  lastName: "",
   email: "",
   phoneNumber: "",
   notes: ""
@@ -139,6 +155,7 @@ const emptyEnrollmentForm: EnrollmentFormState = {
 };
 
 const emptySessionForm: SessionFormState = {
+  trainingRequestId: "",
   title: "",
   targetProgramCode: "",
   operationalSkill: "RESCUE_SKILLS",
@@ -153,8 +170,10 @@ const emptySessionForm: SessionFormState = {
 
 export function RegistrationTrainingPage({ workspace = "trainees" }: { readonly workspace?: "trainees" | "sessions" | "register" | "journeys" }) {
   const auth = useAuth();
+  const location = useLocation();
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
+  const returnToFacilityJourney = location.state?.returnTo === routes.facilityAssessmentJourneys;
   const canView = auth.canUsePermission(permissions.view);
   const canRegisterTrainee = auth.canUsePermission(permissions.registerTrainee);
   const canLinkPersonnel = auth.canUsePermission(permissions.linkPersonnel);
@@ -193,9 +212,9 @@ export function RegistrationTrainingPage({ workspace = "trainees" }: { readonly 
   const [sessionIdempotencyKey, setSessionIdempotencyKey] = useState(() => workspace === "sessions" ? crypto.randomUUID() : "");
   const [isRegisteringTraining, setIsRegisteringTraining] = useState(false);
   const recentRegistrationsQuery = useQuery({
-    queryKey: ["training-recent-registrations"],
+    queryKey: ["training-recent-registrations", auth.session?.id ?? "anonymous"],
     queryFn: listRecentTrainingRegistrations,
-    enabled: canView && workspace === "journeys",
+    enabled: canView && (workspace === "journeys" || workspace === "sessions"),
     retry: false
   });
 
@@ -295,7 +314,7 @@ export function RegistrationTrainingPage({ workspace = "trainees" }: { readonly 
   const facilitiesQuery = useQuery({
     queryKey: ["registration-facilities", "training-session-create"],
     queryFn: () => listRegistrationFacilities(),
-    enabled: canViewFacilities && isCreatingSession,
+    enabled: canViewFacilities && (isCreatingSession || workspace === "sessions"),
     retry: false
   });
   const activeFacilities = useMemo(
@@ -305,6 +324,14 @@ export function RegistrationTrainingPage({ workspace = "trainees" }: { readonly 
       ),
     [facilitiesQuery.data]
   );
+  const approvedRequestsQuery = useQuery({
+    queryKey: ["approved-training-requests"], queryFn: listApprovedTrainingRequests,
+    enabled: canView && isCreatingSession, retry: false
+  });
+  const approvedRequests = (approvedRequestsQuery.data?.requests ?? []).filter((request) => !sessionForm.facilityId || !request.facility_id || request.facility_id === sessionForm.facilityId);
+  useEffect(() => {
+    if (!sessionForm.trainingRequestId && approvedRequests.length === 1) setSessionForm((current) => ({ ...current, trainingRequestId: approvedRequests[0]!.id }));
+  }, [approvedRequests, sessionForm.trainingRequestId]);
   const eligibleInstructorsQuery = useQuery({
     queryKey: [
       "training-eligible-instructors",
@@ -491,6 +518,7 @@ export function RegistrationTrainingPage({ workspace = "trainees" }: { readonly 
       headingId="registration-training-heading"
       title={workspace === "sessions" ? "Training Sessions" : workspace === "register" ? "Register Training" : workspace === "journeys" ? "Training Journeys" : "Trainees"}
     >
+      {returnToFacilityJourney ? <div><Button asChild variant="secondary"><Link to={routes.facilityAssessmentJourneys}>← Back to Facility Assessment Journey</Link></Button></div> : null}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <p className="text-sm leading-6 text-text-muted">{workspace === "sessions" ? "Create a Session using exact Facility, Instructor, and active L6/L7 qualification authority." : workspace === "register" ? "Select or create a Trainee, choose the program, and assign an eligible Session through the guided workflow." : workspace === "journeys" ? "Select an Enrollment to review progress, resolve its next action, and continue the exact evaluation journey." : "Register trainees, link known Personnel records when appropriate, and review governed training enrollments."}</p>
         <div className="flex flex-wrap gap-2">
@@ -597,6 +625,8 @@ export function RegistrationTrainingPage({ workspace = "trainees" }: { readonly 
           instructorsLoading={eligibleInstructorsQuery.isLoading}
           facilities={activeFacilities}
           facilitiesLoading={facilitiesQuery.isLoading}
+          approvedRequests={approvedRequests}
+          requestsLoading={approvedRequestsQuery.isLoading}
           formState={sessionForm}
           isSubmitting={createSessionMutation.isPending}
           onCancel={() => {
@@ -608,6 +638,16 @@ export function RegistrationTrainingPage({ workspace = "trainees" }: { readonly 
           onSubmit={submitTrainingSession}
         />
       ) : null}
+
+      {workspace === "sessions" ? (
+        <Surface className="cl-workflow-card border-l-4 border-l-primary-blue">
+          <h2 className="text-lg font-semibold text-primary-navy">Training Requests</h2>
+          <p className="mt-1 text-sm text-text-muted">Clients submit requests through the translated Request Training journey. Approved requests become available above for session scheduling.</p>
+          {auth.canUsePermission("view_training_request") ? <Button asChild className="mt-4" variant="secondary"><Link to={routes.trainingRequests}>Open Request Training</Link></Button> : null}
+        </Surface>
+      ) : null}
+
+      {workspace === "sessions" ? <TrainingAttendanceEvidencePanel enrollments={recentRegistrationsQuery.data?.enrollments ?? []} /> : null}
 
       {workspace !== "trainees" ? null : traineesQuery.isLoading ? (
         <SafeState title="Loading Trainee records." role="status">
@@ -706,6 +746,7 @@ export function RegistrationTrainingPage({ workspace = "trainees" }: { readonly 
 
 function TrainingRegistrationReceipt({ result, onRegisterAnother }: { result: RegisterTrainingWizardResult; onRegisterAnother: () => void }) {
   const { trainee, enrollment, session } = result;
+  const linkedPersonnelId = trainee.staff_member_links.find((link) => link.ended_at === null)?.staff_member_id;
   const facility = session.facility?.facility_name ?? "Facility preserved on Training Session";
   const client = enrollment.client?.organization_name ?? "No sponsoring Client";
   const instructor = session.instructor_staff_member?.full_name ?? session.instructor_name ?? "Instructor preserved on Training Session";
@@ -732,7 +773,7 @@ function TrainingRegistrationReceipt({ result, onRegisterAnother }: { result: Re
     </dl>
     <div className="mt-5 flex flex-wrap gap-3">
       <Button asChild><Link to={routes.trainingJourneyPath(enrollment.id)}>Continue to Training Journey</Link></Button>
-      <Button asChild variant="secondary"><Link to={routes.trainingTrainees}>View Trainee and Enrollment</Link></Button>
+      {linkedPersonnelId ? <Button asChild variant="secondary"><Link to={routes.personnelProfilePath(linkedPersonnelId)}>View Personnel Profile</Link></Button> : <Button asChild variant="secondary"><Link to={routes.trainingTrainees}>Reconcile Trainee Identity</Link></Button>}
       <Button asChild variant="secondary"><Link to={routes.trainingSessions}>View Training Sessions</Link></Button>
       <Button onClick={onRegisterAnother} type="button" variant="secondary">Register Another Trainee</Button>
     </div>
@@ -754,7 +795,7 @@ function ReceiptItem({ label, value }: { label: string; value: string }) {
 function TrainingJourneysList({ enrollments, loading, failed, initialEnrollmentId }: { enrollments: readonly TrainingEnrollment[]; loading: boolean; failed: boolean; initialEnrollmentId: string | null }) {
   const records = enrollments;
   const [expandedId,setExpandedId]=useState<string|null>(initialEnrollmentId);
-  const [evaluationEnrollment, setEvaluationEnrollment] = useState<TrainingEnrollment | null>(null);
+  const [evaluationEnrollmentId, setEvaluationEnrollmentId] = useState<string | null>(null);
   const openedInitialEnrollmentId = useRef<string | null>(null);
   useEffect(()=>{
     if (!initialEnrollmentId) return;
@@ -763,7 +804,7 @@ function TrainingJourneysList({ enrollments, loading, failed, initialEnrollmentI
     if (!selected) return;
     openedInitialEnrollmentId.current = initialEnrollmentId;
     setExpandedId(initialEnrollmentId);
-    setEvaluationEnrollment(selected);
+    setEvaluationEnrollmentId(selected.id);
   },[initialEnrollmentId, records]);
   return <Surface className="cl-workflow-card">
     <p className="text-xs font-bold uppercase tracking-wide text-primary-blue">Evaluation work queue</p>
@@ -771,9 +812,9 @@ function TrainingJourneysList({ enrollments, loading, failed, initialEnrollmentI
     <p className="mt-2 text-sm text-text-muted">Governed Training Enrollments progressing from attendance through Certification and digital credential issuance.</p>
     {loading ? <p className="mt-4 text-sm text-text-muted" role="status">Loading Training journeys…</p> : failed ? <p className="mt-4 rounded-component border border-red-200 bg-red-50 p-3 text-sm text-red-900" role="alert">Training journeys could not be loaded.</p> : records.length === 0 ? <p className="mt-4 rounded-component border border-dashed border-border p-4 text-sm text-text-muted">No Training journeys are available.</p> : <div className="mt-4 space-y-4">{records.map((enrollment) => {const session=enrollment.training_session,progress=enrollment.journey_progress;return <RecordAccordion expanded={expandedId===enrollment.id} id={`training-registration-${enrollment.id}`} key={enrollment.id} onToggle={()=>setExpandedId(current=>current===enrollment.id?null:enrollment.id)} summary={<div className="grid gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_auto] sm:items-center"><div><p className="text-xs font-bold uppercase tracking-wide text-[#0f766e]">Training journey</p><h3 className="cl-catalog-title mt-1 text-lg font-semibold">{enrollment.trainee.full_name}</h3><p className="mt-1 text-sm text-text-muted">{enrollment.trainee.student_number??"Student number pending"} · {session?.training_title??"Session not assigned"}</p></div><div><p className="text-sm font-semibold text-primary-navy">{enrollment.program.certification_level} · {enrollment.program.display_name}</p><p className="mt-1 text-xs text-text-muted">{formatRegistrationDateTime(enrollment.enrolled_at)}</p></div><span className="w-fit rounded-full border border-teal-300 bg-teal-50 px-3 py-1 text-xs font-bold uppercase tracking-wide text-teal-800">{journeySummaryLabel(progress)}</span></div>}>
       <div className="grid gap-4 lg:grid-cols-2"><RegistrationDetailGroup title="Registration context"><ReceiptItem label="Sponsoring Client" value={enrollment.client?.organization_name??"No sponsoring Client"}/><ReceiptItem label="Facility" value={session?.facility?.facility_name??"No Facility recorded"}/><ReceiptItem label="Registered on" value={formatRegistrationDateTime(enrollment.enrolled_at)}/></RegistrationDetailGroup><RegistrationDetailGroup title="Training Session"><ReceiptItem label="Session" value={session?.training_title??"Not assigned"}/><ReceiptItem label="Session reference" value={session?.business_identifier??"Not available"}/><ReceiptItem label="Primary focus" value={session?.operational_skill?.replaceAll("_"," ")??"Not recorded"}/><ReceiptItem label="Schedule" value={session?`${formatRegistrationDateTime(session.training_start_date)}${session.training_end_date?` – ${formatRegistrationDateTime(session.training_end_date)}`:""}`:"Not scheduled"}/><ReceiptItem label="Duration" value={session?.duration_minutes?`${session.duration_minutes} minutes`:"Not recorded"}/></RegistrationDetailGroup><RegistrationDetailGroup title="Instruction authority"><ReceiptItem label="Primary instructor" value={session?.instructor_staff_member?.full_name??"Not recorded"}/><ReceiptItem label="Instructor Registry Number" value={session?.instructor_staff_member?.instructor_registry_identity?.instructor_number??"Not available"}/><ReceiptItem label="Qualification" value={session?.instructor_qualification_certification?`${session.instructor_qualification_certification.certification_level} · ${session.instructor_qualification_certification.certification_number}`:"Not recorded"}/>{session?.supervisor_staff_member?<ReceiptItem label="Supervising instructor" value={`${session.supervisor_staff_member.full_name} · ${session.supervisor_staff_member.instructor_registry_identity?.instructor_number??"Registry number unavailable"}`}/>:null}</RegistrationDetailGroup><RegistrationDetailGroup title="Training journey"><JourneyState label="Attendance" value={progress?.attendance?"Recorded":"Required"}/><JourneyState label="Skills assessment" value={progress?.skills_assessment??"Not recorded"}/><JourneyState label="Knowledge assessment" value={progress?.knowledge_assessment??"Not recorded"}/><JourneyState label="Readiness" value={progress?.readiness??"Not decided"}/><JourneyState label="Certification" value={progress?.certification?`${progress.certification.certification_level} · ${progress.certification.certification_number}`:"Not issued"}/><p className="mt-3 rounded-component border border-blue-200 bg-blue-50 p-3 text-sm font-semibold text-primary-navy">Next: {nextActionLabel(progress?.next_action)}</p></RegistrationDetailGroup></div>
-      <div className="mt-4 flex flex-wrap items-center gap-2"><Button onClick={() => setEvaluationEnrollment(enrollment)} type="button">Open Evaluation Journey</Button><Button asChild variant="secondary"><Link to={routes.trainingTrainees}>View Trainee and Enrollment</Link></Button><Button asChild variant="secondary"><Link to={routes.trainingSessions}>View Training Sessions</Link></Button></div><details className="mt-4 border-t border-border pt-3 text-xs"><summary className="cursor-pointer font-semibold text-primary-navy">Technical record details</summary><p className="mt-2 break-all text-text-muted">Enrollment {enrollment.id}{enrollment.training_session_id?` · Session ${enrollment.training_session_id}`:""}{session?.instructor_staff_member?.id?` · Instructor Personnel ${session.instructor_staff_member.id}`:""}</p></details>
+      <div className="mt-4 flex flex-wrap items-center gap-2"><Button onClick={() => setEvaluationEnrollmentId(enrollment.id)} type="button">Open Evaluation Journey</Button><Button asChild variant="secondary"><Link to={routes.trainingTrainees}>View Trainee and Enrollment</Link></Button><Button asChild variant="secondary"><Link to={routes.trainingSessions}>View Training Sessions</Link></Button></div><details className="mt-4 border-t border-border pt-3 text-xs"><summary className="cursor-pointer font-semibold text-primary-navy">Technical record details</summary><p className="mt-2 break-all text-text-muted">Enrollment {enrollment.id}{enrollment.training_session_id?` · Session ${enrollment.training_session_id}`:""}{session?.instructor_staff_member?.id?` · Instructor Personnel ${session.instructor_staff_member.id}`:""}</p></details>
     </RecordAccordion>})}</div>}
-    {evaluationEnrollment ? <TrainingEvaluationJourneyModal enrollment={evaluationEnrollment} onClose={() => setEvaluationEnrollment(null)} /> : null}
+    {evaluationEnrollmentId ? <TrainingEvaluationJourneyModal enrollmentId={evaluationEnrollmentId} onClose={() => setEvaluationEnrollmentId(null)} /> : null}
   </Surface>;
 }
 
@@ -802,11 +843,24 @@ const trainingJourneySteps: readonly { readonly key: TrainingJourneyStep; readon
   { key: "CREDENTIAL", label: "Digital Credential", form: "F-048" }
 ];
 
-function TrainingEvaluationJourneyModal({ enrollment, onClose }: { readonly enrollment: TrainingEnrollment; readonly onClose: () => void }) {
+function TrainingEvaluationJourneyModal({ enrollmentId, onClose }: { readonly enrollmentId: string; readonly onClose: () => void }) {
+  const projectionQuery = useQuery({
+    queryKey: ["training-journey-v2", enrollmentId],
+    queryFn: () => getTrainingJourneyProjectionV2(enrollmentId),
+    retry: false
+  });
+  if (projectionQuery.isLoading) return <div aria-modal="true" className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/65" role="dialog"><Surface><p role="status">Loading authoritative Training Journey…</p></Surface></div>;
+  if (projectionQuery.isError || !projectionQuery.data) return <div aria-modal="true" className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/65" role="dialog"><Surface><p className="text-red-800" role="alert">The authoritative Training Journey could not be loaded.</p><Button className="mt-3" onClick={onClose} variant="secondary">Close</Button></Surface></div>;
+  return <TrainingEvaluationJourneyContent enrollment={projectionQuery.data.enrollment} onClose={onClose} projection={projectionQuery.data} />;
+}
+
+function TrainingEvaluationJourneyContent({ enrollment, onClose, projection }: { readonly enrollment: TrainingEnrollment; readonly onClose: () => void; readonly projection: TrainingJourneyProjectionV2 }) {
+  const auth = useAuth();
   const queryClient = useQueryClient();
   const dialogRef = useRef<HTMLDivElement>(null);
   const [step, setStep] = useState<TrainingJourneyStep>("ATTENDANCE");
   const [openRecordId, setOpenRecordId] = useState<string | null>(null);
+  const [lifecycleValidationMessage, setLifecycleValidationMessage] = useState<string | null>(null);
   const workspaceKey = ["training", "enrollment", enrollment.id, "evidence-workspace"] as const;
   const workspaceQuery = useQuery({ queryKey: workspaceKey, queryFn: () => getTrainingEvidenceWorkspace(enrollment.id), retry: false });
   const openRecordQuery = useQuery({
@@ -815,6 +869,19 @@ function TrainingEvaluationJourneyModal({ enrollment, onClose }: { readonly enro
     queryFn: () => getOperationalEvidenceRecord(openRecordId ?? "")
   });
   const openRecord = openRecordQuery.data;
+  const hasStarted = Boolean(enrollment.journey_progress?.attendance || enrollment.journey_progress?.skills_assessment || enrollment.journey_progress?.knowledge_assessment || enrollment.journey_progress?.readiness);
+  const lifecycleAction = hasStarted ? "WITHDRAWN" as const : "CANCELLED" as const;
+  const lifecycleMutation = useMutation({mutationFn:(reason:string)=>transitionTrainingEnrollmentLifecycle(enrollment.id,lifecycleAction,reason,crypto.randomUUID()),onSuccess:async()=>{await queryClient.invalidateQueries({queryKey:["training-recent-registrations"]});onClose();}});
+
+  useEffect(() => {
+    if (!openRecord || openRecord.lifecycle_state === "DRAFT") return;
+    void queryClient.invalidateQueries({
+      queryKey: ["training", "enrollment", enrollment.id, "evidence-workspace"]
+    });
+    void queryClient.invalidateQueries({ queryKey: ["training-recent-registrations"] });
+    void queryClient.invalidateQueries({ queryKey: ["training-journey-v2", enrollment.id] });
+    void queryClient.invalidateQueries({ queryKey: ["training"] });
+  }, [enrollment.id, openRecord?.lifecycle_state, queryClient]);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -838,8 +905,6 @@ function TrainingEvaluationJourneyModal({ enrollment, onClose }: { readonly enro
   function selectStep(nextStep: TrainingJourneyStep) {
     setOpenRecordId(null);
     setStep(nextStep);
-    void queryClient.invalidateQueries({ queryKey: workspaceKey });
-    void queryClient.invalidateQueries({ queryKey: ["training-recent-registrations"] });
   }
 
   return <div aria-label={`Training Evaluation Journey for ${enrollment.trainee.full_name}`} aria-modal="true" className="fixed inset-0 z-50 flex bg-slate-950/65 p-2 sm:p-5" ref={dialogRef} role="dialog">
@@ -848,30 +913,49 @@ function TrainingEvaluationJourneyModal({ enrollment, onClose }: { readonly enro
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="text-xs font-bold uppercase tracking-wide text-teal-700">Training evaluation journey</p>
-            <h2 className="mt-0.5 text-xl font-semibold text-primary-navy">{openRecordId ? trainingJourneyFormTitle(step) : `${enrollment.trainee.full_name} · ${enrollment.program.certification_level} ${enrollment.program.display_name}`}</h2>
-            {openRecord ? <p className="mt-0.5 text-xs font-semibold uppercase tracking-wide text-text-muted">{trainingJourneyFormNumber(step)} · Version {openRecord.template_provenance.template_version} · {humanizeCode(openRecord.lifecycle_state)}</p> : null}
+            <h2 className="mt-0.5 text-xl font-semibold text-primary-navy">{openRecord ? trainingJourneyRecordTitle(openRecord, step) : `${enrollment.trainee.full_name} · ${enrollment.program.certification_level} ${enrollment.program.display_name}`}</h2>
+            {openRecord ? <p className="mt-0.5 text-xs font-semibold uppercase tracking-wide text-text-muted">{trainingJourneyRecordNumber(openRecord, step)} · Version {openRecord.template_provenance.template_version} · {humanizeCode(openRecord.lifecycle_state)}</p> : null}
             {openRecordId ? <p className="mt-0.5 text-sm font-semibold text-indigo-700">{enrollment.trainee.full_name} · {enrollment.program.certification_level} {enrollment.program.display_name}</p> : null}
             <p className="text-sm text-text-muted">{enrollment.trainee.student_number ?? "Student number pending"} · {enrollment.training_session?.training_title ?? "No Training Session assigned"}</p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <div className="flex items-center" id="training-journey-record-actions" />
+            {auth.canUsePermission(permissions.createEnrollment) && !enrollment.journey_progress?.certification ? <Button disabled={lifecycleMutation.isPending} onClick={()=>{const reason=window.prompt(`${hasStarted?"Withdraw":"Cancel"} this Training registration? Enter an audit reason (at least 10 characters).`);if(reason===null)return;const normalized=reason.trim();if(normalized.length<10){setLifecycleValidationMessage("Enter an audit reason of at least 10 characters.");return;}setLifecycleValidationMessage(null);lifecycleMutation.mutate(normalized);}} type="button" variant="secondary">{hasStarted?"Withdraw Registration":"Cancel Registration"}</Button> : null}
             <Button aria-label="Close Training Evaluation Journey" className="border-red-300 bg-white text-red-700 hover:bg-red-50" onClick={onClose} type="button" variant="secondary">Close</Button>
           </div>
         </div>
         <nav aria-label="Training evaluation steps" className="relative mt-3 grid grid-cols-6 gap-1 before:absolute before:left-[8%] before:right-[8%] before:top-5 before:h-0.5 before:bg-blue-200">
           {trainingJourneySteps.map((item) => {
             const selected = step === item.key;
-            const status = journeyStepStatus(item.key, enrollment, workspaceQuery.data);
-            const completed = ["Completed", "Issued", "Pass", "Operationally Ready"].includes(status);
+            const status = journeyStepStatus(item.key, enrollment, projection, workspaceQuery.data, openRecord);
+            const completed = ["Completed", "Issued", "Pass", "Operationally Ready", "Operationally Ready With Restrictions", "Pending", "Active", "Governance Approved", "Ready to Issue"].includes(status);
             return <button aria-current={selected ? "step" : undefined} className="relative z-[1] flex min-w-0 flex-col items-center text-center text-xs" key={item.key} onClick={() => selectStep(item.key)} title={`${item.form} · ${item.label} · ${status}`} type="button"><span className={`flex h-10 min-w-10 items-center justify-center rounded-full border-2 px-2 font-bold shadow-sm transition ${selected ? "border-primary-blue bg-primary-blue text-white ring-4 ring-blue-100" : completed ? "border-teal-600 bg-teal-50 text-teal-800" : "border-blue-200 bg-white text-primary-navy hover:border-primary-blue"}`}>{item.form}</span><span className={`mt-1 hidden truncate font-semibold sm:block ${selected ? "text-primary-blue" : "text-text-primary"}`}>{item.label}</span><span className="hidden text-[10px] text-text-muted lg:block">{status}</span></button>;
           })}
         </nav>
       </header>
       <main className="min-h-0 flex-1 overflow-y-auto p-2 sm:p-4">
+        <PersonCertificationAuthorityCard projection={projection} />
+        {lifecycleValidationMessage ? <p className="mb-3 rounded-component border border-amber-300 bg-amber-50 p-3 text-sm font-semibold text-amber-900" role="alert">{lifecycleValidationMessage}</p> : null}
+        {lifecycleMutation.isError ? <p className="mb-3 rounded-component border border-red-300 bg-red-50 p-3 text-sm font-semibold text-red-800" role="alert">The registration could not be changed. Registrations with Certification authority require a governed void or supersession; otherwise verify the lifecycle reason and try again.</p> : null}
         {openRecordId ? <div className="space-y-2"><Button onClick={() => { setOpenRecordId(null); void queryClient.invalidateQueries({ queryKey: workspaceKey }); }} type="button" variant="secondary">← Back to journey step</Button><OperationalEvidenceRecordPage embeddedRecordId={openRecordId} /></div> : <TrainingJourneyStepContent enrollment={enrollment} onOpenRecord={setOpenRecordId} step={step} />}
       </main>
     </div>
   </div>;
+}
+
+function PersonCertificationAuthorityCard({ projection }: { readonly projection: TrainingJourneyProjectionV2 }) {
+  const authority = projection.person_certification_authority;
+  return <details className="mb-3 rounded-component border border-teal-200 bg-teal-50/60 p-3">
+    <summary className="cursor-pointer font-semibold text-teal-900">Person &amp; Certification authority</summary>
+    <div className="mt-3 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+      <div><p className="cl-data-label">Student</p><p className="font-semibold text-primary-navy">{authority.subject.student_number ?? "Pending"}</p></div>
+      <div><p className="cl-data-label">Personnel link</p><p className="font-semibold text-primary-navy">{authority.subject.staff_member_id ? "Established" : "Not established"}</p></div>
+      <div><p className="cl-data-label">Certification</p><p className="font-semibold text-primary-navy">{authority.certification?.certification_number ?? "Not created"}</p></div>
+      <div><p className="cl-data-label">Operational authorization</p><p className="font-semibold text-primary-navy">{authority.operational_authorizations.filter((item) => item.status === "ACTIVE" && new Date(item.issue_date) <= new Date() && new Date(item.expiry_date) > new Date()).length} currently valid</p></div>
+    </div>
+    {authority.blockers.length ? <p className="mt-3 text-xs text-amber-900">Projection gaps: {authority.blockers.map(humanizeCode).join(" · ")}</p> : <p className="mt-3 text-xs font-semibold text-teal-800">No authority gaps detected.</p>}
+    <p className="mt-2 break-all text-[10px] text-text-muted">Projection checksum: {authority.checksum}</p>
+  </details>;
 }
 
 function trainingJourneyFormTitle(step: TrainingJourneyStep) {
@@ -885,6 +969,20 @@ function trainingJourneyFormTitle(step: TrainingJourneyStep) {
 
 function trainingJourneyFormNumber(step: TrainingJourneyStep) {
   return trainingJourneySteps.find((item) => item.key === step)?.form ?? "Record";
+}
+
+function trainingJourneyRecordTitle(record: OperationalEvidenceRecord, step: TrainingJourneyStep) {
+  if (record.template_provenance.template_code === "OGI_F096_CERTIFICATION_CREDENTIAL_READINESS_REGISTRY") {
+    return "Certification & Credential Readiness Registry";
+  }
+  return trainingJourneyFormTitle(step);
+}
+
+function trainingJourneyRecordNumber(record: OperationalEvidenceRecord, step: TrainingJourneyStep) {
+  if (record.template_provenance.template_code === "OGI_F096_CERTIFICATION_CREDENTIAL_READINESS_REGISTRY") {
+    return "F-096";
+  }
+  return trainingJourneyFormNumber(step);
 }
 
 function TrainingJourneyStepContent({ enrollment, onOpenRecord, step }: { readonly enrollment: TrainingEnrollment; readonly onOpenRecord: (recordId: string) => void; readonly step: TrainingJourneyStep }) {
@@ -902,9 +1000,10 @@ function CredentialJourneyPanel({ certification, enrollment, onOpenRecord }: {
   readonly onOpenRecord: (recordId: string) => void;
 }) {
   const [workflow, setWorkflow] = useState<"READINESS" | "CREDENTIAL">("READINESS");
-  const sharedProps = { initialClientId: enrollment.client_id, initialContextId: certification.id,
+  const sharedProps = { actionPortalId: "training-journey-record-actions", initialClientId: enrollment.client_id, initialContextId: certification.id,
     initialFacilityId: enrollment.training_session?.facility_id ?? null, lockInitialContext: true, onDraftCreated: onOpenRecord } as const;
   const credential = certification.digital_credential;
+  const readinessAuthority = certification.readiness_authority.f096_evidence;
   return <div className="space-y-4">
     <Surface className="border-blue-200 bg-blue-50/60">
       <p className="text-xs font-bold uppercase tracking-wide text-primary-blue">Exact Certification holder context</p>
@@ -917,7 +1016,13 @@ function CredentialJourneyPanel({ certification, enrollment, onOpenRecord }: {
     </Surface>
     {workflow === "READINESS" ? <>
       <Surface className="border-amber-200 bg-amber-50"><p className="text-sm font-semibold text-primary-navy">Complete and submit F-096 through its governed review.</p><p className="mt-1 text-sm text-text-muted">After approval, return here and open step 2. F-048 will derive the approved CRI and defensibility values; it will not accept manual substitutes.</p></Surface>
-      <RuntimeTemplatePage embeddedTemplateCode="OGI_F096_CERTIFICATION_CREDENTIAL_READINESS_REGISTRY" {...sharedProps} />
+      {readinessAuthority ? <ExistingF096JourneyState evidence={readinessAuthority} onOpenRecord={onOpenRecord} /> : null}
+      {readinessAuthority?.lifecycle_state === "RETURNED_FOR_CORRECTION" ? (
+        <div className="space-y-3">
+          <Surface className="border-amber-300 bg-amber-50/60"><p className="text-sm font-semibold text-amber-950">Correction successor required</p><p className="mt-1 text-sm text-amber-900">The returned F-096 is an immutable submitted snapshot. Begin a new correction draft under this exact Certification, complete the required attestation, and submit the successor for review.</p></Surface>
+          <RuntimeTemplatePage embeddedTemplateCode="OGI_F096_CERTIFICATION_CREDENTIAL_READINESS_REGISTRY" {...sharedProps} />
+        </div>
+      ) : !readinessAuthority && certification.commercial_evaluation_recorded ? <RuntimeTemplatePage embeddedTemplateCode="OGI_F096_CERTIFICATION_CREDENTIAL_READINESS_REGISTRY" {...sharedProps} /> : !readinessAuthority ? <Surface className="border-amber-300 bg-amber-50/60"><p className="text-sm font-semibold text-amber-950">Commercial Trainer Evaluation required</p><p className="mt-1 text-sm text-amber-900">F-096 cannot be created or projected until the qualified Trainer records the immutable CRI and defensibility evaluation for this Certification.</p><Button asChild className="mt-3" variant="secondary"><Link to={routes.trainerCommercialEvaluations}>Open Trainer Evaluations</Link></Button></Surface> : null}
     </> : credential.issuance ? (
       <Surface className="border-teal-300 bg-teal-50/60">
         <p className="text-xs font-bold uppercase tracking-wide text-teal-700">Digital credential issued</p>
@@ -931,6 +1036,18 @@ function CredentialJourneyPanel({ certification, enrollment, onOpenRecord }: {
       <RuntimeTemplatePage embeddedTemplateCode="OGI_F048_DIGITAL_CREDENTIAL_ISSUANCE_FORM" {...sharedProps} />
     )}
   </div>;
+}
+
+function ExistingF096JourneyState({ evidence, onOpenRecord }: {
+  readonly evidence: NonNullable<NonNullable<NonNullable<TrainingEnrollment["journey_progress"]>["certification"]>["readiness_authority"]["f096_evidence"]>;
+  readonly onOpenRecord: (recordId: string) => void;
+}) {
+  return <Surface className={evidence.lifecycle_state === "GOVERNANCE_APPROVED" ? "border-teal-300 bg-teal-50/60" : "border-blue-200 bg-blue-50/60"}>
+    <p className="text-xs font-bold uppercase tracking-wide text-primary-blue">Existing F-096 evidence</p>
+    <h3 className="mt-2 text-xl font-semibold text-primary-navy">{`F-096 · ${humanizeCode(evidence.lifecycle_state)}`}</h3>
+    <p className="mt-2 text-sm text-text-muted">This Certification-bound record was recovered automatically. Continue the existing evidence instead of creating a duplicate.</p>
+    <Button className="mt-3" onClick={() => onOpenRecord(evidence.evidence_record_id)} type="button">{evidence.lifecycle_state === "DRAFT" ? "Open Draft" : "Open Existing F-096"}</Button>
+  </Surface>;
 }
 
 function ExistingF048JourneyState({ certificationId, evidence, onOpenRecord }: {
@@ -959,17 +1076,32 @@ function f048JourneyStatus(evidence: NonNullable<NonNullable<NonNullable<Trainin
   return `F-048 · ${evidence.lifecycle_state.replaceAll("_", " ")}`;
 }
 
-function journeyStepStatus(step: TrainingJourneyStep, enrollment: TrainingEnrollment, workspace?: TrainingEvidenceWorkspace) {
+function journeyStepStatus(step: TrainingJourneyStep, enrollment: TrainingEnrollment, projection: TrainingJourneyProjectionV2, workspace?: TrainingEvidenceWorkspace, openRecord?: Awaited<ReturnType<typeof getOperationalEvidenceRecord>>) {
+  const projectedStage = projection.stages.find((candidate) => candidate.stage === (step === "CREDENTIAL" ? "F048_CREDENTIAL" : step));
+  if (projectedStage) {
+    if (projectedStage.state === "NOT_STARTED") return "Not started";
+    if (projectedStage.state === "READY_FOR_REVIEW") return "Ready for review";
+    if (projectedStage.state === "READY_TO_ISSUE") return "Ready to Issue";
+    if (projectedStage.state === "REQUIRED") return step === "CREDENTIAL" ? "F-048 Required" : "Required";
+    if (projectedStage.state === "LOCKED") return step === "CREDENTIAL" ? "Locked by Certification" : "Locked";
+    if (step !== "CREDENTIAL" || !openRecord || openRecord.template_provenance.template_code === "OGI_F048_DIGITAL_CREDENTIAL_ISSUANCE_FORM") return humanizeCode(projectedStage.state);
+  }
   const progress = enrollment.journey_progress;
   if (step === "ATTENDANCE") return progress?.attendance ? "Completed" : "Required";
   if (step === "CERTIFICATION") return progress?.certification ? "Issued" : progress?.readiness ? "Ready for review" : "Locked by readiness";
   if (step === "CREDENTIAL") {
+    if (openRecord?.template_provenance.template_code === "OGI_F048_DIGITAL_CREDENTIAL_ISSUANCE_FORM") {
+      return humanizeCode(openRecord.lifecycle_state);
+    }
     const credential = progress?.certification?.digital_credential;
     if (credential?.issuance) return "Issued";
     if (credential?.f048_evidence?.lifecycle_state === "GOVERNANCE_APPROVED") return credential.f048_evidence.association_status === "BOUND" ? "Ready to Issue" : "Association Review";
     if (credential?.f048_evidence) return humanizeCode(credential.f048_evidence.lifecycle_state);
     return progress?.certification ? "F-048 Required" : "Locked by Certification";
   }
+  if (step === "SKILLS" && progress?.skills_assessment) return humanizeCode(progress.skills_assessment);
+  if (step === "KNOWLEDGE" && progress?.knowledge_assessment) return humanizeCode(progress.knowledge_assessment);
+  if (step === "READINESS" && progress?.readiness) return humanizeCode(progress.readiness);
   const slot = workspace?.slots.find((item) => item.slot === step);
   const current = slot?.active_draft ?? slot?.history[0];
   if (!current) return "Not started";
@@ -1171,8 +1303,6 @@ function TraineeDetailsPanel({
           trainee={trainee}
         />
       </RegistrationWorkspaceSection>
-
-      <TrainingAttendanceEvidencePanel enrollments={enrollments} />
 
       <RegistrationWorkspaceSection
         description="Manage governed program enrollment and Training Session assignment without implying completion."
@@ -1492,7 +1622,6 @@ function EnrollmentSection({
                   <Link to={routes.trainingJourneyPath(enrollment.id)}>Open Training Journey</Link>
                 </Button>
               </div>
-              <TrainingEvidenceWorkspacePanel enrollment={enrollment} />
             </li>
           ))}
         </ul>
@@ -1635,6 +1764,8 @@ function TrainingAttendanceEvidencePanel({
   const queryClient = useQueryClient();
   const [selectedSessionId, setSelectedSessionId] = useState("");
   const [selectedEnrollmentIds, setSelectedEnrollmentIds] = useState<string[]>([]);
+  const initializedFocusedSelectionKey = useRef("");
+  const [focusedSelectionSuppressed, setFocusedSelectionSuppressed] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const sessionOptions = useMemo(
     () => uniqueEnrollmentSessionSummaries(enrollments),
@@ -1653,6 +1784,14 @@ function TrainingAttendanceEvidencePanel({
     retry: false
   });
   const workspace = workspaceQuery.data ?? null;
+  const journeyWorkspace = workspace && focusedEnrollmentId
+    ? {
+        ...workspace,
+        eligible_enrollments: workspace.eligible_enrollments.filter((item) => item.enrollment.id === focusedEnrollmentId),
+        history: workspace.history.filter((record) => record.roster.some((enrollment) => enrollment.id === focusedEnrollmentId)),
+        active_draft: workspace.active_draft?.roster.some((enrollment) => enrollment.id === focusedEnrollmentId) ? workspace.active_draft : null
+      }
+    : workspace;
   const createDraftMutation = useMutation({
     mutationFn: () =>
       createTrainingAttendanceEvidenceDraft(selectedSessionId, {
@@ -1669,6 +1808,7 @@ function TrainingAttendanceEvidencePanel({
     },
     onSuccess(draft) {
       setMessage("Attendance evidence draft created.");
+      selectedEnrollmentIds.forEach((enrollmentId) => void queryClient.invalidateQueries({ queryKey: ["training-journey-v2", enrollmentId] }));
       setSelectedEnrollmentIds([]);
       void queryClient.invalidateQueries({ queryKey: workspaceQueryKey });
       onOpenRecord?.(draft.evidence_record_id);
@@ -1718,25 +1858,22 @@ function TrainingAttendanceEvidencePanel({
             "evidence-workspace"
           ]
         });
+        void queryClient.invalidateQueries({ queryKey: ["training-journey-v2", enrollment.id] });
       });
     }
   });
 
-  const eligibleEnrollmentIds =
-    workspace?.eligible_enrollments
-      .filter((item) => item.enrollment.training_type)
-      .map((item) => item.enrollment.id) ?? [];
   const canCreateAttendanceDraft = Boolean(
-    workspace &&
-      workspace.can_create_draft &&
+    journeyWorkspace &&
+      journeyWorkspace.can_create_draft &&
       selectedEnrollmentIds.length > 0 &&
       selectedEnrollmentIds.every((enrollmentId) =>
-        workspace.eligible_enrollments.some(
+        journeyWorkspace.eligible_enrollments.some(
           (item) => item.enrollment.id === enrollmentId && item.enrollment.training_type
         )
       ) &&
       !createDraftMutation.isPending &&
-      !workspace.active_draft
+      !journeyWorkspace.active_draft
   );
 
   useEffect(() => {
@@ -1746,20 +1883,24 @@ function TrainingAttendanceEvidencePanel({
   }, [initialSessionId, selectedSessionId]);
 
   useEffect(() => {
+    const selectionKey = `${selectedSessionId}:${focusedEnrollmentId ?? ""}`;
     if (
       focusedEnrollmentId &&
+      !focusedSelectionSuppressed &&
+      initializedFocusedSelectionKey.current !== selectionKey &&
       workspace?.eligible_enrollments.some(
         (item) => item.enrollment.id === focusedEnrollmentId
-      ) &&
-      selectedEnrollmentIds.length === 0
+      )
     ) {
       setSelectedEnrollmentIds([focusedEnrollmentId]);
+      initializedFocusedSelectionKey.current = selectionKey;
     }
-  }, [focusedEnrollmentId, selectedEnrollmentIds.length, workspace]);
+  }, [focusedEnrollmentId, focusedSelectionSuppressed, selectedSessionId, workspace]);
 
   function selectSession(trainingSessionId: string) {
     setSelectedSessionId(trainingSessionId);
     setSelectedEnrollmentIds([]);
+    setFocusedSelectionSuppressed(false);
     setMessage(null);
   }
 
@@ -1830,12 +1971,17 @@ function TrainingAttendanceEvidencePanel({
               canCreate={canCreateAttendanceDraft}
               isCreating={createDraftMutation.isPending}
               isReplacing={replaceDraftMutation.isPending}
-              onClearSelection={() => setSelectedEnrollmentIds([])}
+              onClearSelection={() => { setFocusedSelectionSuppressed(true); setSelectedEnrollmentIds([]); }}
+              onSelectAll={() => {
+                setFocusedSelectionSuppressed(true);
+                setSelectedEnrollmentIds((journeyWorkspace ?? workspace).eligible_enrollments
+                  .filter((item) => Boolean(item.enrollment.training_type))
+                  .map((item) => item.enrollment.id));
+              }}
               onCreate={() => {
                 setMessage(null);
                 createDraftMutation.mutate();
               }}
-              onSelectAll={() => setSelectedEnrollmentIds(eligibleEnrollmentIds)}
               onReplace={(record) => {
                 setMessage(null);
                 replaceDraftMutation.mutate(record);
@@ -1843,7 +1989,7 @@ function TrainingAttendanceEvidencePanel({
               onToggleEnrollment={toggleEnrollment}
               selectedEnrollmentIds={selectedEnrollmentIds}
               onOpenRecord={onOpenRecord}
-              workspace={workspace}
+              workspace={journeyWorkspace ?? workspace}
             />
             <TrainingAttendanceHistory
               isLinking={linkEvidenceMutation.isPending}
@@ -1852,7 +1998,7 @@ function TrainingAttendanceEvidencePanel({
                 linkEvidenceMutation.mutate(record);
               }}
               onOpenRecord={onOpenRecord}
-              workspace={workspace}
+              workspace={journeyWorkspace ?? workspace}
             />
           </div>
         ) : null}
@@ -1909,8 +2055,8 @@ function TrainingAttendanceRosterSelection({
   isReplacing,
   onClearSelection,
   onCreate,
-  onSelectAll,
   onReplace,
+  onSelectAll,
   onToggleEnrollment,
   selectedEnrollmentIds,
   onOpenRecord,
@@ -1921,8 +2067,8 @@ function TrainingAttendanceRosterSelection({
   isReplacing: boolean;
   onClearSelection: () => void;
   onCreate: () => void;
-  onSelectAll: () => void;
   onReplace: (record: TrainingAttendanceEvidenceRecord) => void;
+  onSelectAll: () => void;
   onToggleEnrollment: (enrollmentId: string) => void;
   selectedEnrollmentIds: readonly string[];
   onOpenRecord?: (recordId: string) => void;
@@ -2157,11 +2303,13 @@ function TrainingAttendanceHistoryItem({
   record: TrainingAttendanceEvidenceRecord;
 }) {
   const isReplaced = record.evidence.lifecycle_state === "REPLACED";
+  const isDiscarded = record.evidence.lifecycle_state === "DISCARDED";
+  const isHistoricalOnly = isReplaced || isDiscarded;
   const isSubmitted = ["SUBMITTED", "GOVERNANCE_APPROVED"].includes(
     record.evidence.lifecycle_state
   );
   return (
-    <li className={`rounded-component border p-3 ${isReplaced ? "border-amber-300 bg-amber-50/60" : "border-border bg-canvas"}`}>
+    <li className={`rounded-component border p-3 ${isHistoricalOnly ? "border-amber-300 bg-amber-50/60" : "border-border bg-canvas"}`}>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-sm font-semibold text-text-primary">
@@ -2170,14 +2318,16 @@ function TrainingAttendanceHistoryItem({
           <p className="mt-1 text-sm text-text-muted">
             {record.evidence.template_name ?? "Course Attendance Verification"}
           </p>
-          {isReplaced ? (
+          {isHistoricalOnly ? (
             <p className="mt-2 text-sm font-semibold text-amber-900">
-              Historical only — replaced records do not complete attendance.
+              {isDiscarded
+                ? "Historical only — discarded records do not complete attendance."
+                : "Historical only — replaced records do not complete attendance."}
             </p>
           ) : null}
         </div>
         <div className="flex flex-wrap gap-2">
-          {onOpenRecord ? <Button onClick={() => onOpenRecord(record.evidence.evidence_record_id)} type="button" variant="secondary">{record.evidence.lifecycle_state === "DRAFT" ? "Open Attendance Draft" : isReplaced ? "View Replaced Record" : "View Attendance Evidence"}</Button> : <Link className={buttonLinkClassName} state={{ returnTo: routes.registrationTraining }} to={routes.evidenceRecordPath(record.evidence.evidence_record_id)}>{record.evidence.lifecycle_state === "DRAFT" ? "Open Attendance Draft" : isReplaced ? "View Replaced Record" : "View Attendance Evidence"}</Link>}
+          {onOpenRecord ? <Button onClick={() => onOpenRecord(record.evidence.evidence_record_id)} type="button" variant="secondary">{record.evidence.lifecycle_state === "DRAFT" ? "Open Attendance Draft" : isReplaced ? "View Replaced Record" : isDiscarded ? "View Discarded Record" : "View Attendance Evidence"}</Button> : <Link className={buttonLinkClassName} state={{ returnTo: routes.registrationTraining }} to={routes.evidenceRecordPath(record.evidence.evidence_record_id)}>{record.evidence.lifecycle_state === "DRAFT" ? "Open Attendance Draft" : isReplaced ? "View Replaced Record" : isDiscarded ? "View Discarded Record" : "View Attendance Evidence"}</Link>}
           {record.can_link ? (
             <Button
               disabled={isLinking}
@@ -2251,7 +2401,7 @@ function TrainingEvidenceWorkspacePanel({
     .filter((decision) =>
       (decision.readiness_outcome === "OPERATIONALLY_READY" || decision.readiness_outcome === "OPERATIONALLY_READY_WITH_RESTRICTIONS") &&
       decision.certification_review_required)
-    .toSorted((left, right) => Date.parse(right.decided_at) - Date.parse(left.decided_at))[0] ?? null;
+    .sort((left, right) => Date.parse(right.decided_at) - Date.parse(left.decided_at))[0] ?? null;
   const linkedStaffMemberId = traineeQuery.data?.staff_member_links.find(
     (link) => link.ended_at === null
   )?.staff_member_id;
@@ -2265,6 +2415,7 @@ function TrainingEvidenceWorkspacePanel({
       setCreatedCertificationId(certification.id);
       setMessage(`Certification ${certification.certification_number} created from Training readiness.`);
       void queryClient.invalidateQueries({ queryKey: workspaceQueryKey });
+      void queryClient.invalidateQueries({ queryKey: ["training-journey-v2", enrollment.id] });
       void queryClient.invalidateQueries({ queryKey: ["training"] });
       void queryClient.invalidateQueries({ queryKey: ["credentials"] });
     },
@@ -2292,13 +2443,41 @@ function TrainingEvidenceWorkspacePanel({
     onSuccess(draft) {
       setMessage("Training evidence draft created.");
       void queryClient.invalidateQueries({ queryKey: workspaceQueryKey });
+      void queryClient.invalidateQueries({ queryKey: ["training-journey-v2", enrollment.id] });
       if (onOpenRecord) {
         onOpenRecord(draft.evidence_record_id);
       } else {
-        void navigate(routes.evidenceRecordPath(draft.evidence_record_id), {
-          state: { returnTo: routes.registrationTraining }
-        });
+        void navigate(evidencePathWithReturn(draft.evidence_record_id, { kind: "TRAINING_JOURNEY", enrollmentId: enrollment.id }));
       }
+    }
+  });
+  const activeJourneyDrafts = workspaceQuery.data?.slots
+    .flatMap((slot) => slot.active_draft ? [slot.active_draft] : []) ?? [];
+  const discardJourneyDraftsMutation = useMutation({
+    mutationFn: async () => {
+      const results = await Promise.allSettled(activeJourneyDrafts.map(async (workspaceRecord) => {
+        const draft = await getOperationalEvidenceRecord(workspaceRecord.evidence.evidence_record_id);
+        return discardOperationalEvidenceDraft(draft.id, {
+          expected_payload_checksum: draft.payload_checksum,
+          idempotency_key: `discard:${draft.id}:${draft.payload_checksum}`
+        });
+      }));
+      const rejected = results.filter((result) => result.status === "rejected");
+      if (rejected.length > 0) {
+        throw new Error(`${rejected.length} of ${results.length} active drafts could not be discarded.`);
+      }
+      return results.length;
+    },
+    onSuccess: (discardedCount) => {
+      setMessage(`${discardedCount} active Training Journey ${discardedCount === 1 ? "draft" : "drafts"} discarded. Governed evidence and results were preserved.`);
+      void queryClient.invalidateQueries({ queryKey: workspaceQueryKey });
+      void queryClient.invalidateQueries({ queryKey: ["training-recent-registrations"] });
+      void queryClient.invalidateQueries({ queryKey: ["training-journey-v2", enrollment.id] });
+      void queryClient.invalidateQueries({ queryKey: ["training"] });
+    },
+    onError: (error) => {
+      setMessage(error instanceof Error ? error.message : "Active Training Journey drafts could not be discarded.");
+      void queryClient.invalidateQueries({ queryKey: workspaceQueryKey });
     }
   });
 
@@ -2327,6 +2506,28 @@ function TrainingEvidenceWorkspacePanel({
         </p>
       ) : workspaceQuery.data ? (
         <>
+          {activeJourneyDrafts.length > 0 && auth.canUsePermission("transition_operational_evidence") ? (
+            <Surface className="border-amber-300 bg-amber-50/60">
+              <p className="text-sm font-semibold text-amber-950">Draft cleanup</p>
+              <p className="mt-1 text-sm text-amber-900">
+                {activeJourneyDrafts.length} active {activeJourneyDrafts.length === 1 ? "draft" : "drafts"} across F-023, F-024, and F-025. Clearing them preserves audit history and does not alter submitted or governed evidence.
+              </p>
+              <Button
+                className="mt-3"
+                disabled={discardJourneyDraftsMutation.isPending}
+                onClick={() => {
+                  if (window.confirm(`Discard all ${activeJourneyDrafts.length} active Training Journey drafts? Governed evidence and recorded results will remain unchanged.`)) {
+                    setMessage(null);
+                    discardJourneyDraftsMutation.mutate();
+                  }
+                }}
+                type="button"
+                variant="secondary"
+              >
+                {discardJourneyDraftsMutation.isPending ? "Clearing drafts…" : "Clear all active drafts"}
+              </Button>
+            </Surface>
+          ) : null}
           <TrainingEvidenceWorkspaceContent
             isCreatingDraft={createDraftMutation.isPending}
             onOpenRecord={onOpenRecord}
@@ -2425,6 +2626,7 @@ function TrainingEvidenceWorkspaceContent({
       <div className="grid gap-3 xl:grid-cols-3">
         {workspace.slots.filter((slot) => !slotFilter || slot.slot === slotFilter).map((slot) => (
           <TrainingEvidenceSlotCard
+            enrollmentId={workspace.enrollment.id}
             isCreatingDraft={isCreatingDraft}
             key={slot.slot}
             onCreateDraft={onCreateDraft}
@@ -2438,11 +2640,13 @@ function TrainingEvidenceWorkspaceContent({
 }
 
 function TrainingEvidenceSlotCard({
+  enrollmentId,
   isCreatingDraft,
   onCreateDraft,
   onOpenRecord,
   slot
 }: {
+  enrollmentId: string;
   isCreatingDraft: boolean;
   onCreateDraft: (slot: TrainingEvidenceWorkspaceSlot) => void;
   onOpenRecord?: (recordId: string) => void;
@@ -2462,7 +2666,7 @@ function TrainingEvidenceSlotCard({
       <div className="flex flex-wrap gap-2">
         {slot.active_draft ? (
           <>
-            {onOpenRecord ? <Button onClick={() => onOpenRecord(slot.active_draft?.evidence.evidence_record_id ?? "")} type="button">Open Draft</Button> : <Link className={buttonLinkClassName} state={{ returnTo: routes.registrationTraining }} to={routes.evidenceRecordPath(slot.active_draft.evidence.evidence_record_id)}>Open Draft</Link>}
+            {onOpenRecord ? <Button onClick={() => onOpenRecord(slot.active_draft?.evidence.evidence_record_id ?? "")} type="button">Open Draft</Button> : <Link className={buttonLinkClassName} to={evidencePathWithReturn(slot.active_draft.evidence.evidence_record_id,{kind:"TRAINING_JOURNEY",enrollmentId})}>Open Draft</Link>}
             {slot.can_replace_active_draft ? <Button disabled={isCreatingDraft} onClick={() => onCreateDraft(slot)} type="button" variant="secondary">Replace with current form</Button> : null}
           </>
         ) : slot.can_create_draft ? (
@@ -2516,7 +2720,24 @@ function TrainingEvidenceHistoryItem({
       operational_evidence_record_id: record.evidence.evidence_record_id,
       evidence_purpose: evidencePurposeForTemplate(record.evidence.template_code)
     }),
-    onSuccess: () => { setActionError(null); void queryClient.invalidateQueries({ queryKey: workspaceKey }); },
+    onSuccess: () => { setActionError(null); void queryClient.invalidateQueries({ queryKey: workspaceKey }); void queryClient.invalidateQueries({ queryKey: ["training-journey-v2", record.evidence.training_enrollment_id] }); },
+    onError: (error) => setActionError(trainingEvidenceErrorMessage(error))
+  });
+  const discardDraftMutation = useMutation({
+    mutationFn: async () => {
+      const draft = await getOperationalEvidenceRecord(record.evidence.evidence_record_id);
+      return discardOperationalEvidenceDraft(draft.id, {
+        expected_payload_checksum: draft.payload_checksum,
+        idempotency_key: `discard:${draft.id}:${draft.payload_checksum}`
+      });
+    },
+    onSuccess: () => {
+      setActionError(null);
+      void queryClient.invalidateQueries({ queryKey: workspaceKey });
+      void queryClient.invalidateQueries({ queryKey: ["training-recent-registrations"] });
+      void queryClient.invalidateQueries({ queryKey: ["training-journey-v2", record.evidence.training_enrollment_id] });
+      void queryClient.invalidateQueries({ queryKey: ["training"] });
+    },
     onError: (error) => setActionError(trainingEvidenceErrorMessage(error))
   });
   const assessmentMutation = useMutation({
@@ -2527,7 +2748,7 @@ function TrainingEvidenceHistoryItem({
       remediation_required: record.assessment_evidence?.remediation_required ?? false,
       reassessment_required: record.assessment_evidence?.reassessment_required ?? false
     }),
-    onSuccess: () => { setActionError(null); void queryClient.invalidateQueries({ queryKey: workspaceKey }); },
+    onSuccess: () => { setActionError(null); void queryClient.invalidateQueries({ queryKey: workspaceKey }); void queryClient.invalidateQueries({ queryKey: ["training-journey-v2", record.evidence.training_enrollment_id] }); },
     onError: (error) => setActionError(trainingEvidenceErrorMessage(error))
   });
   const readinessMutation = useMutation({
@@ -2537,7 +2758,7 @@ function TrainingEvidenceHistoryItem({
       remediation_required: record.readiness_evidence?.remediation_required ?? false,
       certification_review_required: record.readiness_evidence?.certification_review_required ?? false
     }),
-    onSuccess: () => { setActionError(null); void queryClient.invalidateQueries({ queryKey: workspaceKey }); },
+    onSuccess: () => { setActionError(null); void queryClient.invalidateQueries({ queryKey: workspaceKey }); void queryClient.invalidateQueries({ queryKey: ["training-journey-v2", record.evidence.training_enrollment_id] }); },
     onError: (error) => setActionError(trainingEvidenceErrorMessage(error))
   });
   const isAssessment = record.evidence.template_code === "OGI_F023_OPERATIONAL_SKILLS_ASSESSMENT" || record.evidence.template_code === "OGI_F024_OPERATIONAL_KNOWLEDGE_ASSESSMENT_RECORD";
@@ -2552,7 +2773,23 @@ function TrainingEvidenceHistoryItem({
             {record.evidence.template_name ?? record.evidence.template_code}
           </p>
         </div>
-        {onOpenRecord ? <Button onClick={() => onOpenRecord(record.evidence.evidence_record_id)} type="button" variant="secondary">{record.evidence.lifecycle_state === "DRAFT" ? "Open Draft" : "View Evidence"}</Button> : <Link className={buttonLinkClassName} state={{ returnTo: routes.registrationTraining }} to={routes.evidenceRecordPath(record.evidence.evidence_record_id)}>{record.evidence.lifecycle_state === "DRAFT" ? "Open Draft" : "View Evidence"}</Link>}
+        <div className="flex flex-wrap gap-2">
+          {onOpenRecord ? <Button onClick={() => onOpenRecord(record.evidence.evidence_record_id)} type="button" variant="secondary">{record.evidence.lifecycle_state === "DRAFT" ? "Open Draft" : "View Evidence"}</Button> : <Link className={buttonLinkClassName} to={evidencePathWithReturn(record.evidence.evidence_record_id,{kind:"TRAINING_JOURNEY",enrollmentId:record.evidence.training_enrollment_id})}>{record.evidence.lifecycle_state === "DRAFT" ? "Open Draft" : "View Evidence"}</Link>}
+          {record.evidence.lifecycle_state === "DRAFT" && auth.canUsePermission("transition_operational_evidence") ? (
+            <Button
+              disabled={discardDraftMutation.isPending}
+              onClick={() => {
+                if (window.confirm("Discard this obsolete Draft? Its audit history will be preserved and it cannot be restored.")) {
+                  discardDraftMutation.mutate();
+                }
+              }}
+              type="button"
+              variant="secondary"
+            >
+              {discardDraftMutation.isPending ? "Discarding…" : "Discard obsolete draft"}
+            </Button>
+          ) : null}
+        </div>
       </div>
       <dl className="mt-3 grid gap-2 text-sm">
         <MetadataItem
@@ -2671,11 +2908,13 @@ function TraineeCreatePanel({
       >
         <div className="grid gap-3 md:grid-cols-2">
           <FormInput
-            label="Full name"
-            onChange={(fullName) => onChange({ ...formState, fullName })}
+            label="First name"
+            onChange={(firstName) => onChange({ ...formState, firstName, fullName:[firstName,formState.middleName,formState.lastName].filter(Boolean).join(" ") })}
             required
-            value={formState.fullName}
+            value={formState.firstName}
           />
+          <FormInput label="Middle name" onChange={(middleName)=>onChange({...formState,middleName,fullName:[formState.firstName,middleName,formState.lastName].filter(Boolean).join(" ")})} value={formState.middleName}/>
+          <FormInput label="Last name" onChange={(lastName)=>onChange({...formState,lastName,fullName:[formState.firstName,formState.middleName,lastName].filter(Boolean).join(" ")})} required value={formState.lastName}/>
           <FormInput
             label="Email"
             onChange={(email) => onChange({ ...formState, email })}
@@ -2701,7 +2940,7 @@ function TraineeCreatePanel({
           />
         </label>
         <div className="flex flex-wrap gap-2">
-          <Button disabled={isSubmitting || !formState.fullName.trim()} type="submit">
+          <Button disabled={isSubmitting || !formState.firstName.trim() || !formState.lastName.trim()} type="submit">
             Create Trainee
           </Button>
           <Button
@@ -2793,6 +3032,8 @@ function TrainingSessionCreatePanel({
   instructorsLoading,
   facilities,
   facilitiesLoading,
+  approvedRequests,
+  requestsLoading,
   formState,
   isSubmitting,
   onCancel,
@@ -2805,6 +3046,8 @@ function TrainingSessionCreatePanel({
   instructorsLoading: boolean;
   facilities: readonly RegistrationFacility[];
   facilitiesLoading: boolean;
+  approvedRequests: readonly { readonly id: string; readonly business_identifier: string }[];
+  requestsLoading: boolean;
   formState: SessionFormState;
   isSubmitting: boolean;
   onCancel: () => void;
@@ -2834,6 +3077,13 @@ function TrainingSessionCreatePanel({
           </p>
         </div>
         <div className="grid gap-4 md:grid-cols-2">
+          <label className="block text-sm font-semibold text-text-primary">
+            Approved Training Request
+            <select className={inputClassName} disabled={requestsLoading} required value={formState.trainingRequestId} onChange={(event) => setField("trainingRequestId", event.currentTarget.value)}>
+              <option value="">{requestsLoading ? "Loading approved requests…" : "Select an approved F020 request"}</option>
+              {approvedRequests.map((request) => <option key={request.id} value={request.id}>{request.business_identifier}</option>)}
+            </select>
+          </label>
           <label className="block text-sm font-semibold text-text-primary">
             Session title
             <input
@@ -3073,6 +3323,9 @@ function SafeState({
 function buildCreateTraineeRequest(formState: TraineeFormState) {
   return {
     full_name: formState.fullName.trim(),
+    first_name: formState.firstName.trim(),
+    middle_name: nullableText(formState.middleName),
+    last_name: formState.lastName.trim(),
     email: nullableText(formState.email),
     phone_number: nullableText(formState.phoneNumber),
     notes: nullableText(formState.notes)
@@ -3091,6 +3344,7 @@ function buildCreateEnrollmentRequest(formState: EnrollmentFormState) {
 
 function buildCreateSessionRequest(formState: SessionFormState) {
   return {
+    training_request_id: formState.trainingRequestId,
     training_title: formState.title.trim(),
     operational_skill: formState.operationalSkill,
     training_start_date: new Date(formState.startDate).toISOString(),

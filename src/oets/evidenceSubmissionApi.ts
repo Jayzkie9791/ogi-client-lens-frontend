@@ -1,5 +1,6 @@
 import { apiRequest } from "../api/client";
-import { OetsEvidencePayload } from "./types";
+import { OetsEvidencePayload, OetsFieldValue } from "./types";
+import { OetsContextCandidate, OetsContextFieldPolicy } from "./contextApi";
 
 export interface OperationalEvidenceCreateRequest {
   template_code: string;
@@ -83,6 +84,8 @@ export interface OperationalEvidenceTrainingDraftContext {
 
 export interface OperationalEvidenceRecord {
   id: string;
+  predecessor_evidence_record_id?: string | null;
+  correction_successor_id?: string | null;
   template_provenance: OperationalEvidenceTemplateProvenance;
   client_id: string | null;
   facility_id: string | null;
@@ -98,6 +101,17 @@ export interface OperationalEvidenceRecord {
   updated_at: string;
   scope_kind?: OperationalEvidenceRecordScopeKind;
   training_context?: OperationalEvidenceTrainingDraftContext | null;
+  context?: OperationalEvidenceExistingContext | null;
+}
+
+export interface OperationalEvidenceExistingContext {
+  requirement_code: string;
+  context_kind: string;
+  selected_id: string;
+  summary: OetsContextCandidate;
+  field_policy: Record<string, OetsContextFieldPolicy>;
+  authoritative_values: Record<string, OetsFieldValue>;
+  snapshot_provenance: "EVIDENCE_BINDING_AND_PAYLOAD";
 }
 
 export interface OperationalEvidenceTransitionRequest {
@@ -109,6 +123,12 @@ export interface OperationalEvidenceDraftPayloadUpdateRequest {
   payload: {
     sections: OetsEvidencePayload["sections"];
   };
+  correlation_id?: string;
+}
+
+export interface OperationalEvidenceDraftDiscardRequest {
+  expected_payload_checksum: string;
+  idempotency_key: string;
   correlation_id?: string;
 }
 
@@ -169,6 +189,34 @@ export function transitionOperationalEvidenceRecord(
   );
 }
 
+export function discardOperationalEvidenceDraft(
+  recordId: string,
+  request: OperationalEvidenceDraftDiscardRequest
+) {
+  return apiRequest<OperationalEvidenceRecord>(
+    `/api/v1/operational-evidence/records/${encodeURIComponent(recordId)}/discard`,
+    { method: "POST", body: request, validate: isOperationalEvidenceRecord }
+  );
+}
+
+export function createOperationalEvidenceCorrectionDraft(recordId: string) {
+  return apiRequest<OperationalEvidenceRecord>(
+    `/api/v1/operational-evidence/records/${encodeURIComponent(recordId)}/correction-draft`,
+    {
+      method: "POST",
+      body: { idempotency_key: crypto.randomUUID() },
+      validate: isOperationalEvidenceRecord
+    }
+  );
+}
+
+export function createOperationalEvidenceRevisionDraft(recordId: string) {
+  return apiRequest<OperationalEvidenceRecord>(
+    `/api/v1/operational-evidence/records/${encodeURIComponent(recordId)}/revision-draft`,
+    { method: "POST", body: { idempotency_key: crypto.randomUUID() }, validate: isOperationalEvidenceRecord }
+  );
+}
+
 export function getOperationalEvidenceRecord(recordId: string) {
   return apiRequest<OperationalEvidenceRecord>(
     `/api/v1/operational-evidence/records/${encodeURIComponent(recordId)}`,
@@ -184,6 +232,8 @@ function isOperationalEvidenceRecord(
   return (
     isRecord(value) &&
     typeof value.id === "string" &&
+    (value.predecessor_evidence_record_id === undefined || typeof value.predecessor_evidence_record_id === "string" || value.predecessor_evidence_record_id === null) &&
+    (value.correction_successor_id === undefined || typeof value.correction_successor_id === "string" || value.correction_successor_id === null) &&
     isRecord(value.template_provenance) &&
     typeof value.template_provenance.template_version_id === "string" &&
     typeof value.template_provenance.checksum === "string" &&
@@ -201,8 +251,30 @@ function isOperationalEvidenceRecord(
     (value.scope_kind === undefined || isOperationalEvidenceScopeKind(value.scope_kind)) &&
     (value.training_context === undefined ||
       value.training_context === null ||
-      isOperationalEvidenceTrainingDraftContext(value.training_context))
+      isOperationalEvidenceTrainingDraftContext(value.training_context)) &&
+    (value.context === undefined || value.context === null || isOperationalEvidenceExistingContext(value.context))
   );
+}
+
+function isOperationalEvidenceExistingContext(value: unknown): value is OperationalEvidenceExistingContext {
+  return isRecord(value) &&
+    typeof value.requirement_code === "string" &&
+    typeof value.context_kind === "string" &&
+    typeof value.selected_id === "string" &&
+    isContextCandidate(value.summary) &&
+    isRecord(value.field_policy) &&
+    Object.values(value.field_policy).every((entry) => entry === "OPERATOR_EDITABLE" || entry === "READ_ONLY_DERIVED" || entry === "UNAVAILABLE_POST_ISSUANCE") &&
+    isRecord(value.authoritative_values) &&
+    Object.values(value.authoritative_values).every(isOetsFieldValue) &&
+    value.snapshot_provenance === "EVIDENCE_BINDING_AND_PAYLOAD";
+}
+
+function isContextCandidate(value: unknown): value is OetsContextCandidate {
+  return isRecord(value) && typeof value.id === "string" && typeof value.primary_label === "string" && typeof value.secondary_label === "string" && typeof value.context_kind === "string" && (value.holder_kind === undefined || value.holder_kind === "TRAINEE" || value.holder_kind === "STAFF_MEMBER" || value.holder_kind === "TRAINING_ENROLLMENT");
+}
+
+function isOetsFieldValue(value: unknown) {
+  return value === null || typeof value === "string" || typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value)) || (Array.isArray(value) && value.every((entry) => typeof entry === "string"));
 }
 
 function isOperationalEvidenceScopeKind(

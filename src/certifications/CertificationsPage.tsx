@@ -24,7 +24,8 @@ import {
   certificationEndorsementsForLevel,
   CertificationLevel,
   certificationLevels,
-  createCertification
+  createCertification,
+  retireCertification
 } from "./certificationsApi";
 import { CertificationWorkspaceTabs } from "./CertificationWorkspaceTabs";
 import {
@@ -51,6 +52,7 @@ const viewPersonnelPermission = "view_staff_member";
 const createDraftPermission = "create_certification_draft";
 const issueCertificationPermission = "issue_certification";
 const endorseCertificationPermission = "endorse_certification";
+const revokeCertificationPermission = "revoke_certification";
 const viewOperationalAuthorizationPermission = "view_operational_authorization";
 const createOperationalAuthorizationPermission = "create_operational_authorization";
 const renewOperationalAuthorizationPermission = "renew_operational_authorization";
@@ -153,6 +155,7 @@ export function CertificationsPage() {
   const canCreateDraft = auth.canUsePermission(createDraftPermission);
   const canIssueCertification = auth.canUsePermission(issueCertificationPermission);
   const canEndorseCertification = auth.canUsePermission(endorseCertificationPermission);
+  const canRevokeCertification = auth.canUsePermission(revokeCertificationPermission);
   const canViewOperationalAuthorization = auth.canUsePermission(viewOperationalAuthorizationPermission);
   const canCreateOperationalAuthorization = auth.canUsePermission(
     createOperationalAuthorizationPermission
@@ -181,6 +184,7 @@ export function CertificationsPage() {
     emptyEndorsementForm
   );
   const [endorsementSuccess, setEndorsementSuccess] = useState<string | null>(null);
+  const [retirementReason,setRetirementReason]=useState("");
   const [authorizationSuccess, setAuthorizationSuccess] = useState<string | null>(null);
   const [createAuthorizationForm, setCreateAuthorizationForm] =
     useState<CreateAuthorizationFormState>(emptyCreateAuthorizationForm);
@@ -351,6 +355,8 @@ export function CertificationsPage() {
       }
     }
   });
+
+  const retirementMutation=useMutation({mutationFn:()=>retireCertification(selectedCertificationId??"",retirementReason.trim(),crypto.randomUUID()),onSuccess:async()=>{setRetirementReason("");await Promise.all([queryClient.invalidateQueries({queryKey:["credentials"]}),queryClient.invalidateQueries({queryKey:selectedDetailQueryKey}),queryClient.invalidateQueries({queryKey:["certification-form-completeness"]})]);}});
 
   const authorizationCommandMutation = useMutation({
     mutationFn: (payload: {
@@ -594,6 +600,7 @@ export function CertificationsPage() {
                     </Button>
                   </div>
                   <div className="cl-workflow-canvas min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
+                    {canRevokeCertification&&selectedCertification&&["ACTIVE","PENDING"].includes(selectedCertification.certification_status)?<Surface className="mb-4 border border-red-200"><p className="font-semibold text-primary-navy">Governed certification retirement</p><p className="mt-1 text-sm text-text-muted">Use this only to retire an invalid or duplicate certification. Evidence and history are preserved.</p><label className="mt-3 block text-sm font-semibold">Reason<input className="mt-1 min-h-10 w-full rounded-component border px-3 font-normal" onChange={event=>setRetirementReason(event.target.value)} placeholder="Explain why this certification must be retired" value={retirementReason}/></label>{retirementMutation.isError?<p className="mt-2 text-sm text-red-700" role="alert">Certification retirement was not accepted.</p>:null}{retirementMutation.isSuccess?<p className="mt-2 text-sm text-emerald-700" role="status">Certification retired. Its governed history remains available.</p>:null}<Button className="mt-3" disabled={retirementReason.trim().length<10||retirementMutation.isPending} onClick={()=>retirementMutation.mutate()} variant="secondary">{retirementMutation.isPending?"Retiring…":"Retire certification"}</Button></Surface>:null}
                     <CertificationDetailPanel
                 authorizationCommandError={authorizationCommandMutation.error}
                 authorizationCommandPending={authorizationCommandMutation.isPending}
@@ -1296,8 +1303,11 @@ function CredentialIssuanceSection({
   const [pendingBindingReviewId, setPendingBindingReviewId] = useState<string | null>(null);
   const [bindingDecisionRationale, setBindingDecisionRationale] = useState("");
   const bindingReviewAction = preparation?.remediation_actions.find(
-    (action) => action.action_code === "REQUEST_CREDENTIAL_EVIDENCE_BINDING_REVIEW"
+    (action) => action.action_code === "REQUEST_CREDENTIAL_EVIDENCE_BINDING_REVIEW" ||
+      action.action_code === "COMPLETE_CREDENTIAL_EVIDENCE_BINDING_REVIEW"
   ) ?? null;
+  const effectivePendingBindingReviewId = preparation?.pending_evidence_binding_review?.review_id ?? pendingBindingReviewId;
+  const actorCanDecidePendingBindingReview = preparation?.pending_evidence_binding_review?.actor_can_decide ?? Boolean(pendingBindingReviewId);
   const selectedBindingCandidate = preparation?.evidence_binding_candidates.find(
     (candidate) => candidate.source_evidence_record_id === selectedBindingCandidateId
   ) ?? null;
@@ -1330,11 +1340,11 @@ function CredentialIssuanceSection({
   });
   const bindingDecisionMutation = useMutation({
     mutationFn: () => {
-      if (!pendingBindingReviewId || !bindingDecisionRationale.trim()) {
+      if (!effectivePendingBindingReviewId || !bindingDecisionRationale.trim()) {
         throw new Error("A governed association rationale is required.");
       }
       return decideCredentialEvidenceBindingReview(
-        pendingBindingReviewId,
+        effectivePendingBindingReviewId,
         bindingDecisionRationale.trim(),
         crypto.randomUUID()
       );
@@ -1519,22 +1529,22 @@ function CredentialIssuanceSection({
                     </fieldset>
                   )}
                   {bindingReviewSuccess ? <p className="mt-3 text-sm text-text-primary" role="status">{bindingReviewSuccess}</p> : null}
-                  {pendingBindingReviewId ? (
+                  {effectivePendingBindingReviewId ? (
                     <div className="mt-3 space-y-3 rounded-component border border-blue-200 bg-blue-50/60 p-3">
                       <p className="text-sm font-semibold text-primary-navy">Complete credential association review</p>
-                      <p className="text-sm text-text-muted">Review {pendingBindingReviewId} is governed separately from the F-048 conclusion. Backend authority and separation policy remain enforced.</p>
-                      <label className="block text-sm font-semibold text-text-primary">
+                      <p className="text-sm text-text-muted">Review {effectivePendingBindingReviewId} is governed separately from the F-048 conclusion. Backend authority and separation policy remain enforced.</p>
+                      {actorCanDecidePendingBindingReview ? <label className="block text-sm font-semibold text-text-primary">
                         Association approval rationale
                         <textarea className={`${inputClassName} min-h-24`} onChange={(event) => setBindingDecisionRationale(event.currentTarget.value)} value={bindingDecisionRationale} />
-                      </label>
+                      </label> : null}
                       {bindingDecisionMutation.error ? <CertificationErrorState compact error={bindingDecisionMutation.error} operation="issuance" /> : null}
-                      <Button disabled={!bindingDecisionRationale.trim() || bindingDecisionMutation.isPending} onClick={() => bindingDecisionMutation.mutate()} type="button">
+                      {actorCanDecidePendingBindingReview ? <Button disabled={!bindingDecisionRationale.trim() || bindingDecisionMutation.isPending} onClick={() => bindingDecisionMutation.mutate()} type="button">
                         {bindingDecisionMutation.isPending ? "Approving Association" : "Approve F-048 Association"}
-                      </Button>
+                      </Button> : <p className="text-sm font-semibold text-text-primary">Association review pending with an independent authorized reviewer.</p>}
                     </div>
                   ) : null}
                   {bindingReviewMutation.error ? <div className="mt-3"><CertificationErrorState compact error={bindingReviewMutation.error} operation="issuance" /></div> : null}
-                  {!pendingBindingReviewId && bindingReviewAction.action_available && bindingReviewAction.actor_can_act && preparation.evidence_binding_candidates.length > 0 ? (
+                  {!effectivePendingBindingReviewId && bindingReviewAction.action_available && bindingReviewAction.actor_can_act && preparation.evidence_binding_candidates.length > 0 ? (
                     <Button
                       disabled={!selectedBindingCandidate || bindingReviewMutation.isPending}
                       onClick={() => bindingReviewMutation.mutate()}
@@ -1542,7 +1552,7 @@ function CredentialIssuanceSection({
                     >
                       {bindingReviewMutation.isPending ? "Requesting Governance Review" : "Request Governance Review"}
                     </Button>
-                  ) : !pendingBindingReviewId ? (
+                  ) : !effectivePendingBindingReviewId ? (
                     <p className="mt-3 text-sm font-semibold text-text-primary">Governance review required.</p>
                   ) : null}
                 </section>

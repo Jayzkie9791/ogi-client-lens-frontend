@@ -11,6 +11,7 @@ export type RegistrationClientStatus =
 
 export interface RegistrationClient {
   id: string;
+  business_identifier?: string;
   organization_name: string;
   contact_email?: string | null;
   contact_phone?: string | null;
@@ -100,6 +101,7 @@ function isRegistrationClient(value: unknown): value is RegistrationClient {
   return (
     isRecord(value) &&
     typeof value.id === "string" &&
+    (value.business_identifier === undefined || typeof value.business_identifier === "string") &&
     typeof value.organization_name === "string" &&
     isNullableString(value.contact_email) &&
     isNullableString(value.contact_phone) &&

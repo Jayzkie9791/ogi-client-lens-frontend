@@ -138,6 +138,12 @@ export interface CredentialIssuancePreparationResponse {
     readonly CredentialIssuancePreparationF048EvidenceCandidate[];
   readonly evidence_binding_candidates:
     readonly CredentialIssuancePreparationF048GovernanceCandidate[];
+  readonly pending_evidence_binding_review: {
+    readonly review_id: string;
+    readonly source_evidence_record_id: string;
+    readonly requested_by_user_id: string;
+    readonly actor_can_decide: boolean;
+  } | null;
   readonly operational_authorization_options:
     readonly CredentialIssuancePreparationAuthorizationOption[];
   readonly existing_issuance: {
@@ -300,6 +306,12 @@ function isCredentialIssuancePreparationResponse(
     value.eligible_f048_evidence.every(isF048Candidate) &&
     Array.isArray(value.evidence_binding_candidates) &&
     value.evidence_binding_candidates.every(isF048GovernanceCandidate) &&
+    (value.pending_evidence_binding_review === null ||
+      (isRecord(value.pending_evidence_binding_review) &&
+        typeof value.pending_evidence_binding_review.review_id === "string" &&
+        typeof value.pending_evidence_binding_review.source_evidence_record_id === "string" &&
+        typeof value.pending_evidence_binding_review.requested_by_user_id === "string" &&
+        typeof value.pending_evidence_binding_review.actor_can_decide === "boolean")) &&
     Array.isArray(value.operational_authorization_options) &&
     value.operational_authorization_options.every(isAuthorizationOption) &&
     (value.existing_issuance === null || isRecord(value.existing_issuance)) &&

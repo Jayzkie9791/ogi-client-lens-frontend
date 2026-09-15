@@ -66,6 +66,19 @@ export function GovernedAttestationControl({
   const current = [...matching].reverse().find((item) => item.status === "CURRENT");
 
   if (!metadata) {
+    const containment = readSignatureContainment(field);
+    if (containment) {
+      return (
+        <div className="rounded-component border border-amber-300 bg-amber-50 p-4 text-sm">
+          <p className="font-semibold text-text-primary">{field.label}</p>
+          <p className="mt-1 font-semibold text-amber-900">Governed artifact deferred</p>
+          <p className="mt-1 text-text-muted">{containment.reason}</p>
+          <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-text-muted">
+            No self-attestation or recorded external attestation is permitted.
+          </p>
+        </div>
+      );
+    }
     return (
       <div className="rounded-component border border-border bg-elevated p-3 text-sm">
         <p className="font-semibold text-text-primary">{field.label}</p>
@@ -156,7 +169,9 @@ export function GovernedAttestationControl({
               onChange={(event) => setConfirmed(event.target.checked)}
               type="checkbox"
             />
-            <span>I have reviewed the exact evidence and deliberately accept the attestation statement above.</span>
+            <span>{mode === "RECORDED_EXTERNAL_ATTESTATION"
+              ? "I confirm that I observed or verified this external attestation and am recording it without impersonating the signer."
+              : "I have reviewed the exact evidence and deliberately accept the attestation statement above."}</span>
           </label>
           {!confirmed ? (
             <p className="text-sm font-medium text-text-muted" role="status">
@@ -165,7 +180,9 @@ export function GovernedAttestationControl({
           ) : null}
           {errorMessage ? <p className="text-sm font-semibold text-state-error" role="alert">{errorMessage}</p> : null}
           <Button
-            disabled={pending || !confirmed || (mode === "RECORDED_EXTERNAL_ATTESTATION" && !externalName.trim())}
+            disabled={pending || !confirmed || (mode === "RECORDED_EXTERNAL_ATTESTATION" && (
+              !externalName.trim() || (metadata.externalSubjectRole === "REQUIRED" && !externalRole.trim())
+            ))}
             onClick={() => void onAttest({
               expected_payload_checksum: context.payloadChecksum,
               expected_template_version_id: context.templateVersionId,
@@ -182,7 +199,9 @@ export function GovernedAttestationControl({
               correlation_id: crypto.randomUUID()
             }).catch(() => undefined)}
           >
-            {pending ? "Signing…" : "Sign & Attest"}
+            {pending
+              ? (mode === "RECORDED_EXTERNAL_ATTESTATION" ? "Recording…" : "Signing…")
+              : (mode === "RECORDED_EXTERNAL_ATTESTATION" ? "Record External Attestation" : "Sign & Attest")}
           </Button>
         </div>
       ) : null}
@@ -201,6 +220,14 @@ export function GovernedAttestationControl({
       ) : null}
     </fieldset>
   );
+}
+
+function readSignatureContainment(field: OetsField): { reason: string } | null {
+  const value = field.metadata?.signature_containment;
+  if (!isRecord(value) || value.kind !== "DEFERRED_GOVERNED_ARTIFACT" || typeof value.reason !== "string") {
+    return null;
+  }
+  return { reason: value.reason };
 }
 
 function AttestationSnapshot({ item }: { item: EvidenceAttestation }) {

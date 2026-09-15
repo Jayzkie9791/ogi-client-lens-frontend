@@ -97,11 +97,68 @@ describe("GovernedAttestationControl", () => {
     expect(screen.getByText(/Recorded by/)).toHaveTextContent("Authenticated Recorder");
     expect(screen.getByText(/not represented as digitally authenticated/)).toBeVisible();
     await user.click(screen.getByRole("checkbox"));
-    await user.click(screen.getByRole("button", { name: "Sign & Attest" }));
+    await user.click(screen.getByRole("button", { name: "Record External Attestation" }));
     expect(onAttest.mock.calls[0][0]).toMatchObject({
       signer_mode: "RECORDED_EXTERNAL_ATTESTATION",
       external_subject_name: "External Witness"
     });
+  });
+
+  it("requires the external role when the template requires it", async () => {
+    const user = userEvent.setup();
+    const onAttest = vi.fn().mockResolvedValue({});
+    const externalOnly: OetsField = {
+      ...field,
+      metadata: {
+        governed_attestation: {
+          statement,
+          purpose: "WITNESS",
+          permitted_signer_modes: ["RECORDED_EXTERNAL_ATTESTATION"],
+          source_role_label: "Witness",
+          external_subject_role: "REQUIRED"
+        }
+      }
+    };
+    render(
+      <GovernedAttestationControl
+        attestations={[]}
+        context={context}
+        field={externalOnly}
+        onAttest={onAttest}
+        pending={false}
+        readOnly={false}
+        sectionInstanceIndex={null}
+      />
+    );
+    await user.type(screen.getByLabelText("External signer name"), "External Witness");
+    await user.click(screen.getByRole("checkbox"));
+    const button = screen.getByRole("button", { name: "Record External Attestation" });
+    expect(button).toBeDisabled();
+    await user.type(screen.getByLabelText("External role/title *"), "Witness");
+    expect(button).toBeEnabled();
+  });
+
+  it("contains a deferred governed artifact without exposing any signing action", () => {
+    render(
+      <GovernedAttestationControl
+        attestations={[]}
+        field={{
+          ...field,
+          metadata: {
+            signature_containment: {
+              kind: "DEFERRED_GOVERNED_ARTIFACT",
+              reason: "Seal authority is not implemented."
+            }
+          }
+        }}
+        pending={false}
+        readOnly={false}
+        sectionInstanceIndex={null}
+      />
+    );
+    expect(screen.getByText("Governed artifact deferred")).toBeVisible();
+    expect(screen.getByText("Seal authority is not implemented.")).toBeVisible();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 
   it("renders immutable current and stale snapshots in read-only mode", () => {
@@ -116,9 +173,10 @@ describe("GovernedAttestationControl", () => {
     );
     expect(screen.getByText("Current attestation")).toBeVisible();
     expect(screen.getByText("Stale historical attestation")).toBeVisible();
-    expect(screen.getAllByText(/External Witness/)).toHaveLength(2);
+    expect(screen.getAllByText("External signer: External Witness")).toHaveLength(2);
     expect(screen.getAllByText(/Recorded by: Authenticated Recorder/)).toHaveLength(2);
     expect(screen.queryByRole("button", { name: "Sign & Attest" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Record External Attestation" })).not.toBeInTheDocument();
   });
 
   it("keeps historical unconfigured signature fields non-editable without fabricating a signature value", () => {

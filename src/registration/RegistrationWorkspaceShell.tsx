@@ -6,6 +6,7 @@ import { RegistrationNavigation } from "./RegistrationNavigation";
 interface RegistrationWorkspaceShellProps {
   readonly children: ReactNode;
   readonly description: string;
+  readonly headerActions?: ReactNode;
   readonly headingId: string;
   readonly title: string;
 }
@@ -13,15 +14,18 @@ interface RegistrationWorkspaceShellProps {
 export function RegistrationWorkspaceShell({
   children,
   description,
+  headerActions,
   headingId,
   title
 }: RegistrationWorkspaceShellProps) {
   return <WorkspaceShell
-    description="Manage organizations, facilities, and personnel registered with Client Lens."
+    description={description}
+    headerActions={headerActions}
     headingId={headingId}
     navigation={<RegistrationNavigation />}
     sectionDescription={description}
     sectionTitle={title}
+    showSectionHeader={false}
     title="Registration"
   >
     {children}

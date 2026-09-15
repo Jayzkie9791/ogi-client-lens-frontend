@@ -9,6 +9,8 @@ export type OperationalEvidenceRecordSortField =
 export type OperationalEvidenceRecordSortDirection = "asc" | "desc";
 
 export interface OperationalEvidenceRecordsFilters {
+  client_id?: string;
+  facility_id?: string;
   lifecycle_state?: string;
   created_by_user_id?: string;
   template_code?: string;
@@ -79,6 +81,8 @@ function buildOperationalEvidenceRecordsPath(
 ) {
   const searchParams = new URLSearchParams();
 
+  setStringParam(searchParams, "client_id", filters.client_id);
+  setStringParam(searchParams, "facility_id", filters.facility_id);
   setStringParam(searchParams, "lifecycle_state", filters.lifecycle_state);
   setStringParam(searchParams, "created_by_user_id", filters.created_by_user_id);
   setStringParam(searchParams, "template_code", filters.template_code);

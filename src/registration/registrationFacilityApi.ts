@@ -25,6 +25,7 @@ export type RegistrationFacilityOperationalStatus =
 
 export interface RegistrationFacility {
   id: string;
+  business_identifier?: string;
   client_id: string;
   facility_name: string;
   facility_type: RegistrationFacilityType;
@@ -137,6 +138,7 @@ function isRegistrationFacility(value: unknown): value is RegistrationFacility {
   return (
     isRecord(value) &&
     typeof value.id === "string" &&
+    (value.business_identifier === undefined || typeof value.business_identifier === "string") &&
     typeof value.client_id === "string" &&
     typeof value.facility_name === "string" &&
     isRegistrationFacilityType(value.facility_type) &&
