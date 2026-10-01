@@ -1,6 +1,7 @@
 import { apiRequest } from "../api/client";
-import { OetsEvidencePayload, OetsFieldValue } from "./types";
-import { OetsContextCandidate, OetsContextFieldPolicy } from "./contextApi";
+import { isOetsFieldAuthorityPresentation } from "./definitionGuards";
+import { OetsEvidencePayload, OetsFieldAuthorityPresentation, OetsFieldValue } from "./types";
+import { isOetsContextRepeatableGroups, OetsContextCandidate, OetsContextFieldPolicy, OetsContextRepeatableGroup } from "./contextApi";
 
 export interface OperationalEvidenceCreateRequest {
   template_code: string;
@@ -102,6 +103,33 @@ export interface OperationalEvidenceRecord {
   scope_kind?: OperationalEvidenceRecordScopeKind;
   training_context?: OperationalEvidenceTrainingDraftContext | null;
   context?: OperationalEvidenceExistingContext | null;
+  creation_resolution?: OetsDraftCreationResolution;
+  presentation?: {
+    template_name: string;
+    client_name: string | null;
+    facility_name: string | null;
+    subject: {
+      kind: "CERTIFICATION_HOLDER" | "TRAINEE";
+      display_name: string;
+      reference_number: string | null;
+      secondary_reference: string | null;
+    } | null;
+  } | null;
+}
+
+export interface OetsDraftCreationResolution {
+  outcome: "CREATED_NEW" | "REUSED_EXISTING_CONTEXT_RECORD" | "IDEMPOTENT_REPLAY";
+  requested_template_version: string;
+  returned_template_version: string;
+  version_relation: "CURRENT_VERSION_CREATED" | "CURRENT_VERSION_REUSED" | "HISTORICAL_VERSION_REUSED";
+  duplicate_policy: "ONE_LIVE_RECORD_PER_SUBJECT" | "ONE_ACTIVE_DRAFT_PER_SUBJECT" | "ONE_EVIDENCE_LINEAGE_PER_SUBJECT" | null;
+  context_kind: string | null;
+  context_label: string | null;
+  user_message_code: "NEW_DRAFT_CREATED" | "EXISTING_RECORD_REUSED" | "HISTORICAL_RECORD_REUSED" | "IDEMPOTENT_COMMAND_REPLAYED";
+}
+
+export interface OperationalEvidenceRecordDetail extends OperationalEvidenceRecord {
+  field_authority: OetsFieldAuthorityPresentation;
 }
 
 export interface OperationalEvidenceExistingContext {
@@ -111,6 +139,7 @@ export interface OperationalEvidenceExistingContext {
   summary: OetsContextCandidate;
   field_policy: Record<string, OetsContextFieldPolicy>;
   authoritative_values: Record<string, OetsFieldValue>;
+  repeatable_groups?: OetsContextRepeatableGroup[];
   snapshot_provenance: "EVIDENCE_BINDING_AND_PAYLOAD";
 }
 
@@ -218,12 +247,18 @@ export function createOperationalEvidenceRevisionDraft(recordId: string) {
 }
 
 export function getOperationalEvidenceRecord(recordId: string) {
-  return apiRequest<OperationalEvidenceRecord>(
+  return apiRequest<OperationalEvidenceRecordDetail>(
     `/api/v1/operational-evidence/records/${encodeURIComponent(recordId)}`,
     {
-      validate: isOperationalEvidenceRecord
+      validate: isOperationalEvidenceRecordDetail
     }
   );
+}
+
+function isOperationalEvidenceRecordDetail(value: unknown): value is OperationalEvidenceRecordDetail {
+  return isOperationalEvidenceRecord(value) &&
+    isRecord(value) &&
+    isOetsFieldAuthorityPresentation(value.field_authority);
 }
 
 function isOperationalEvidenceRecord(
@@ -253,7 +288,36 @@ function isOperationalEvidenceRecord(
       value.training_context === null ||
       isOperationalEvidenceTrainingDraftContext(value.training_context)) &&
     (value.context === undefined || value.context === null || isOperationalEvidenceExistingContext(value.context))
+    && (value.creation_resolution === undefined || isOetsDraftCreationResolution(value.creation_resolution))
+    && (value.presentation === undefined || value.presentation === null || isOperationalEvidencePresentation(value.presentation))
   );
+}
+
+function isOperationalEvidencePresentation(value: unknown) {
+  if (!isRecord(value)) return false;
+  const subject = value.subject;
+  return typeof value.template_name === "string" &&
+    (value.client_name === null || typeof value.client_name === "string") &&
+    (value.facility_name === null || typeof value.facility_name === "string") &&
+    (subject === null || (
+      isRecord(subject) &&
+      (subject.kind === "CERTIFICATION_HOLDER" || subject.kind === "TRAINEE") &&
+      typeof subject.display_name === "string" &&
+      (subject.reference_number === null || typeof subject.reference_number === "string") &&
+      (subject.secondary_reference === null || typeof subject.secondary_reference === "string")
+    ));
+}
+
+function isOetsDraftCreationResolution(value: unknown): value is OetsDraftCreationResolution {
+  if (!isRecord(value)) return false;
+  return ["CREATED_NEW", "REUSED_EXISTING_CONTEXT_RECORD", "IDEMPOTENT_REPLAY"].includes(String(value.outcome)) &&
+    typeof value.requested_template_version === "string" &&
+    typeof value.returned_template_version === "string" &&
+    ["CURRENT_VERSION_CREATED", "CURRENT_VERSION_REUSED", "HISTORICAL_VERSION_REUSED"].includes(String(value.version_relation)) &&
+    (value.duplicate_policy === null || ["ONE_LIVE_RECORD_PER_SUBJECT", "ONE_ACTIVE_DRAFT_PER_SUBJECT", "ONE_EVIDENCE_LINEAGE_PER_SUBJECT"].includes(String(value.duplicate_policy))) &&
+    (value.context_kind === null || typeof value.context_kind === "string") &&
+    (value.context_label === null || typeof value.context_label === "string") &&
+    ["NEW_DRAFT_CREATED", "EXISTING_RECORD_REUSED", "HISTORICAL_RECORD_REUSED", "IDEMPOTENT_COMMAND_REPLAYED"].includes(String(value.user_message_code));
 }
 
 function isOperationalEvidenceExistingContext(value: unknown): value is OperationalEvidenceExistingContext {
@@ -266,6 +330,7 @@ function isOperationalEvidenceExistingContext(value: unknown): value is Operatio
     Object.values(value.field_policy).every((entry) => entry === "OPERATOR_EDITABLE" || entry === "READ_ONLY_DERIVED" || entry === "UNAVAILABLE_POST_ISSUANCE") &&
     isRecord(value.authoritative_values) &&
     Object.values(value.authoritative_values).every(isOetsFieldValue) &&
+    (value.repeatable_groups === undefined || isOetsContextRepeatableGroups(value.repeatable_groups)) &&
     value.snapshot_provenance === "EVIDENCE_BINDING_AND_PAYLOAD";
 }
 

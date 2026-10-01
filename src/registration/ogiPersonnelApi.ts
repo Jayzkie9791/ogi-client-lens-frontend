@@ -19,6 +19,7 @@ export interface OgiOperationalAuthorization {
   valid_from: string;
   valid_until: string | null;
   reason: string | null;
+  supersedes_authorization_id?: string | null;
   facility_grants: Array<{ authorization_id: string; facility_id: string; created_at: string }>;
   lifecycle_events: Array<{ id: string; event_type: string; effective_at: string; reason: string }>;
 }
@@ -75,6 +76,13 @@ export function closeOgiOperationalAuthorization(personnelId: string, authorizat
   return apiRequest<{ event: unknown; replayed: boolean }>(
     `/api/v1/registration/personnel/${encodeURIComponent(personnelId)}/operational-authorizations/${encodeURIComponent(authorizationId)}/${action}`,
     { method: "POST", body: request, headers: { "idempotency-key": idempotencyKey }, validate: isEventResponse }
+  );
+}
+
+export function renewOgiOperationalAuthorization(personnelId: string, authorizationId: string, request: Omit<GrantOgiOperationalAuthorizationRequest, "client_id" | "valid_from">, idempotencyKey: string) {
+  return apiRequest<{ authorization: OgiOperationalAuthorization; replayed: boolean }>(
+    `/api/v1/registration/personnel/${encodeURIComponent(personnelId)}/operational-authorizations/${encodeURIComponent(authorizationId)}/renew`,
+    { method: "POST", body: request, headers: { "idempotency-key": idempotencyKey }, validate: isAuthorizationResponse }
   );
 }
 

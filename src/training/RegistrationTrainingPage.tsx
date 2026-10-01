@@ -272,7 +272,7 @@ export function RegistrationTrainingPage({ workspace = "trainees" }: { readonly 
   const clientsQuery = useQuery({
     queryKey: ["registration-clients"],
     queryFn: () => listRegistrationClients(),
-    enabled: canViewClients && isAddingEnrollment,
+    enabled: canViewClients && (isAddingEnrollment || isLinkingPersonnel),
     retry: false
   });
   const clients = useMemo(
@@ -869,9 +869,11 @@ function TrainingEvaluationJourneyContent({ enrollment, onClose, projection }: {
     queryFn: () => getOperationalEvidenceRecord(openRecordId ?? "")
   });
   const openRecord = openRecordQuery.data;
-  const hasStarted = Boolean(enrollment.journey_progress?.attendance || enrollment.journey_progress?.skills_assessment || enrollment.journey_progress?.knowledge_assessment || enrollment.journey_progress?.readiness);
-  const lifecycleAction = hasStarted ? "WITHDRAWN" as const : "CANCELLED" as const;
-  const lifecycleMutation = useMutation({mutationFn:(reason:string)=>transitionTrainingEnrollmentLifecycle(enrollment.id,lifecycleAction,reason,crypto.randomUUID()),onSuccess:async()=>{await queryClient.invalidateQueries({queryKey:["training-recent-registrations"]});onClose();}});
+  const lifecycleAction = enrollment.lifecycle_control?.allowed_action ?? null;
+  const lifecycleMutation = useMutation({mutationFn:(reason:string)=>{
+    if (!lifecycleAction) throw new Error("No governed lifecycle action is available.");
+    return transitionTrainingEnrollmentLifecycle(enrollment.id,lifecycleAction,reason,crypto.randomUUID());
+  },onSuccess:async()=>{await queryClient.invalidateQueries({queryKey:["training-recent-registrations"]});onClose();}});
 
   useEffect(() => {
     if (!openRecord || openRecord.lifecycle_state === "DRAFT") return;
@@ -920,7 +922,7 @@ function TrainingEvaluationJourneyContent({ enrollment, onClose, projection }: {
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <div className="flex items-center" id="training-journey-record-actions" />
-            {auth.canUsePermission(permissions.createEnrollment) && !enrollment.journey_progress?.certification ? <Button disabled={lifecycleMutation.isPending} onClick={()=>{const reason=window.prompt(`${hasStarted?"Withdraw":"Cancel"} this Training registration? Enter an audit reason (at least 10 characters).`);if(reason===null)return;const normalized=reason.trim();if(normalized.length<10){setLifecycleValidationMessage("Enter an audit reason of at least 10 characters.");return;}setLifecycleValidationMessage(null);lifecycleMutation.mutate(normalized);}} type="button" variant="secondary">{hasStarted?"Withdraw Registration":"Cancel Registration"}</Button> : null}
+            {auth.canUsePermission(permissions.createEnrollment) && lifecycleAction ? <Button disabled={lifecycleMutation.isPending} onClick={()=>{const verb=lifecycleAction === "WITHDRAWN"?"Withdraw":"Cancel";const reason=window.prompt(`${verb} this Training registration? Enter an audit reason (at least 10 characters).`);if(reason===null)return;const normalized=reason.trim();if(normalized.length<10){setLifecycleValidationMessage("Enter an audit reason of at least 10 characters.");return;}setLifecycleValidationMessage(null);lifecycleMutation.mutate(normalized);}} type="button" variant="secondary">{lifecycleAction === "WITHDRAWN"?"Withdraw Registration":"Cancel Registration"}</Button> : null}
             <Button aria-label="Close Training Evaluation Journey" className="border-red-300 bg-white text-red-700 hover:bg-red-50" onClick={onClose} type="button" variant="secondary">Close</Button>
           </div>
         </div>
@@ -936,11 +938,20 @@ function TrainingEvaluationJourneyContent({ enrollment, onClose, projection }: {
       <main className="min-h-0 flex-1 overflow-y-auto p-2 sm:p-4">
         <PersonCertificationAuthorityCard projection={projection} />
         {lifecycleValidationMessage ? <p className="mb-3 rounded-component border border-amber-300 bg-amber-50 p-3 text-sm font-semibold text-amber-900" role="alert">{lifecycleValidationMessage}</p> : null}
-        {lifecycleMutation.isError ? <p className="mb-3 rounded-component border border-red-300 bg-red-50 p-3 text-sm font-semibold text-red-800" role="alert">The registration could not be changed. Registrations with Certification authority require a governed void or supersession; otherwise verify the lifecycle reason and try again.</p> : null}
-        {openRecordId ? <div className="space-y-2"><Button onClick={() => { setOpenRecordId(null); void queryClient.invalidateQueries({ queryKey: workspaceKey }); }} type="button" variant="secondary">← Back to journey step</Button><OperationalEvidenceRecordPage embeddedRecordId={openRecordId} /></div> : <TrainingJourneyStepContent enrollment={enrollment} onOpenRecord={setOpenRecordId} step={step} />}
+        {lifecycleMutation.isError ? <p className="mb-3 rounded-component border border-red-300 bg-red-50 p-3 text-sm font-semibold text-red-800" role="alert">{trainingEnrollmentLifecycleErrorMessage(lifecycleMutation.error)}</p> : null}
+        {openRecordId ? <div className="space-y-2"><Button onClick={() => { setOpenRecordId(null); void queryClient.invalidateQueries({ queryKey: workspaceKey }); }} type="button" variant="secondary">← Back to journey step</Button><OperationalEvidenceRecordPage embeddedRecordId={openRecordId} onRecordIdentityChange={setOpenRecordId} /></div> : <TrainingJourneyStepContent enrollment={enrollment} onOpenRecord={setOpenRecordId} step={step} />}
       </main>
     </div>
   </div>;
+}
+
+function trainingEnrollmentLifecycleErrorMessage(error: unknown) {
+  if (!isApiError(error)) return "The registration could not be changed. Refresh the journey and try again.";
+  if (error.code === "TRAINING_ENROLLMENT_MUST_BE_WITHDRAWN") return "Training activity has been recorded for this registration. Refresh the journey and use Withdraw Registration.";
+  if (error.code === "TRAINING_ENROLLMENT_MUST_BE_CANCELLED") return "No training activity has been recorded for this registration. Refresh the journey and use Cancel Registration.";
+  if (error.code === "TRAINING_ENROLLMENT_CERTIFICATION_AUTHORITY") return "This registration has Certification authority and requires a governed void or supersession.";
+  if (error.code === "TRAINING_ENROLLMENT_ALREADY_INACTIVE") return "This registration is already inactive. Refresh the Training Journey.";
+  return "The registration could not be changed. Refresh the journey and try again.";
 }
 
 function PersonCertificationAuthorityCard({ projection }: { readonly projection: TrainingJourneyProjectionV2 }) {
@@ -1060,7 +1071,7 @@ function ExistingF048JourneyState({ certificationId, evidence, onOpenRecord }: {
   return <Surface className={approved ? "border-teal-300 bg-teal-50/60" : "border-blue-200 bg-blue-50/60"}>
     <p className="text-xs font-bold uppercase tracking-wide text-primary-blue">Existing F-048 evidence</p>
     <h3 className="mt-2 text-xl font-semibold text-primary-navy">{f048JourneyStatus(evidence)}</h3>
-    <p className="mt-2 text-sm text-text-muted">The journey is reconnected to record {evidence.evidence_record_id}. A replacement F-048 is neither required nor permitted by this continuation.</p>
+    <p className="mt-2 text-sm text-text-muted">The journey is connected to its existing governed F-048 record. A replacement F-048 is neither required nor permitted by this continuation.</p>
     <div className="mt-3 flex flex-wrap gap-2">
       <Button onClick={() => onOpenRecord(evidence.evidence_record_id)} type="button" variant="secondary">Open Existing F-048</Button>
       {approved ? <Link className={buttonLinkClassName} to={`${routes.certifications}?certification=${encodeURIComponent(certificationId)}&issue=1`}>{bound ? "Continue Credential Issuance" : "Continue Association Review"}</Link> : null}
@@ -1291,6 +1302,7 @@ function TraineeDetailsPanel({
         <PersonnelLinkSection
           canLinkPersonnel={canLinkPersonnel}
           canViewPersonnel={canViewPersonnel}
+          clients={clients}
           isLinkingPersonnel={isLinkingPersonnel}
           isSubmitting={isSubmittingLink}
           onCancel={onCancelLink}
@@ -1342,6 +1354,7 @@ function TraineeDetailsPanel({
 function PersonnelLinkSection({
   canLinkPersonnel,
   canViewPersonnel,
+  clients,
   isLinkingPersonnel,
   isSubmitting,
   onCancel,
@@ -1355,6 +1368,7 @@ function PersonnelLinkSection({
 }: {
   canLinkPersonnel: boolean;
   canViewPersonnel: boolean;
+  clients: readonly RegistrationClient[];
   isLinkingPersonnel: boolean;
   isSubmitting: boolean;
   onCancel: () => void;
@@ -1430,7 +1444,7 @@ function PersonnelLinkSection({
                 <option value="">Select Personnel</option>
                 {personnel.map((staffMember) => (
                   <option key={staffMember.id} value={staffMember.id}>
-                    {personnelOptionLabel(staffMember)}
+                    {personnelOptionLabel(staffMember, clients)}
                   </option>
                 ))}
               </select>
@@ -1789,7 +1803,7 @@ function TrainingAttendanceEvidencePanel({
         ...workspace,
         eligible_enrollments: workspace.eligible_enrollments.filter((item) => item.enrollment.id === focusedEnrollmentId),
         history: workspace.history.filter((record) => record.roster.some((enrollment) => enrollment.id === focusedEnrollmentId)),
-        active_draft: workspace.active_draft?.roster.some((enrollment) => enrollment.id === focusedEnrollmentId) ? workspace.active_draft : null
+        active_draft: workspace.active_draft
       }
     : workspace;
   const createDraftMutation = useMutation({
@@ -2133,6 +2147,12 @@ function TrainingAttendanceRosterSelection({
         </Button>
       </div>
 
+      {!canCreate ? (
+        <p className="rounded-component border border-amber-300 bg-amber-50 p-3 text-sm font-semibold text-amber-900" role="status">
+          {attendanceDraftUnavailableMessage(workspace, selectedEnrollmentIds)}
+        </p>
+      ) : null}
+
       {workspace.active_draft ? (
         <div className="rounded-component border border-border bg-canvas p-3">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -2156,7 +2176,7 @@ function TrainingAttendanceRosterSelection({
                   {isReplacing ? "Replacing…" : "Replace with Current Version"}
                 </Button>
               ) : null}
-              {onOpenRecord ? <Button onClick={() => onOpenRecord(workspace.active_draft?.evidence.evidence_record_id ?? "")} type="button" variant="secondary">Open Attendance Draft</Button> : <Link className={buttonLinkClassName} state={{ returnTo: routes.registrationTraining }} to={routes.evidenceRecordPath(workspace.active_draft.evidence.evidence_record_id)}>Open Attendance Draft</Link>}
+              {onOpenRecord ? <Button onClick={() => onOpenRecord(workspace.active_draft?.evidence.evidence_record_id ?? "")} type="button" variant="secondary">Open Attendance Draft</Button> : <Link className={buttonLinkClassName} to={evidencePathWithReturn(workspace.active_draft.evidence.evidence_record_id, { kind: "TRAINING" })}>Open Attendance Draft</Link>}
             </div>
           </div>
         </div>
@@ -2256,6 +2276,27 @@ function TrainingAttendanceRosterSelection({
   );
 }
 
+function attendanceDraftUnavailableMessage(
+  workspace: TrainingAttendanceEvidenceWorkspace,
+  selectedEnrollmentIds: readonly string[]
+) {
+  if (workspace.create_draft_blocked_reason === "ACTIVE_SESSION_DRAFT") {
+    return "This Training Session already has an active attendance draft. Open that draft to continue or replace it when a newer governed template is required.";
+  }
+  if (workspace.create_draft_blocked_reason === "MISSING_PERMISSION") {
+    return "Your current account may view this roster but is not authorized to create attendance evidence.";
+  }
+  if (selectedEnrollmentIds.length === 0) {
+    return "Select at least one eligible trainee before creating attendance evidence.";
+  }
+  if (selectedEnrollmentIds.some((enrollmentId) =>
+    workspace.eligible_enrollments.some((item) => item.enrollment.id === enrollmentId && !item.enrollment.training_type)
+  )) {
+    return "Confirm the Training Type for every selected trainee before creating attendance evidence.";
+  }
+  return "Attendance evidence is temporarily unavailable. Refresh the workspace and try again.";
+}
+
 function TrainingAttendanceHistory({
   isLinking,
   onLink,
@@ -2327,7 +2368,7 @@ function TrainingAttendanceHistoryItem({
           ) : null}
         </div>
         <div className="flex flex-wrap gap-2">
-          {onOpenRecord ? <Button onClick={() => onOpenRecord(record.evidence.evidence_record_id)} type="button" variant="secondary">{record.evidence.lifecycle_state === "DRAFT" ? "Open Attendance Draft" : isReplaced ? "View Replaced Record" : isDiscarded ? "View Discarded Record" : "View Attendance Evidence"}</Button> : <Link className={buttonLinkClassName} state={{ returnTo: routes.registrationTraining }} to={routes.evidenceRecordPath(record.evidence.evidence_record_id)}>{record.evidence.lifecycle_state === "DRAFT" ? "Open Attendance Draft" : isReplaced ? "View Replaced Record" : isDiscarded ? "View Discarded Record" : "View Attendance Evidence"}</Link>}
+          {onOpenRecord ? <Button onClick={() => onOpenRecord(record.evidence.evidence_record_id)} type="button" variant="secondary">{record.evidence.lifecycle_state === "DRAFT" ? "Open Attendance Draft" : isReplaced ? "View Replaced Record" : isDiscarded ? "View Discarded Record" : "View Attendance Evidence"}</Button> : <Link className={buttonLinkClassName} to={evidencePathWithReturn(record.evidence.evidence_record_id, { kind: "TRAINING" })}>{record.evidence.lifecycle_state === "DRAFT" ? "Open Attendance Draft" : isReplaced ? "View Replaced Record" : isDiscarded ? "View Discarded Record" : "View Attendance Evidence"}</Link>}
           {record.can_link ? (
             <Button
               disabled={isLinking}
@@ -3411,11 +3452,17 @@ function programLabel(program: {
   return `${program.certification_level} - ${program.display_name}`;
 }
 
-function personnelOptionLabel(staffMember: RegistrationPersonnel) {
+function personnelOptionLabel(
+  staffMember: RegistrationPersonnel,
+  clients: readonly RegistrationClient[]
+) {
+  const clientName = staffMember.client_id
+    ? clients.find((client) => client.id === staffMember.client_id)?.organization_name ?? "Client organization unavailable"
+    : "Ocean Guard International";
   return [
     staffMember.full_name,
     staffMember.email ?? "no email",
-    `Client ${staffMember.client_id}`
+    clientName
   ].join(" - ");
 }
 

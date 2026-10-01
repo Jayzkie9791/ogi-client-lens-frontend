@@ -10,6 +10,8 @@ export const registrationFacilityAssignmentStatuses = [
 export type RegistrationFacilityAssignmentStatus =
   (typeof registrationFacilityAssignmentStatuses)[number];
 
+export type RegistrationFacilityAssignmentDuty = "OPERATIONAL_LIFEGUARD" | "OTHER_DUTY";
+
 export interface RegistrationFacilityAssignment {
   id: string;
   staff_member_id: string;
@@ -18,6 +20,8 @@ export interface RegistrationFacilityAssignment {
   assigned_from: string;
   assigned_to: string | null;
   is_primary_assignment: boolean;
+  position_title?: string | null;
+  duty_code: RegistrationFacilityAssignmentDuty | null;
   notes?: string | null;
   created_at: string;
   updated_at: string;
@@ -30,6 +34,8 @@ export interface RegistrationFacilityAssignmentListResponse {
 
 export interface CreateRegistrationFacilityAssignmentRequest {
   facility_id: string;
+  position_title?: string;
+  duty_code: RegistrationFacilityAssignmentDuty;
   assigned_from: string;
   is_primary_assignment?: boolean;
   notes?: string;
@@ -78,6 +84,21 @@ export function endRegistrationFacilityAssignment(
   );
 }
 
+export function updateRegistrationFacilityAssignment(
+  staffMemberId: string,
+  assignmentId: string,
+  positionTitle: string
+) {
+  return apiRequest<RegistrationFacilityAssignment>(
+    `/api/v1/registration/personnel/${encodeURIComponent(staffMemberId)}/facility-assignments/${encodeURIComponent(assignmentId)}`,
+    {
+      method: "PATCH",
+      body: { position_title: positionTitle },
+      validate: isRegistrationFacilityAssignment
+    }
+  );
+}
+
 export function setPrimaryRegistrationFacilityAssignment(
   staffMemberId: string,
   assignmentId: string
@@ -110,9 +131,11 @@ function isRegistrationFacilityAssignment(
     typeof value.staff_member_id === "string" &&
     typeof value.facility_id === "string" &&
     isRegistrationFacilityAssignmentStatus(value.assignment_status) &&
+    (value.duty_code === null || value.duty_code === "OPERATIONAL_LIFEGUARD" || value.duty_code === "OTHER_DUTY") &&
     typeof value.assigned_from === "string" &&
     isNullableString(value.assigned_to) &&
     typeof value.is_primary_assignment === "boolean" &&
+    isNullableString(value.position_title) &&
     isNullableString(value.notes) &&
     typeof value.created_at === "string" &&
     typeof value.updated_at === "string" &&

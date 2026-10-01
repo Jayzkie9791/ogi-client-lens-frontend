@@ -159,6 +159,13 @@ function mockFetchQueue(responses: MockResponse[]) {
       });
     }
 
+    if (url.endsWith("/context-record-resolution") && method === "POST") {
+      return jsonResponse(200, {
+        resolution: "NO_EXISTING_RECORD",
+        duplicate_policy: "ONE_LIVE_RECORD_PER_SUBJECT"
+      });
+    }
+
     if (url.endsWith("/actions")) {
       const projected = takeResponse((response) =>
         (response.body as { projection_version?: string } | undefined)?.projection_version === "EVIDENCE_RECORD_ACTIONS_V1"
@@ -233,8 +240,12 @@ function mockFetchQueue(responses: MockResponse[]) {
       }
     }
 
+    const responseBody = enrichAuthorityResponse(
+      next.body,
+      lastTemplateDefinition ?? responses.find((response) => Boolean((response.body as { definition_jsonb?: unknown } | undefined)?.definition_jsonb))?.body as { definition_jsonb?: OetsDefinition } | undefined
+    );
     return new Response(
-      next.body === undefined ? null : JSON.stringify(next.body),
+      responseBody === undefined ? null : JSON.stringify(responseBody),
       {
         status: next.status,
         statusText: next.statusText,
@@ -297,6 +308,12 @@ function evidenceRecord(
     scope_kind: "CLIENT_SCOPED" | "TRAINING_SCOPED";
     training_context: unknown;
     context: unknown;
+    presentation: {
+      template_name: string;
+      client_name: string | null;
+      facility_name: string | null;
+      subject: null;
+    };
   }> = {}
 ) {
   return {
@@ -445,6 +462,48 @@ function clientContext() {
   };
 }
 
+function enrichAuthorityResponse(body: unknown, templateSource?: OetsDefinition | { definition_jsonb?: OetsDefinition } | null) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return body;
+  const record = body as Record<string, unknown>;
+  let exactDefinition = definition;
+  if ("definition_jsonb" in record) {
+    exactDefinition = record.definition_jsonb as OetsDefinition;
+  } else if (templateSource && "definition_jsonb" in templateSource) {
+    exactDefinition = templateSource.definition_jsonb ?? definition;
+  } else if (templateSource) {
+    exactDefinition = templateSource as OetsDefinition;
+  }
+  if ("definition_jsonb" in record) {
+    return { ...record, field_authority: testFieldAuthority(exactDefinition, String(record.template_version_id ?? "version-1")) };
+  }
+  if (("lifecycle_state" in record && "template_provenance" in record) || ("selected_id" in record && "field_policy" in record)) {
+    return { ...record, field_authority: testFieldAuthority(exactDefinition, "version-1") };
+  }
+  return body;
+}
+
+function testFieldAuthority(source: OetsDefinition, templateVersionId: string) {
+  return {
+    projection_version: "OETS_FIELD_AUTHORITY_PRESENTATION_V1" as const,
+    template_code: source.template_metadata.template_code,
+    template_version: source.template_metadata.version,
+    template_version_id: templateVersionId,
+    fields: source.sections.flatMap((section) => section.fields.map((field) => ({
+      section_code: section.section_code,
+      field_id: field.field_id,
+      field_code: field.field_code,
+      repeatable: section.repeatable === true,
+      visible: field.visible,
+      authority_kind: "OPERATOR_RECORDED" as const,
+      authority_state: "EFFECTIVE" as const,
+      disposition: "ACTIVE" as const,
+      presentation_editability: field.readonly ? "READ_ONLY" as const : "EDITABLE" as const,
+      reason_code: "OPERATOR_RECORDED" as const
+    }))),
+    projection_checksum: "a".repeat(64)
+  };
+}
+
 function recordActionProjection({
   activeClaim = null,
   record = evidenceRecord(),
@@ -516,6 +575,54 @@ function governedDefinition(): OetsDefinition {
   };
 }
 
+function relationshipProjectionDefinition(): OetsDefinition {
+  const governed = governedDefinition();
+  return {
+    ...governed,
+    sections: [{
+      ...governed.sections[0],
+      fields: [
+        {
+          field_id: "relationship-actor-projection",
+          field_code: "RELATIONSHIP_SIGNER_NAME",
+          label: "Relationship Signer Name",
+          field_type: "TEXT",
+          required: false,
+          readonly: true,
+          visible: true,
+          sequence: 1,
+          metadata: { governed_attestation_projection: {
+            source_signature_field_id: governedSignatureField.field_id,
+            value: "SUBJECT_NAME"
+          } }
+        },
+        {
+          ...governedSignatureField,
+          sequence: 2,
+          metadata: { governed_attestation: {
+            ...governedSignatureField.metadata.governed_attestation,
+            signer_relationship: "PRIMARY_TRAINING_INSTRUCTOR"
+          } }
+        },
+        {
+          field_id: "relationship-date-projection",
+          field_code: "RELATIONSHIP_SIGNED_DATE",
+          label: "Relationship Signed Date",
+          field_type: "DATE",
+          required: false,
+          readonly: true,
+          visible: true,
+          sequence: 3,
+          metadata: { governed_attestation_projection: {
+            source_signature_field_id: governedSignatureField.field_id,
+            value: "SIGNED_AT_DATE"
+          } }
+        }
+      ]
+    }]
+  };
+}
+
 function governedEditableDefinition(): OetsDefinition {
   const governed = governedDefinition();
   return {
@@ -549,6 +656,44 @@ function governedAttestation(status: "CURRENT" | "STALE" = "CURRENT"): EvidenceA
 beforeEach(() => {
   window.sessionStorage.clear();
   vi.stubEnv("VITE_OETS_DEVELOPER_DIAGNOSTICS", "enabled");
+});
+
+describe("C.0 fixed repeatable context rendering", () => {
+  it("hides structural controls while preserving operator-owned row edits", async () => {
+    const user = userEvent.setup();
+    const submit = vi.fn();
+    const repeatableDefinition = {
+      ...definition,
+      sections: [{
+        section_id: "roster-section",
+        section_code: "ROSTER",
+        title: "Roster",
+        sequence: 1,
+        visible: true,
+        repeatable: true,
+        fields: [
+          { field_id: "name", field_code: "NAME", label: "Name", field_type: "TEXT", required: false, readonly: true, visible: true, sequence: 1 },
+          { field_id: "status", field_code: "STATUS", label: "Status", field_type: "TEXT", required: false, readonly: false, visible: true, sequence: 2 }
+        ]
+      }]
+    } as OetsDefinition;
+    render(<MemoryRouter><OetsRenderer
+      definition={repeatableDefinition}
+      initialPayload={{ sections: { ROSTER: [{ NAME: "Alpha", STATUS: null }, { NAME: "Bravo", STATUS: null }] } }}
+      onSubmit={submit}
+      repeatableSectionControls={{ ROSTER: { cardinality: "FIXED", instance_count: 2 } }}
+      runtimeTemplate={runtimeTemplate}
+    /></MemoryRouter>);
+    expect(screen.queryByRole("button", { name: "Add entry" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Remove" })).not.toBeInTheDocument();
+    const names = screen.getAllByLabelText("Name");
+    expect(names).toHaveLength(2);
+    expect(names[0]).toBeDisabled();
+    const statuses = screen.getAllByLabelText("Status");
+    await user.type(statuses[0], "Present");
+    await user.click(screen.getByRole("button", { name: "Create Audit Draft" }));
+    expect(submit).toHaveBeenCalledWith(expect.objectContaining({ sections: { ROSTER: [{ NAME: "Alpha", STATUS: "Present" }, { NAME: "Bravo", STATUS: null }] } }));
+  });
 });
 
 afterEach(() => {
@@ -676,6 +821,54 @@ describe("Generic OETS renderer", () => {
     expect(screen.getByText(/Authenticated signer/)).toHaveTextContent("Server Confirmed Operator");
   });
 
+  it("G.2.0 keeps relationship-rejected signing unprojected and safely retries the same command", async () => {
+    const user = userEvent.setup();
+    const queryClient = createTestQueryClient();
+    const signingSession = { ...session, permissions: [...session.permissions, "submit_operational_evidence"] };
+    const relationshipDefinition = relationshipProjectionDefinition();
+    const rejectionMessage = "Only the governed Primary Instructor for this Training Session may attest.";
+    const { calls } = mockFetchQueue([
+      { status: 200, body: evidenceRecord({ lifecycle_state: "DRAFT" }) },
+      { status: 200, body: { ...runtimeTemplate, definition_jsonb: relationshipDefinition } },
+      { status: 200, body: { attestations: [] } },
+      { status: 422, statusText: "Unprocessable Entity", body: { error: {
+        code: "OEE_ATTESTATION_RELATIONSHIP_NOT_ELIGIBLE",
+        message: rejectionMessage
+      } } },
+      { status: 201, body: governedAttestation() },
+      { status: 200, body: { attestations: [governedAttestation()] } }
+    ]);
+
+    renderOperationalEvidenceRecordPageWithSession({
+      initialPath: "/workbench/evidence/evidence-record-1",
+      queryClient,
+      currentSession: signingSession
+    });
+
+    expect(await screen.findByLabelText("Relationship Signer Name")).toHaveValue("");
+    expect(screen.getByLabelText("Relationship Signed Date")).toHaveValue("");
+    await user.click(screen.getByRole("checkbox", { name: /deliberately accept the attestation statement/i }));
+    await user.click(screen.getByRole("button", { name: "Sign & Attest" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(rejectionMessage);
+    expect(screen.queryByText("Current attestation")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Relationship Signer Name")).toHaveValue("");
+    expect(screen.getByLabelText("Relationship Signed Date")).toHaveValue("");
+
+    await user.click(screen.getByRole("button", { name: "Sign & Attest" }));
+    expect(await screen.findByText("Current attestation")).toBeVisible();
+    expect(screen.getByLabelText("Relationship Signer Name")).toHaveValue("Server Confirmed Operator");
+    expect(screen.getByLabelText("Relationship Signed Date")).toHaveValue("2026-08-24");
+    expect(screen.getByLabelText("Relationship Signer Name")).toBeDisabled();
+    expect(screen.getByLabelText("Relationship Signed Date")).toBeDisabled();
+
+    const commands = calls
+      .filter((call) => call.url.endsWith("/attestations") && call.init?.method === "POST")
+      .map((call) => JSON.parse(String(call.init?.body)) as { idempotency_key: string });
+    expect(commands).toHaveLength(2);
+    expect(commands[1].idempotency_key).toBe(commands[0].idempotency_key);
+  });
+
   it("surfaces missing or stale required-attestation finalization errors from the backend", async () => {
     const user = userEvent.setup();
     const queryClient = createTestQueryClient();
@@ -710,15 +903,20 @@ describe("Generic OETS renderer", () => {
       { status: 200, body: { ...runtimeTemplate, definition_jsonb: governedEditableDefinition() } },
       { status: 200, body: { attestations: [] } }
     ]);
-    renderOperationalEvidenceRecordPageWithSession({ initialPath: "/workbench/evidence/evidence-record-1", queryClient, currentSession: signingSession });
+    renderOperationalEvidenceRecordPageWithSession({ initialPath: "/workbench/evidence/evidence-record-1?return=facility-assessment&client=client-1&facility=facility-1&category=LIFEGUARD_OPERATIONS", queryClient, currentSession: signingSession });
 
     expect(await screen.findByRole("button", { name: "Sign & Attest" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Finalize Evidence" })).toBeVisible();
     expect(screen.getByTestId("draft-save-state")).toHaveTextContent("No unsaved changes.");
+    const discardDraft = screen.getByRole("button", { name: "Discard Draft" });
+    const editableField = screen.getByLabelText("Text Field");
+    expect(discardDraft).toBeEnabled();
+    expect(discardDraft.compareDocumentPosition(editableField) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByRole("button", { name: "Save Draft" })).toBeDisabled();
-    await user.type(screen.getByLabelText("Text Field"), "Unsaved evidence B");
+    await user.type(editableField, "Unsaved evidence B");
     expect(screen.getByTestId("draft-save-state")).toHaveTextContent("Unsaved changes. Save Draft before finalizing.");
     expect(screen.getByRole("button", { name: "Save Draft" })).toBeEnabled();
+    expect(discardDraft).toBeDisabled();
     expect(screen.getByRole("button", { name: "Sign & Attest" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: "Finalize Evidence" })).not.toBeInTheDocument();
   });
@@ -728,7 +926,11 @@ describe("Generic OETS renderer", () => {
     const queryClient = createTestQueryClient();
     const signingSession = { ...session, permissions: [...session.permissions, "submit_operational_evidence"] };
     let resolveSave: (response: Response) => void = () => undefined;
-    let record = evidenceRecord({ lifecycle_state: "DRAFT" });
+    const editableDefinition = governedEditableDefinition();
+    let record = {
+      ...evidenceRecord({ lifecycle_state: "DRAFT" }),
+      field_authority: testFieldAuthority(editableDefinition, "version-1")
+    };
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = readRequestPath(input);
       if (url.endsWith("/payload") && init?.method === "PATCH") {
@@ -749,10 +951,14 @@ describe("Generic OETS renderer", () => {
         }]
       });
       if (url.includes("/attestations")) return jsonResponse(200, { attestations: [] });
-      if (url.includes("/template-versions/")) return jsonResponse(200, { ...runtimeTemplate, definition_jsonb: governedEditableDefinition() });
+      if (url.includes("/template-versions/")) return jsonResponse(200, {
+        ...runtimeTemplate,
+        definition_jsonb: editableDefinition,
+        field_authority: testFieldAuthority(editableDefinition, "version-1")
+      });
       return jsonResponse(200, record);
     }));
-    renderOperationalEvidenceRecordPageWithSession({ initialPath: "/workbench/evidence/evidence-record-1", queryClient, currentSession: signingSession });
+    renderOperationalEvidenceRecordPageWithSession({ initialPath: "/workbench/evidence/evidence-record-1?return=facility-assessment&client=client-1&facility=facility-1&category=LIFEGUARD_OPERATIONS", queryClient, currentSession: signingSession });
     await screen.findByRole("button", { name: "Sign & Attest" });
     await user.type(screen.getByLabelText("Text Field"), "Saved evidence B");
     await user.click(screen.getByRole("button", { name: "Save Draft" }));
@@ -761,7 +967,10 @@ describe("Generic OETS renderer", () => {
     expect(screen.getByRole("button", { name: "Sign & Attest" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: "Finalize Evidence" })).not.toBeInTheDocument();
 
-    record = evidenceRecord({ lifecycle_state: "DRAFT", payload: { sections: { GENERAL_EVIDENCE: { TEXT_FIELD: "Saved evidence B" } } } });
+    record = {
+      ...evidenceRecord({ lifecycle_state: "DRAFT", payload: { sections: { GENERAL_EVIDENCE: { TEXT_FIELD: "Saved evidence B" } } } }),
+      field_authority: testFieldAuthority(editableDefinition, "version-1")
+    };
     record.payload_checksum = "payload-checksum-2";
     resolveSave(jsonResponse(200, record));
     await user.click(await screen.findByRole("checkbox", { name: /deliberately accept the attestation statement/i }));
@@ -769,6 +978,7 @@ describe("Generic OETS renderer", () => {
     expect(screen.getByTestId("draft-save-state")).toHaveTextContent("Draft saved. No unsaved changes.");
     expect(screen.getByRole("button", { name: "Save Draft" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Finalize Evidence" })).toBeVisible();
+    expect(screen.getByRole("button", { name: /Back to Facility Assessment Journey/ })).toBeVisible();
   });
 
   it("makes lifecycle-action load failure visible and retryable", async () => {
@@ -819,6 +1029,94 @@ describe("Generic OETS renderer", () => {
       currentSession: session
     });
     expect(await screen.findByRole("button", { name: /Back to Training Journey/ })).toBeVisible();
+  });
+
+  it("keeps a plan revision inside an embedded journey by handing off the successor identity", async () => {
+    const user = userEvent.setup();
+    const queryClient = createTestQueryClient();
+    const onRecordIdentityChange = vi.fn();
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const f100TemplateCode = "OGI_F100_EMERGENCY_PREPAREDNESS_OPERATIONAL_CONTINUITY_PLAN";
+    const f100Definition = {
+      ...definition,
+      template_metadata: { ...definition.template_metadata, template_code: f100TemplateCode }
+    };
+    const f100Runtime = { ...runtimeTemplate, template_code: f100TemplateCode, definition_jsonb: f100Definition };
+    const submittedBase = evidenceRecord({ lifecycle_state: "SUBMITTED" });
+    const submitted = {
+      ...submittedBase,
+      template_provenance: { ...submittedBase.template_provenance, template_code: f100TemplateCode },
+      field_authority: testFieldAuthority(f100Definition, "version-1")
+    };
+    const revision = { ...submitted, id: "evidence-record-revision-2", lifecycle_state: "DRAFT" };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = readRequestPath(input);
+      if (url.endsWith("/revision-draft") && init?.method === "POST") return jsonResponse(200, revision);
+      if (url.endsWith("/actions")) return jsonResponse(200, {
+        projection_version: "EVIDENCE_RECORD_ACTIONS_V1",
+        evidence_record_id: submitted.id,
+        lifecycle_state: "SUBMITTED",
+        revision: "test:submitted",
+        actions: [{
+          action: "CREATE_REVISION_DRAFT",
+          transition_trigger: null,
+          target_state: null,
+          governance_authority_code: null,
+          review_claim: null,
+          claimed_by_name: null
+        }]
+      });
+      if (url.includes("/template-versions/")) return jsonResponse(200, { ...f100Runtime, field_authority: testFieldAuthority(f100Definition, "version-1") });
+      return jsonResponse(200, submitted);
+    }));
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <AuthContext.Provider value={authContextValue(session)}>
+          <MemoryRouter initialEntries={["/workbench/assessments/facility-journeys?client=client-1&facility=facility-1&category=LIFEGUARD_OPERATIONS"]}>
+            <div id="assessment-journey-form-actions" />
+            <OperationalEvidenceRecordPage actionPortalId="assessment-journey-form-actions" embeddedRecordId={submitted.id} onRecordIdentityChange={onRecordIdentityChange} />
+          </MemoryRouter>
+        </AuthContext.Provider>
+      </QueryClientProvider>
+    );
+
+    expect(await screen.findByText("Plan submitted")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Return to Facility Assessment Journey" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Create another plan revision" }));
+    expect(window.confirm).toHaveBeenCalledWith("Create another plan revision only if the submitted plan must be changed. Continue?");
+    await waitFor(() => expect(onRecordIdentityChange).toHaveBeenCalledWith(revision.id));
+    expect(window.location.pathname).not.toContain(revision.id);
+  });
+
+  it("keeps an approved F104 registry correction inside an embedded journey", async () => {
+    const user = userEvent.setup();
+    const queryClient = createTestQueryClient();
+    const onRecordIdentityChange = vi.fn();
+    const templateCode = "OGI_F104_EMERGENCY_CONTACT_REGISTRY";
+    const f104Definition = { ...definition, template_metadata: { ...definition.template_metadata, template_code: templateCode } };
+    const approvedBase = evidenceRecord({ lifecycle_state: "GOVERNANCE_APPROVED" });
+    const approved = { ...approvedBase, template_provenance: { ...approvedBase.template_provenance, template_code: templateCode }, field_authority: testFieldAuthority(f104Definition, "version-1") };
+    const correction = { ...approved, id: "evidence-record-f104-correction", lifecycle_state: "DRAFT", predecessor_evidence_record_id: approved.id };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = readRequestPath(input);
+      if (url.endsWith("/correction-draft") && init?.method === "POST") return jsonResponse(201, correction);
+      if (url.endsWith("/actions")) return jsonResponse(200, { projection_version: "EVIDENCE_RECORD_ACTIONS_V1", evidence_record_id: approved.id, lifecycle_state: approved.lifecycle_state, revision: "test:f104-approved", actions: [{ action: "CREATE_CORRECTION_DRAFT", transition_trigger: null, target_state: null, governance_authority_code: null, review_claim: null, claimed_by_name: null }] });
+      if (url.includes("/template-versions/")) return jsonResponse(200, { ...runtimeTemplate, template_code: templateCode, definition_jsonb: f104Definition, field_authority: testFieldAuthority(f104Definition, "version-1") });
+      return jsonResponse(200, approved);
+    }));
+    render(
+      <QueryClientProvider client={queryClient}>
+        <AuthContext.Provider value={authContextValue(session)}>
+          <MemoryRouter initialEntries={["/workbench/assessments/facility-journeys?client=client-1&facility=facility-1&category=EMERGENCY_PREPAREDNESS"]}>
+            <div id="assessment-journey-form-actions" />
+            <OperationalEvidenceRecordPage actionPortalId="assessment-journey-form-actions" embeddedRecordId={approved.id} onRecordIdentityChange={onRecordIdentityChange} />
+          </MemoryRouter>
+        </AuthContext.Provider>
+      </QueryClientProvider>
+    );
+    await user.click(await screen.findByRole("button", { name: "Create registry correction" }));
+    await waitFor(() => expect(onRecordIdentityChange).toHaveBeenCalledWith(correction.id));
   });
 
   it("uses server-confirmed lifecycle state after successful persisted-draft finalization", async () => {
@@ -916,6 +1214,12 @@ describe("Generic OETS renderer", () => {
     window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
     const persistedRecord = evidenceRecord({
       lifecycle_state: "DRAFT",
+      presentation: {
+        template_name: "Weekly Safety Audit Checklist",
+        client_name: "AiaAva Hotels and Resorts",
+        facility_name: "Aia Private Club",
+        subject: null
+      },
       payload: {
         sections: {
           GENERAL_EVIDENCE: {
@@ -944,10 +1248,12 @@ describe("Generic OETS renderer", () => {
     });
 
     expect(
-      await screen.findByRole("heading", { name: runtimeTemplate.template_code })
+      await screen.findByRole("heading", { name: "Weekly Safety Audit Checklist" })
     ).toBeInTheDocument();
     expect(screen.getByText("Record Detail")).toBeInTheDocument();
-    expect(screen.getByText("Record evidence-record-1")).toBeInTheDocument();
+    expect(screen.queryByText("Record evidence-record-1")).not.toBeInTheDocument();
+    expect(screen.getByText("AiaAva Hotels and Resorts")).toBeInTheDocument();
+    expect(screen.getByText("Aia Private Club")).toBeInTheDocument();
     expect(screen.getByText("Current State")).toBeInTheDocument();
     expect(screen.getByText("Draft")).toBeInTheDocument();
     expect(
@@ -2336,6 +2642,45 @@ describe("Generic OETS renderer", () => {
     expect(screen.getByText(/"NUMBER_FIELD": null/)).toBeInTheDocument();
   });
 
+  it("enforces template numeric bounds before submission while allowing optional blanks", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const boundedDefinition: OetsDefinition = {
+      ...definition,
+      sections: definition.sections.map((section) => ({
+        ...section,
+        fields: section.fields.map((field) => field.field_code === "NUMBER_FIELD"
+          ? { ...field, validation: { ...field.validation, minimum: 1, maximum: 10 } }
+          : field.field_code === "DECIMAL_FIELD"
+            ? { ...field, validation: { ...field.validation, minimum: 1, maximum: 20 } }
+            : field)
+      }))
+    };
+
+    render(<OetsRenderer definition={boundedDefinition} onSubmit={onSubmit} runtimeTemplate={runtimeTemplate} />);
+
+    const numberField = screen.getByLabelText("Number Field");
+    const decimalField = screen.getByLabelText("Decimal Field");
+    const submit = screen.getByRole("button", { name: "Create Audit Draft" });
+    expect(numberField).toHaveAttribute("min", "1");
+    expect(numberField).toHaveAttribute("max", "10");
+    expect(decimalField).toHaveAttribute("max", "20");
+    expect(submit).toBeEnabled();
+
+    await user.type(numberField, "17");
+    expect(screen.getByText("Enter a value from 1 through 10.")).toBeInTheDocument();
+    expect(submit).toBeDisabled();
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    await user.clear(numberField);
+    await user.type(numberField, "10");
+    expect(screen.queryByText("Enter a value from 1 through 10.")).not.toBeInTheDocument();
+    expect(submit).toBeEnabled();
+    await user.click(submit);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0]?.[0].sections.GENERAL_EVIDENCE.NUMBER_FIELD).toBe(10);
+  });
+
   it("handles select, radio, and multiselect options from field metadata", async () => {
     const user = userEvent.setup();
 
@@ -2369,6 +2714,98 @@ describe("Generic OETS renderer", () => {
     expect(screen.getByText(/"REPEATABLE_OBSERVATIONS": \[/)).toBeInTheDocument();
     expect(screen.getByText(/"OBSERVATION_TIME": "09:30"/)).toBeInTheDocument();
     expect(screen.getByText(/"OBSERVATION_TIME": "10:15"/)).toBeInTheDocument();
+  });
+
+  it("keeps saved repeatable rows independent when a third entry is added after reopen", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const initialPayload = { sections: { REPEATABLE_OBSERVATIONS: [
+      { OBSERVATION_TIME: "09:00" },
+      { OBSERVATION_TIME: "10:00" }
+    ] } };
+    render(<OetsRenderer definition={definition} initialPayload={initialPayload} onSubmit={onSubmit} runtimeTemplate={runtimeTemplate} />);
+
+    await user.click(screen.getByRole("button", { name: "Add entry" }));
+    const times = screen.getAllByLabelText("Observation Time");
+    expect(times).toHaveLength(3);
+    await user.type(times[2], "11:00");
+
+    expect((times[0] as HTMLInputElement).value).toBe("09:00");
+    expect((times[1] as HTMLInputElement).value).toBe("10:00");
+    expect((times[2] as HTMLInputElement).value).toBe("11:00");
+    await user.click(screen.getByRole("button", { name: "Create Audit Draft" }));
+    expect(onSubmit.mock.calls[0][0].sections.REPEATABLE_OBSERVATIONS).toEqual([
+      expect.objectContaining({ OBSERVATION_TIME: "09:00" }),
+      expect.objectContaining({ OBSERVATION_TIME: "10:00" }),
+      expect.objectContaining({ OBSERVATION_TIME: "11:00" })
+    ]);
+  });
+
+  it("persists invisible technical row identity and enforces declared repeatable bounds", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const boundedDefinition = structuredClone(definition);
+    const section = boundedDefinition.sections.find((candidate) => candidate.section_code === "REPEATABLE_OBSERVATIONS")!;
+    section.metadata = { repeatable_constraints: { minimum_instances: 0, maximum_instances: 1 } };
+    section.fields.unshift({
+      field_id: "field-repeat-row-key",
+      field_code: "FINDING_SOURCE_ROW_KEY",
+      label: "Finding Source Row Key",
+      field_type: "TEXT",
+      required: true,
+      readonly: true,
+      visible: false,
+      sequence: 0,
+      metadata: { persist_hidden: true, technical_row_identity: "CLIENT_GENERATED_UUID_V1" }
+    });
+
+    render(<OetsRenderer definition={boundedDefinition} onSubmit={onSubmit} runtimeTemplate={runtimeTemplate} />);
+
+    expect(screen.queryByLabelText("Finding Source Row Key")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Entry 1" })).not.toBeInTheDocument();
+    const add = screen.getByRole("button", { name: "Add entry" });
+    await user.click(add);
+    expect(add).toBeDisabled();
+    await user.type(screen.getByLabelText("Observation Time"), "09:30");
+    await user.click(screen.getByRole("button", { name: "Create Audit Draft" }));
+    const firstKey = (onSubmit.mock.calls[0][0].sections.REPEATABLE_OBSERVATIONS[0] as Record<string, unknown>).FINDING_SOURCE_ROW_KEY;
+    expect(firstKey).toMatch(/^[0-9a-f-]{36}$/);
+
+    await user.click(screen.getByRole("button", { name: "Remove" }));
+    expect(add).toBeEnabled();
+    await user.click(add);
+    await user.click(screen.getByRole("button", { name: "Create Audit Draft" }));
+    const secondKey = (onSubmit.mock.calls[1][0].sections.REPEATABLE_OBSERVATIONS[0] as Record<string, unknown>).FINDING_SOURCE_ROW_KEY;
+    expect(secondKey).not.toBe(firstKey);
+  });
+
+  it("locks a registered repeatable row and exposes its governed action state", () => {
+    const registeredDefinition = structuredClone(definition);
+    const section = registeredDefinition.sections.find((candidate) => candidate.section_code === "REPEATABLE_OBSERVATIONS")!;
+    section.fields.push({
+      field_id: "finding-number",
+      field_code: "FINDING_NUMBER",
+      label: "Finding Number",
+      field_type: "TEXT",
+      required: false,
+      readonly: true,
+      visible: true,
+      sequence: 99
+    });
+    render(<OetsRenderer
+      definition={registeredDefinition}
+      initialPayload={{sections:{REPEATABLE_OBSERVATIONS:[{OBSERVATION_TIME:"09:30",FINDING_NUMBER:"INSPECTION-FINDING-2026-000001"}]}}}
+      readOnly={false}
+      repeatableRowControl={{
+        sectionCode:"REPEATABLE_OBSERVATIONS",
+        isLocked:(values)=>Boolean(values.FINDING_NUMBER),
+        renderAction:()=> <span>Registered</span>
+      }}
+      runtimeTemplate={runtimeTemplate}
+    />);
+    expect(screen.getByText("Registered")).toBeInTheDocument();
+    expect(screen.getByLabelText("Observation Time")).toBeDisabled();
+    expect(screen.getByRole("button",{name:"Remove"})).toBeDisabled();
   });
 
   it("does not reuse repeatable instance identity after removing a non-last entry", async () => {
@@ -3276,25 +3713,6 @@ function trainingContext() {
   };
 }
 
-const runtimeTemplate: OetsTemplateRuntimeDefinition = {
-  template_registry_id: "registry-1",
-  template_version_id: "version-1",
-  template_code: "ARBITRARY_RUNTIME_TEMPLATE",
-  template_archetype: "CHECKLIST_INSPECTION",
-  template_version: "1.0",
-  schema_version: "1.0",
-  checksum: "checksum-1",
-  status: "ACTIVE",
-  definition_jsonb: undefined
-};
-
-const versionTwoRuntimeTemplate: OetsTemplateRuntimeDefinition = {
-  ...runtimeTemplate,
-  template_version_id: "version-2",
-  template_version: "2.0",
-  checksum: "checksum-2"
-};
-
 const definition: OetsDefinition = {
   schema_version: "1.0",
   template_metadata: {
@@ -3351,6 +3769,27 @@ const definition: OetsDefinition = {
       ]
     }
   ]
+};
+
+const runtimeTemplate: OetsTemplateRuntimeDefinition = {
+  template_registry_id: "registry-1",
+  template_version_id: "version-1",
+  template_code: "ARBITRARY_RUNTIME_TEMPLATE",
+  template_archetype: "CHECKLIST_INSPECTION",
+  template_version: "1.0",
+  schema_version: "1.0",
+  checksum: "checksum-1",
+  status: "ACTIVE",
+  definition_jsonb: undefined,
+  field_authority: testFieldAuthority(definition, "version-1")
+};
+
+const versionTwoRuntimeTemplate: OetsTemplateRuntimeDefinition = {
+  ...runtimeTemplate,
+  template_version_id: "version-2",
+  template_version: "2.0",
+  checksum: "checksum-2",
+  field_authority: testFieldAuthority({ ...definition, template_metadata: { ...definition.template_metadata, version: "2.0" } }, "version-2")
 };
 
 const workflowDefinition: OetsDefinition = {
@@ -4000,7 +4439,8 @@ function optionField(
           DEFENSIBILITY_SCORE_100: 92,
           DEFENSIBILITY_CLASSIFICATION: "PLATINUM"
         },
-        required_fields: []
+        required_fields: [],
+        field_authority: testFieldAuthority(f048Definition, f048Runtime.template_version_id)
       });
       if (url === "/api/v1/operational-evidence/records/drafts" && init?.method === "POST") {
         return jsonResponse(201, evidenceRecord());
@@ -4115,6 +4555,77 @@ function optionField(
     expect(calls.some((url) => url.includes("limit=25") && url.includes("cursor=page-2"))).toBe(true);
   });
 
+  it("fails closed when a Journey supplies locked context but the active template exposes no context authority", async () => {
+    const queryClient = createTestQueryClient();
+    queryClient.setQueryData(["oets-runtime-template", runtimeTemplate.template_code], { ...runtimeTemplate, definition_jsonb: definition });
+    const enrollmentId = "40000000-0000-4000-8000-000000000021";
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = readRequestPath(input);
+      calls.push({ url, init });
+      if (url.includes("/context-requirement?")) return jsonResponse(200, { required: false, requirement_code: null, selection_mode: null, presentation: null, duplicate_policy: null, successor_policy: null });
+      if (url.includes(`/context-candidates/${enrollmentId}?`)) return jsonResponse(404, { error: { code: "OEE_NOT_FOUND", message: "Context adapter unavailable." } });
+      throw new Error(`Unexpected locked-context mismatch request: ${url}`);
+    }));
+
+    renderRuntimeTemplatePageWithSession({
+      initialPath: "/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE",
+      queryClient,
+      currentSession: session,
+      runtimeProps: { initialClientId: testClientId, initialFacilityId: session.facilityIds[0], initialContextId: enrollmentId, lockInitialContext: true, lockInitialScope: true }
+    });
+
+    expect(await screen.findByText("Evidence context authority mismatch.")).toBeVisible();
+    expect(screen.getByText(/Evidence creation is disabled/)).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Begin Evidence" })).not.toBeInTheDocument();
+    expect(calls.some((call) => call.url === "/api/v1/operational-evidence/records/drafts" && call.init?.method === "POST")).toBe(false);
+  });
+
+  it("registers an Asset through ASSET_CONTEXT, selects it, and begins governed evidence", async () => {
+    const queryClient=createTestQueryClient(),facilityId=session.facilityIds[0]!,assetId="40000000-0000-4000-8000-000000000001";
+    queryClient.setQueryData(["oets-runtime-template",runtimeTemplate.template_code],{...runtimeTemplate,definition_jsonb:definition});
+    const calls:Array<{url:string;init?:RequestInit}>=[];
+    vi.stubGlobal("fetch",vi.fn(async(input:RequestInfo|URL,init?:RequestInit)=>{const url=readRequestPath(input);calls.push({url,init});
+      if(url.includes("/context-requirement?"))return jsonResponse(200,{required:true,requirement_code:"ASSET_CONTEXT",selection_mode:"EXPLICIT",presentation:{label:"Asset context",help_text:"Select the exact governed Asset.",candidate_singular:"Asset",candidate_plural:"Assets"},duplicate_policy:"ONE_ACTIVE_DRAFT_PER_SUBJECT",successor_policy:"CLONE_IMMUTABLE_CONTEXT"});
+      if(url.includes("/context-candidates?")){const registered=calls.some(call=>call.url==="/api/v1/assets"&&call.init?.method==="POST");return jsonResponse(200,{candidates:registered?[{id:assetId,primary_label:"ASSET-2026-000001",secondary_label:"Rescue Tube 1 · RESCUE_EQUIPMENT",context_kind:"ASSET"}]:[],count:registered?1:0,next_cursor:null,selection_mode:"EXPLICIT"});}
+      if(url==="/api/v1/assets"&&init?.method==="POST")return jsonResponse(200,{success:true,data:{asset_id:assetId,business_identifier:"ASSET-2026-000001",client_id:testClientId,facility_id:facilityId,equipment_name:"Rescue Tube 1",equipment_category:"RESCUE_EQUIPMENT",equipment_subtype:null,manufacturer:null,model_number:null,serial_number:null,assigned_location:null,assigned_custodian:null,placed_in_service_date:null,preventive_maintenance_applicability:"UNSPECIFIED",rescue_inspection_applicability:"UNSPECIFIED",calibration_applicability:"UNSPECIFIED",lifecycle_status:"ACTIVE",created_by_user_id:session.id,created_at:"2026-09-16T00:00:00.000Z"}});
+      if(url.includes(`/context-candidates/${assetId}?`))return jsonResponse(200,{requirement_code:"ASSET_CONTEXT",selected_id:assetId,summary:{id:assetId,primary_label:"ASSET-2026-000001",secondary_label:"Rescue Tube 1 · RESCUE_EQUIPMENT",context_kind:"ASSET"},field_policy:{},authoritative_values:{},required_fields:[],field_authority:testFieldAuthority(definition,runtimeTemplate.template_version_id)});
+      if(url.endsWith("/context-record-resolution")&&init?.method==="POST")return jsonResponse(200,{resolution:"NO_EXISTING_RECORD",duplicate_policy:"ONE_ACTIVE_DRAFT_PER_SUBJECT"});
+      if(url==="/api/v1/operational-evidence/records/drafts"&&init?.method==="POST")return jsonResponse(201,evidenceRecord());
+      throw new Error(`Unexpected Asset context request: ${url}`);
+    }));
+    const user=userEvent.setup();renderRuntimeTemplatePageWithSession({initialPath:"/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE",queryClient,currentSession:{...session,permissions:[...session.permissions,"create_asset"]}});
+    expect(await screen.findByText("Asset context")).toBeInTheDocument();await user.click(screen.getByRole("button",{name:"Register New Asset"}));await user.type(screen.getByLabelText("Equipment name"),"Rescue Tube 1");await user.click(screen.getByRole("button",{name:"Register Asset"}));expect(await screen.findByText("Asset ASSET-2026-000001 registered.")).toBeInTheDocument();expect(await screen.findByText(/Using ASSET-2026-000001/)).toBeInTheDocument();await user.click(screen.getByRole("button",{name:"Begin Evidence"}));const draft=calls.find(call=>call.url==="/api/v1/operational-evidence/records/drafts"&&call.init?.method==="POST");expect(JSON.parse(String(draft?.init?.body)).context).toEqual({requirement_code:"ASSET_CONTEXT",selected_id:assetId});
+  });
+
+  it("preflights a governed context and offers the accessible historical Draft without creating another", async () => {
+    const queryClient = createTestQueryClient();
+    queryClient.setQueryData(["oets-runtime-template", runtimeTemplate.template_code], { ...runtimeTemplate, template_version: "3.4", definition_jsonb: definition });
+    const staffId = "40000000-0000-4000-8000-000000000093";
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = readRequestPath(input); calls.push({ url, init });
+      if (url.includes("/context-requirement?")) return jsonResponse(200,{required:true,requirement_code:"PERSONNEL_CONTEXT",selection_mode:"EXPLICIT",presentation:{label:"Personnel context",help_text:"Select the exact active Staff Member.",candidate_singular:"Staff Member",candidate_plural:"Staff Members"},duplicate_policy:"ONE_LIVE_RECORD_PER_SUBJECT",successor_policy:"CLONE_IMMUTABLE_CONTEXT"});
+      if (url.includes(`/context-candidates/${staffId}?`)) return jsonResponse(200,{requirement_code:"PERSONNEL_CONTEXT",selected_id:staffId,summary:{id:staffId,primary_label:"Elmer Miranda",secondary_label:"ACTIVE",context_kind:"STAFF_MEMBER"},field_policy:{},authoritative_values:{},required_fields:[],field_authority:testFieldAuthority(definition,runtimeTemplate.template_version_id)});
+      if (url.endsWith("/context-record-resolution") && init?.method === "POST") return jsonResponse(200,{resolution:"EXISTING_RECORD",duplicate_policy:"ONE_LIVE_RECORD_PER_SUBJECT",record:{evidence_record_id:"evidence-record-1",lifecycle_state:"DRAFT",template_version:"3.3",version_relation:"HISTORICAL_VERSION",access_action:"CONTINUE_DRAFT"}});
+      throw new Error(`Unexpected contextual preflight request: ${url}`);
+    }));
+
+    const user = userEvent.setup();
+    renderRuntimeTemplatePageWithSession({
+      initialPath: "/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE",
+      queryClient,
+      currentSession: session,
+      runtimeProps: { initialClientId: testClientId, initialFacilityId: session.facilityIds[0], initialContextId: staffId, lockInitialContext: true, lockInitialScope: true }
+    });
+
+    expect(await screen.findByText("Existing Draft found")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Begin Evidence" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Continue existing v3.3 Draft" }));
+    expect(await screen.findByText("Persisted evidence record route")).toBeVisible();
+    expect(calls.some((call) => call.url === "/api/v1/operational-evidence/records/drafts")).toBe(false);
+  });
+
   it("does not erase operator input when a Journey recreates equivalent initial field values on dirty change", async () => {
     const queryClient = createTestQueryClient();
     queryClient.setQueryData(["oets-runtime-template", runtimeTemplate.template_code], { ...runtimeTemplate, definition_jsonb: definition });
@@ -4142,9 +4653,14 @@ function optionField(
 
   it("creates a governed-template draft only after deliberate Begin Evidence and uses the draft endpoint", async () => {
     const queryClient = createTestQueryClient();
+    const exactDefinition = governedDefinition();
     queryClient.setQueryData(
       ["oets-runtime-template", runtimeTemplate.template_code],
-      { ...runtimeTemplate, definition_jsonb: governedDefinition() }
+      {
+        ...runtimeTemplate,
+        definition_jsonb: exactDefinition,
+        field_authority: testFieldAuthority(exactDefinition, runtimeTemplate.template_version_id)
+      }
     );
     const { calls } = mockFetchQueue([{ status: 201, body: evidenceRecord({ lifecycle_state: "DRAFT" }) }]);
     const user = userEvent.setup();
@@ -4266,13 +4782,15 @@ function optionField(
     } as const;
     let persisted = {
       ...evidenceRecord({ lifecycle_state: "DRAFT", context, payload: { sections: { CERTIFIED_INDIVIDUAL_PROFILE: { EMAIL: "cloudio@skyranch.com", TELEPHONE: "+63 917 555 0101" } } } }),
-      template_provenance: { template_id:"f041",template_code:f041Runtime.template_code,template_version:"3.2",template_registry_id:f041Runtime.template_registry_id,template_version_id:f041Runtime.template_version_id,schema_version:f041Runtime.schema_version,checksum:f041Runtime.checksum }
+      template_provenance: { template_id:"f041",template_code:f041Runtime.template_code,template_version:"3.2",template_registry_id:f041Runtime.template_registry_id,template_version_id:f041Runtime.template_version_id,schema_version:f041Runtime.schema_version,checksum:f041Runtime.checksum },
+      field_authority: testFieldAuthority(f041Definition, f041Runtime.template_version_id)
     };
     const calls: Array<{url:string;init?:RequestInit}> = [];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = readRequestPath(input); const method = init?.method ?? "GET"; calls.push({url,init});
       if (url.includes("/context-requirement?")) return jsonResponse(200,{required:true,requirement_code:"CERTIFICATION_CONTEXT",selection_mode:"EXPLICIT",presentation:{label:"Certification context",help_text:"Select certification.",candidate_singular:"Certification",candidate_plural:"Certifications"},duplicate_policy:"ONE_LIVE_RECORD_PER_SUBJECT",successor_policy:"CLONE_IMMUTABLE_CONTEXT"});
-      if (url.includes("/context-candidates/certification-1?")) return jsonResponse(200,context);
+      if (url.includes("/context-candidates/certification-1?")) return jsonResponse(200,{...context,field_authority:testFieldAuthority(f041Definition,f041Runtime.template_version_id)});
+      if (url.endsWith("/context-record-resolution") && method === "POST") return jsonResponse(200,{resolution:"NO_EXISTING_RECORD",duplicate_policy:"ONE_LIVE_RECORD_PER_SUBJECT"});
       if (url === "/api/v1/operational-evidence/records/drafts" && method === "POST") return jsonResponse(201,persisted);
       if (url === `/api/v1/operational-evidence/records/${persisted.id}` && method === "GET") return jsonResponse(200,persisted);
       if (url.endsWith("/actions")) return jsonResponse(200,{projection_version:"EVIDENCE_RECORD_ACTIONS_V1",evidence_record_id:persisted.id,lifecycle_state:"DRAFT",revision:`test:${persisted.payload_checksum}`,actions:[{action:"TRANSITION",transition_trigger:"FINALIZE_DRAFT",target_state:"SUBMITTED",governance_authority_code:null,review_claim:null,claimed_by_name:null}]});
@@ -4310,9 +4828,139 @@ function optionField(
     expect(await screen.findByRole("button",{name:"Finalize Draft"})).toBeVisible();
   });
 
+  it("completes the F091 fixed-roster journey through Begin Evidence, save, and reopen", async () => {
+    const user = userEvent.setup();
+    const queryClient = createTestQueryClient();
+    const f091Runtime: OetsTemplateRuntimeDefinition = {
+      ...runtimeTemplate,
+      template_code: "OGI_F091_TRAINING_ATTENDANCE_REGISTER",
+      template_version: "3.3",
+      template_version_id: "f091-version-33",
+      checksum: "f091-checksum"
+    };
+    const f091Definition: OetsDefinition = {
+      ...definition,
+      template_metadata: { ...definition.template_metadata, template_code: f091Runtime.template_code, template_name: "Training Attendance and Participation Intelligence Report", version: "3.3" },
+      sections: [
+        {
+          section_id: "f091-participants",
+          section_code: "PARTICIPANT_INFORMATION",
+          title: "Participant Information",
+          sequence: 1,
+          repeatable: true,
+          fields: [
+            { ...textField("EMPLOYEE_NAME", "Employee Name", "TEXT", 1), field_id: "f091-participant-name" },
+            { ...textField("EMPLOYEE_ID", "Employee ID", "TEXT", 2), field_id: "f091-participant-id" },
+            { ...textField("POSITION", "Position", "TEXT", 3), field_id: "f091-participant-position" }
+          ]
+        },
+        {
+          section_id: "f091-attendance",
+          section_code: "ATTENDANCE_VERIFICATION",
+          title: "Attendance Verification",
+          sequence: 2,
+          repeatable: true,
+          fields: [
+            { ...textField("ATTENDANCE_STATUS", "Attendance Status", "TEXT", 1), field_id: "f091-attendance-status" },
+            { ...textField("ARRIVAL_TIME", "Arrival Time", "TIME", 2), field_id: "f091-arrival-time" }
+          ]
+        }
+      ],
+      workflow: {
+        states: [{ state_code: "DRAFT", label: "Draft" }, { state_code: "SUBMITTED", label: "Submitted" }],
+        transitions: [{ from: "DRAFT", to: "SUBMITTED", trigger: "FINALIZE_DRAFT", label: "Finalize Draft" }]
+      }
+    };
+    const rosterGroup = {
+      group_code: "TRAINING_SESSION_ROSTER",
+      cardinality: "FIXED" as const,
+      instance_count: 3,
+      max_instances: 100,
+      sections: [
+        { section_code: "PARTICIPANT_INFORMATION", instances: [
+          { EMPLOYEE_NAME: "Alpha Trainee", EMPLOYEE_ID: "OGI-STU-2026-0001" },
+          { EMPLOYEE_NAME: "Bravo Trainee" },
+          { EMPLOYEE_NAME: "Charlie Trainee", EMPLOYEE_ID: "OGI-STU-2026-0003" }
+        ] },
+        { section_code: "ATTENDANCE_VERIFICATION", instances: [{}, {}, {}] }
+      ]
+    };
+    const resolvedContext = {
+      requirement_code: "TRAINING_SESSION_CONTEXT",
+      selected_id: "training-session-1",
+      summary: { id: "training-session-1", primary_label: "TRAINING-SESSION-2026-000409", secondary_label: "Roster Training · 2026-09-12", context_kind: "TRAINING_SESSION" },
+      field_policy: {
+        "PARTICIPANT_INFORMATION.EMPLOYEE_NAME": "READ_ONLY_DERIVED",
+        "PARTICIPANT_INFORMATION.EMPLOYEE_ID": "READ_ONLY_DERIVED",
+        ATTENDANCE_STATUS: "OPERATOR_EDITABLE",
+        ARRIVAL_TIME: "OPERATOR_EDITABLE",
+        POSITION: "OPERATOR_EDITABLE"
+      },
+      authoritative_values: {},
+      required_fields: [],
+      repeatable_groups: [rosterGroup]
+    } as const;
+    const existingContext = { ...resolvedContext, context_kind: "TRAINING_SESSION", snapshot_provenance: "EVIDENCE_BINDING_AND_PAYLOAD" as const };
+    let persisted = {
+      ...evidenceRecord({ lifecycle_state: "DRAFT", context: existingContext, payload: { sections: {} } }),
+      template_provenance: { template_id:"f091",template_code:f091Runtime.template_code,template_version:"3.3",template_registry_id:f091Runtime.template_registry_id,template_version_id:f091Runtime.template_version_id,schema_version:f091Runtime.schema_version,checksum:f091Runtime.checksum },
+      field_authority: testFieldAuthority(f091Definition, f091Runtime.template_version_id)
+    };
+    const calls: Array<{url:string;init?:RequestInit}> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url=readRequestPath(input);const method=init?.method??"GET";calls.push({url,init});
+      if(url.includes("/context-requirement?"))return jsonResponse(200,{required:true,requirement_code:"TRAINING_SESSION_CONTEXT",selection_mode:"EXPLICIT",presentation:{label:"Training Session context",help_text:"Select the exact governed Training Session.",candidate_singular:"Training Session",candidate_plural:"Training Sessions"},duplicate_policy:"ONE_LIVE_RECORD_PER_SUBJECT",successor_policy:"CLONE_IMMUTABLE_CONTEXT"});
+      if(url.includes("/context-candidates?")&&!url.includes("training-session-1"))return jsonResponse(200,{candidates:[resolvedContext.summary],count:1,next_cursor:null,selection_mode:"EXPLICIT"});
+      if(url.includes("/context-candidates/training-session-1?"))return jsonResponse(200,{...resolvedContext,field_authority:testFieldAuthority(f091Definition,f091Runtime.template_version_id)});
+      if(url.endsWith("/context-record-resolution")&&method==="POST")return jsonResponse(200,{resolution:"NO_EXISTING_RECORD",duplicate_policy:"ONE_LIVE_RECORD_PER_SUBJECT"});
+      if(url==="/api/v1/operational-evidence/records/drafts"&&method==="POST"){
+        const body=JSON.parse(String(init?.body));
+        persisted={...persisted,payload:body.payload};
+        return jsonResponse(201,persisted);
+      }
+      if(url===`/api/v1/operational-evidence/records/${persisted.id}`&&method==="GET")return jsonResponse(200,persisted);
+      if(url.endsWith("/actions"))return jsonResponse(200,{projection_version:"EVIDENCE_RECORD_ACTIONS_V1",evidence_record_id:persisted.id,lifecycle_state:"DRAFT",revision:`test:${persisted.payload_checksum}`,actions:[{action:"TRANSITION",transition_trigger:"FINALIZE_DRAFT",target_state:"SUBMITTED",governance_authority_code:null,review_claim:null,claimed_by_name:null}]});
+      if(url.includes("/template-versions/f091-version-33"))return jsonResponse(200,{...f091Runtime,definition_jsonb:f091Definition});
+      if(url.endsWith("/payload")&&method==="PATCH"){
+        const body=JSON.parse(String(init?.body));
+        persisted={...persisted,payload:body.payload,payload_checksum:"f091-payload-checksum-2"};
+        return jsonResponse(200,persisted);
+      }
+      throw new Error(`Unexpected F091 journey request: ${method} ${url}`);
+    }));
+    queryClient.setQueryData(["oets-runtime-template",f091Runtime.template_code],{...f091Runtime,definition_jsonb:f091Definition});
+
+    function F091JourneyHarness(){const[recordId,setRecordId]=useState<string|null>(null);const[dirty,setDirty]=useState(false);return <div><header><div id="f091-journey-actions"/>{dirty?<span>Unsaved journey changes</span>:null}<button type="button">← Back to Facility Assessment Journey</button></header>{recordId?<OperationalEvidenceRecordPage actionPortalId="f091-journey-actions" embeddedRecordId={recordId} onDirtyChange={setDirty}/>:<RuntimeTemplatePage actionPortalId="f091-journey-actions" embeddedTemplateCode={f091Runtime.template_code} initialClientId={session.clientId} initialFacilityId={session.facilityIds[0]} lockInitialScope onDirtyChange={setDirty} onDraftCreated={setRecordId}/>}</div>}
+    render(<QueryClientProvider client={queryClient}><AuthContext.Provider value={authContextValue({...session,permissions:[...session.permissions,"submit_operational_evidence","view_training"]})}><MemoryRouter><F091JourneyHarness/></MemoryRouter></AuthContext.Provider></QueryClientProvider>);
+
+    const selector=await screen.findByLabelText("Select Training Session");
+    await screen.findByRole("option",{name:/TRAINING-SESSION-2026-000409/});
+    await waitFor(()=>expect(selector).not.toBeDisabled());
+    await user.selectOptions(selector,"training-session-1");
+    expect(selector).toHaveValue("training-session-1");
+    expect(screen.queryByText("Unsaved journey changes")).not.toBeInTheDocument();
+    const names=await screen.findAllByLabelText("Employee Name");
+    expect(names).toHaveLength(3);expect(names.map((field)=>(field as HTMLInputElement).value)).toEqual(["Alpha Trainee","Bravo Trainee","Charlie Trainee"]);expect(names.every((field)=>(field as HTMLInputElement).disabled)).toBe(true);
+    const numbers=screen.getAllByLabelText("Employee ID");expect(numbers.map((field)=>(field as HTMLInputElement).value)).toEqual(["OGI-STU-2026-0001","","OGI-STU-2026-0003"]);expect(numbers.every((field)=>(field as HTMLInputElement).disabled)).toBe(true);
+    expect(screen.queryByRole("button",{name:"Add entry"})).not.toBeInTheDocument();expect(screen.queryByRole("button",{name:"Remove"})).not.toBeInTheDocument();expect(screen.queryByText("Unsaved journey changes")).not.toBeInTheDocument();
+    const attendance=screen.getAllByLabelText("Attendance Status");await user.type(attendance[0],"Present");await user.type(attendance[1],"Absent");await user.type(attendance[2],"Late");
+    await user.click(screen.getByRole("button",{name:"Begin Evidence"}));
+    expect(await screen.findByRole("button",{name:/Back to Facility Assessment Journey/})).toBeVisible();
+    const draftRequest=calls.find(call=>call.url==="/api/v1/operational-evidence/records/drafts"&&call.init?.method==="POST");const draftBody=JSON.parse(String(draftRequest?.init?.body));
+    expect(draftBody.context).toEqual({requirement_code:"TRAINING_SESSION_CONTEXT",selected_id:"training-session-1"});expect(draftBody.payload.sections.PARTICIPANT_INFORMATION).toHaveLength(3);expect(draftBody.payload.sections.ATTENDANCE_VERIFICATION.map((row:Record<string,unknown>)=>row.ATTENDANCE_STATUS)).toEqual(["Present","Absent","Late"]);
+    expect(await screen.findByRole("button",{name:"Finalize Draft"})).toBeVisible();
+    const reopenedAttendance=await screen.findAllByLabelText("Attendance Status");await user.clear(reopenedAttendance[1]);await user.type(reopenedAttendance[1],"Excused");expect(screen.getByText("Unsaved journey changes")).toBeVisible();expect(screen.queryByRole("button",{name:"Finalize Draft"})).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button",{name:"Save Draft"}));await waitFor(()=>expect(calls.filter(call=>call.init?.method==="PATCH")).toHaveLength(1));expect((await screen.findAllByText("Draft evidence saved.")).length).toBeGreaterThan(0);await waitFor(()=>expect(screen.queryByText("Unsaved journey changes")).not.toBeInTheDocument());expect((await screen.findAllByLabelText("Employee Name")).map(field=>(field as HTMLInputElement).value)).toEqual(["Alpha Trainee","Bravo Trainee","Charlie Trainee"]);expect((await screen.findAllByLabelText("Attendance Status")).map(field=>(field as HTMLInputElement).value)).toEqual(["Present","Excused","Late"]);expect(await screen.findByRole("button",{name:"Finalize Draft"})).toBeVisible();
+  });
+
   it("recovers from governed draft creation failure without fake navigation and permits retry", async () => {
     const queryClient = createTestQueryClient();
-    queryClient.setQueryData(["oets-runtime-template", runtimeTemplate.template_code], { ...runtimeTemplate, definition_jsonb: governedDefinition() });
+    const exactDefinition = governedDefinition();
+    queryClient.setQueryData(["oets-runtime-template", runtimeTemplate.template_code], {
+      ...runtimeTemplate,
+      definition_jsonb: exactDefinition,
+      field_authority: testFieldAuthority(exactDefinition, runtimeTemplate.template_version_id)
+    });
     const { calls } = mockFetchQueue([
       { status: 500, statusText: "Failure", body: { error: { code: "OEE_PERSISTENCE_FAILURE", message: "Draft persistence failed." } } },
       { status: 201, body: evidenceRecord({ lifecycle_state: "DRAFT" }) }

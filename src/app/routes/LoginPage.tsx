@@ -13,6 +13,7 @@ export function LoginPage() {
   const [password, setPassword] = useState("");
   const [fieldError, setFieldError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const activationSucceeded=readActivationSuccess(location.state);
 
   if (auth.status === "authenticated") {
     return <Navigate replace to={readDestination(location.state) ?? routes.workbench} />;
@@ -92,6 +93,9 @@ export function LoginPage() {
         </div>
 
         <form className="mt-9 space-y-6" onSubmit={handleSubmit}>
+          {activationSucceeded?<p role="status" className="rounded-component border border-state-success bg-green-50 px-3 py-2 text-sm text-green-800">
+            Your account is ready. Sign in with your new password.
+          </p>:null}
           <div>
             <label
               className="block text-base font-semibold text-primary-navy"
@@ -153,6 +157,9 @@ export function LoginPage() {
     </main>
   );
 }
+
+function readActivationSuccess(state:unknown){return Boolean(state&&typeof state==="object"&&
+  "personnelAccountActivated" in state&&(state as {personnelAccountActivated?:unknown}).personnelAccountActivated===true);}
 
 function readDestination(state: unknown) {
   if (!state || typeof state !== "object" || !("from" in state)) {

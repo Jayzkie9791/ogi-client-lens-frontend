@@ -285,7 +285,7 @@ afterEach(() => {
 });
 
 describe("Credentials V1 frontend", () => {
-  it("exposes permission-aware Credentials navigation and preserves Registration routes", async () => {
+  it("exposes permission-aware Credentials navigation and preserves Organization routes", async () => {
     const user = userEvent.setup();
     const { calls } = mockFetchRoutes([
       ...authRoutes(registrationSession),
@@ -304,13 +304,13 @@ describe("Credentials V1 frontend", () => {
       "href",
       routes.credentials
     );
-    await user.click(screen.getByRole("button", { name: "Registration" }));
-    expect(screen.getByRole("link", { name: "Clients" })).toHaveAttribute(
+    await user.click(screen.getByRole("button", { name: "Organizations" }));
+    expect(screen.getByRole("link", { name: "Client Masterlist" })).toHaveAttribute(
       "href",
-      routes.registrationClients
+      routes.clientMasterlist
     );
 
-    await user.click(screen.getByRole("link", { name: "Clients" }));
+    await user.click(screen.getByRole("link", { name: "Client Masterlist" }));
 
     expect(
       await screen.findByRole("heading", { name: "Clients / Organizations" })

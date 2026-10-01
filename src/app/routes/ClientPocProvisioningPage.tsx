@@ -1,615 +1,70 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-
-import {
-  provisionClientPoc,
-  ProvisionClientPocResponse
-} from "../../admin/clientPocProvisioningApi";
 import { isApiError } from "../../api/errors";
 import { useAuth } from "../../auth/useAuth";
+import { ClientPocInvitation, issueClientPocInvitation, listClientPocInvitations, revokeClientPocInvitation } from "../../admin/clientPocInvitationApi";
 import { listRegistrationClients } from "../../registration/registrationClientApi";
-import {
-  listRegistrationFacilities,
-  RegistrationFacility
-} from "../../registration/registrationFacilityApi";
+import { listRegistrationFacilities, RegistrationFacility } from "../../registration/registrationFacilityApi";
 import { Button } from "../../ui/components/Button";
 import { Surface } from "../../ui/components/Surface";
 import { routes } from "../routePaths";
 
-type FacilityScopeMode = "EXPLICIT" | "CLIENT_WIDE";
-
-interface ProvisionClientPocFormState {
-  clientId: string;
-  fullName: string;
-  email: string;
-  initialPassword: string;
-  facilityScopeMode: FacilityScopeMode;
-  explicitFacilityIds: string[];
-}
-
-interface ProvisioningConfirmation {
-  account: ProvisionClientPocResponse;
-  clientName: string;
-  facilityLabels: string[];
-}
-
-const createUserPermission = "create_user";
-
-const emptyForm: ProvisionClientPocFormState = {
-  clientId: "",
-  fullName: "",
-  email: "",
-  initialPassword: "",
-  facilityScopeMode: "EXPLICIT",
-  explicitFacilityIds: []
-};
+type ScopeMode = "EXPLICIT" | "CLIENT_WIDE";
+const permission = "create_user";
+const inputClass = "mt-1 block min-h-10 w-full rounded-component border border-border bg-surface px-3 py-2 text-sm text-text-primary outline-none focus:border-primary-blue focus:ring-2 focus:ring-focus";
 
 export function ClientPocProvisioningPage() {
-  const auth = useAuth();
-  const queryClient = useQueryClient();
-  const canProvisionClientPoc = auth.canUsePermission(createUserPermission);
-  const [formState, setFormState] =
-    useState<ProvisionClientPocFormState>(emptyForm);
-  const [localError, setLocalError] = useState<string | null>(null);
-  const [confirmation, setConfirmation] =
-    useState<ProvisioningConfirmation | null>(null);
+  const auth = useAuth(), queryClient = useQueryClient();
+  const allowed = auth.canUsePermission(permission) && !auth.session?.clientId;
+  const [clientId, setClientId] = useState(""), [fullName, setFullName] = useState(""), [email, setEmail] = useState("");
+  const [scopeMode, setScopeMode] = useState<ScopeMode>("EXPLICIT"), [facilityIds, setFacilityIds] = useState<string[]>([]);
+  const [activationLink, setActivationLink] = useState<string | null>(null), [notice, setNotice] = useState<string | null>(null);
+  const clientsQuery = useQuery({ queryKey: ["registration-clients"], queryFn: listRegistrationClients, enabled: allowed, retry: false });
+  const clients = useMemo(() => (clientsQuery.data?.clients ?? []).filter(item => item.status === "ACTIVE"), [clientsQuery.data]);
+  useEffect(() => { if (!clientId && clients[0]) setClientId(clients[0].id); }, [clientId, clients]);
+  const facilitiesQuery = useQuery({ queryKey: ["registration-facilities", clientId], queryFn: () => listRegistrationFacilities({ clientId }), enabled: allowed && scopeMode === "EXPLICIT" && Boolean(clientId), retry: false });
+  const facilities = useMemo(() => (facilitiesQuery.data?.facilities ?? []).filter(item => item.operational_status === "ACTIVE"), [facilitiesQuery.data]);
+  const invitationsQuery = useQuery({ queryKey: ["client-poc-invitations"], queryFn: listClientPocInvitations, enabled: allowed, retry: false });
+  const issue = useMutation({ mutationFn: () => issueClientPocInvitation({ client_id: clientId, full_name: fullName.trim(), email: email.trim(), facility_scope: scopeMode === "CLIENT_WIDE" ? { mode: "CLIENT_WIDE" } : { mode: "EXPLICIT", facility_ids: facilityIds } }, crypto.randomUUID()), onSuccess: result => {
+    void queryClient.invalidateQueries({ queryKey: ["client-poc-invitations"] });
+    if (result.activation_token) { setActivationLink(`${window.location.origin}${routes.activatePersonnelAccount}?client_poc_token=${encodeURIComponent(result.activation_token)}`); setNotice("Invitation created. Copy this one-time registration link before leaving this page."); }
+    else { setActivationLink(null); setNotice("This invitation already exists, but its one-time link is no longer available. Issue a replacement if another copy is required."); }
+  }});
+  const revoke = useMutation({ mutationFn: revokeClientPocInvitation, onSuccess: () => { setActivationLink(null); setNotice("Invitation revoked."); void queryClient.invalidateQueries({ queryKey: ["client-poc-invitations"] }); } });
 
-  const clientsQuery = useQuery({
-    queryKey: ["registration-clients"],
-    queryFn: () => listRegistrationClients(),
-    enabled: canProvisionClientPoc,
-    retry: false
-  });
-  const clients = useMemo(
-    () => clientsQuery.data?.clients ?? [],
-    [clientsQuery.data]
-  );
-  const activeClients = useMemo(
-    () => clients.filter((client) => client.status === "ACTIVE"),
-    [clients]
-  );
-  const selectedClient = activeClients.find(
-    (client) => client.id === formState.clientId
-  );
+  if (!auth.canUsePermission(permission)) return <SafeState title="You are not authorized to invite Client POC accounts.">Your current session does not include Client POC invitation authority.</SafeState>;
+  if (auth.session?.clientId) return <SafeState title="You are not authorized to invite Client POC accounts.">Client-bound sessions cannot use this OGI invitation workflow.</SafeState>;
+  function submit(event: FormEvent) { event.preventDefault(); setNotice(null); setActivationLink(null); issue.mutate(); }
+  function toggleFacility(id: string) { setFacilityIds(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id]); }
+  async function copyLink() { if (!activationLink) return; try { await navigator.clipboard.writeText(activationLink); setNotice("Registration link copied."); } catch { setNotice("Clipboard access failed. Select and copy the link manually."); } }
 
-  useEffect(() => {
-    if (!formState.clientId && activeClients.length > 0) {
-      setFormState((current) => ({
-        ...current,
-        clientId: activeClients[0].id,
-        explicitFacilityIds: []
-      }));
-    }
-  }, [activeClients, formState.clientId]);
-
-  const facilitiesQuery = useQuery({
-    queryKey: ["registration-facilities", formState.clientId],
-    queryFn: () => listRegistrationFacilities({ clientId: formState.clientId }),
-    enabled:
-      canProvisionClientPoc &&
-      formState.facilityScopeMode === "EXPLICIT" &&
-      Boolean(formState.clientId),
-    retry: false
-  });
-  const activeFacilities = useMemo(
-    () =>
-      (facilitiesQuery.data?.facilities ?? []).filter(
-        (facility) => facility.operational_status === "ACTIVE"
-      ),
-    [facilitiesQuery.data]
-  );
-
-  const provisionMutation = useMutation({
-    mutationFn: () =>
-      provisionClientPoc({
-        client_id: formState.clientId,
-        full_name: formState.fullName.trim(),
-        email: formState.email.trim(),
-        initial_password: formState.initialPassword,
-        facility_scope:
-          formState.facilityScopeMode === "CLIENT_WIDE"
-            ? { mode: "CLIENT_WIDE" }
-            : {
-                mode: "EXPLICIT",
-                facility_ids: formState.explicitFacilityIds
-              }
-      }),
-    onSuccess: (account) => {
-      setConfirmation({
-        account,
-        clientName: selectedClient?.organization_name ?? account.client_id,
-        facilityLabels: facilityLabelsForSelection(
-          account.explicit_facility_ids,
-          activeFacilities
-        )
-      });
-      setLocalError(null);
-      setFormState((current) => ({
-        ...emptyForm,
-        clientId: current.clientId,
-        initialPassword: ""
-      }));
-      void queryClient.invalidateQueries({ queryKey: ["administration-users"] });
-    },
-    onError: (error) => {
-      if (
-        isApiError(error) &&
-        error.status === 404 &&
-        error.message.toLowerCase().includes("facility")
-      ) {
-        void queryClient.invalidateQueries({
-          queryKey: ["registration-facilities", formState.clientId]
-        });
-      }
-    }
-  });
-
-  function updateClient(clientId: string) {
-    setFormState((current) => ({
-      ...current,
-      clientId,
-      explicitFacilityIds: []
-    }));
-    setLocalError(null);
-    setConfirmation(null);
-  }
-
-  function updateFacilityScopeMode(facilityScopeMode: FacilityScopeMode) {
-    setFormState((current) => ({
-      ...current,
-      facilityScopeMode,
-      explicitFacilityIds: []
-    }));
-    setLocalError(null);
-    setConfirmation(null);
-  }
-
-  function toggleFacility(facilityId: string) {
-    setFormState((current) => {
-      const explicitFacilityIds = current.explicitFacilityIds.includes(facilityId)
-        ? current.explicitFacilityIds.filter((id) => id !== facilityId)
-        : [...current.explicitFacilityIds, facilityId];
-
-      return {
-        ...current,
-        explicitFacilityIds
-      };
-    });
-    setLocalError(null);
-    setConfirmation(null);
-  }
-
-  function submitForm(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setConfirmation(null);
-
-    const validationError = validateForm(formState);
-
-    if (validationError) {
-      setLocalError(validationError);
-      return;
-    }
-
-    setLocalError(null);
-    provisionMutation.mutate();
-  }
-
-  if (!canProvisionClientPoc) {
-    return (
-      <SafeState title="You are not authorized to provision Client POC accounts.">
-        Your current session does not include Client POC provisioning authority.
-      </SafeState>
-    );
-  }
-
-  if (auth.session?.clientId) {
-    return (
-      <SafeState title="You are not authorized to provision Client POC accounts.">
-        Client-bound sessions cannot use the OGI-side Client POC provisioning workflow.
-      </SafeState>
-    );
-  }
-
-  return (
-    <section aria-labelledby="client-poc-provisioning-heading" className="space-y-4">
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-wide text-primary-blue">
-          Administration
-        </p>
-        <h1
-          className="mt-2 text-2xl font-semibold text-text-primary"
-          id="client-poc-provisioning-heading"
-        >
-          Provision Client POC
-        </h1>
-        <p className="mt-2 max-w-3xl text-sm leading-6 text-text-muted">
-          Create one Client point-of-contact account using the server-owned Client Administrator provisioning contract.
-        </p>
+  return <section aria-labelledby="client-poc-invitation-heading" className="space-y-4">
+    <div><p className="text-xs font-semibold uppercase tracking-wide text-primary-blue">Administration</p><h1 className="mt-2 text-2xl font-semibold text-text-primary" id="client-poc-invitation-heading">Invite Client POC</h1><p className="mt-2 max-w-3xl text-sm leading-6 text-text-muted">Create a one-time registration link. The invited Client POC confirms their business email and chooses their own password; no account is created until activation.</p></div>
+    <Button asChild variant="secondary"><Link to={routes.administration}>Back to Administration</Link></Button>
+    <Surface><form aria-label="Invite Client POC" className="space-y-5" onSubmit={submit}>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <label className="block text-sm font-semibold text-text-primary">Client<select className={inputClass} disabled={clientsQuery.isLoading || issue.isPending} value={clientId} onChange={event => { setClientId(event.currentTarget.value); setFacilityIds([]); }} required><option value="">Select a Client</option>{clients.map(client => <option key={client.id} value={client.id}>{client.organization_name}</option>)}</select></label>
+        <FormInput label="Full name" value={fullName} onChange={setFullName} disabled={issue.isPending} />
+        <FormInput label="Business email" value={email} onChange={setEmail} disabled={issue.isPending} type="email" />
+        <div className="rounded-component border border-blue-100 bg-blue-50 p-3 text-sm"><p><strong>Server-assigned role:</strong> Client Administrator</p><p className="mt-1 text-text-muted">The recipient creates the password during activation.</p></div>
       </div>
-
-      <Button asChild variant="secondary">
-        <Link to={routes.administration}>Back to Administration</Link>
-      </Button>
-
-      {confirmation ? <ProvisioningSuccess confirmation={confirmation} /> : null}
-
-      <ProvisioningErrorAlert error={provisionMutation.error} localError={localError} />
-
-      <Surface>
-        <form
-          aria-label="Provision Client POC"
-          className="space-y-5"
-          onSubmit={submitForm}
-        >
-          <div className="grid gap-4 lg:grid-cols-2">
-            <label className="block text-sm font-semibold text-text-primary">
-              Client
-              <select
-                className={inputClassName}
-                disabled={clientsQuery.isLoading || provisionMutation.isPending}
-                onChange={(event) => updateClient(event.currentTarget.value)}
-                value={formState.clientId}
-              >
-                <option value="">Select a Client</option>
-                {activeClients.map((client) => (
-                  <option key={client.id} value={client.id}>
-                    {client.organization_name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <FormInput
-              disabled={provisionMutation.isPending}
-              label="Full name"
-              onChange={(fullName) =>
-                setFormState((current) => ({ ...current, fullName }))
-              }
-              value={formState.fullName}
-            />
-            <FormInput
-              disabled={provisionMutation.isPending}
-              label="Business email"
-              onChange={(email) =>
-                setFormState((current) => ({ ...current, email }))
-              }
-              type="email"
-              value={formState.email}
-            />
-            <FormInput
-              disabled={provisionMutation.isPending}
-              label="Initial password"
-              onChange={(initialPassword) =>
-                setFormState((current) => ({ ...current, initialPassword }))
-              }
-              type="password"
-              value={formState.initialPassword}
-            />
-          </div>
-
-          <fieldset className="space-y-3">
-            <legend className="text-sm font-semibold text-text-primary">
-              Facility scope
-            </legend>
-            <div className="flex flex-col gap-3 sm:flex-row">
-              <label className={scopeOptionClassName}>
-                <input
-                  checked={formState.facilityScopeMode === "EXPLICIT"}
-                  disabled={provisionMutation.isPending}
-                  name="facility-scope"
-                  onChange={() => updateFacilityScopeMode("EXPLICIT")}
-                  type="radio"
-                />
-                <span>Specific Facilities</span>
-              </label>
-              <label className={scopeOptionClassName}>
-                <input
-                  checked={formState.facilityScopeMode === "CLIENT_WIDE"}
-                  disabled={provisionMutation.isPending}
-                  name="facility-scope"
-                  onChange={() => updateFacilityScopeMode("CLIENT_WIDE")}
-                  type="radio"
-                />
-                <span>Client-wide Access</span>
-              </label>
-            </div>
-          </fieldset>
-
-          {formState.facilityScopeMode === "EXPLICIT" ? (
-            <FacilitySelection
-              disabled={provisionMutation.isPending}
-              facilities={activeFacilities}
-              facilitiesLoading={facilitiesQuery.isLoading}
-              onToggleFacility={toggleFacility}
-              selectedFacilityIds={formState.explicitFacilityIds}
-            />
-          ) : (
-            <Surface className="bg-elevated shadow-none">
-              <h2 className="text-base font-semibold text-text-primary">
-                Client-wide Access
-              </h2>
-              <p className="mt-2 text-sm leading-6 text-text-muted">
-                The backend will bind this account to the selected Client without per-Facility access rows.
-              </p>
-            </Surface>
-          )}
-
-          <Button disabled={provisionMutation.isPending} type="submit">
-            {provisionMutation.isPending ? "Provisioning..." : "Provision Client POC"}
-          </Button>
-        </form>
-      </Surface>
-    </section>
-  );
-}
-
-function FacilitySelection({
-  disabled,
-  facilities,
-  facilitiesLoading,
-  onToggleFacility,
-  selectedFacilityIds
-}: {
-  disabled: boolean;
-  facilities: RegistrationFacility[];
-  facilitiesLoading: boolean;
-  onToggleFacility: (facilityId: string) => void;
-  selectedFacilityIds: string[];
-}) {
-  if (facilitiesLoading) {
-    return (
-      <Surface className="bg-elevated shadow-none" role="status">
-        <p className="text-sm text-text-muted">Loading Client Facilities.</p>
-      </Surface>
-    );
-  }
-
-  if (facilities.length === 0) {
-    return (
-      <Surface className="bg-elevated shadow-none">
-        <h2 className="text-base font-semibold text-text-primary">
-          No active Facilities returned for the selected Client.
-        </h2>
-        <p className="mt-2 text-sm leading-6 text-text-muted">
-          Select another Client or use Client-wide Access if that is the intended authority.
-        </p>
-      </Surface>
-    );
-  }
-
-  return (
-    <fieldset className="space-y-3">
-      <legend className="text-sm font-semibold text-text-primary">
-        Specific Facilities
-      </legend>
-      <div className="grid gap-3 md:grid-cols-2">
-        {facilities.map((facility) => (
-          <label
-            className="flex items-start gap-3 rounded-component border border-border bg-surface p-3 text-sm text-text-primary"
-            key={facility.id}
-          >
-            <input
-              checked={selectedFacilityIds.includes(facility.id)}
-              disabled={disabled}
-              onChange={() => onToggleFacility(facility.id)}
-              type="checkbox"
-            />
-            <span>
-              <span className="block font-semibold">{facility.facility_name}</span>
-              <span className="block break-all text-xs text-text-muted">
-                {facility.id}
-              </span>
-            </span>
-          </label>
-        ))}
-      </div>
-    </fieldset>
-  );
-}
-
-function ProvisioningSuccess({
-  confirmation
-}: {
-  confirmation: ProvisioningConfirmation;
-}) {
-  const { account, clientName, facilityLabels } = confirmation;
-
-  return (
-    <Surface role="status">
-      <h2 className="text-base font-semibold text-text-primary">
-        Client POC account provisioned successfully.
-      </h2>
-      <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
-        <MetadataItem label="Full name" value={account.full_name} />
-        <MetadataItem label="Business email" value={account.email} />
-        <MetadataItem label="Client" value={clientName} />
-        <MetadataItem label="Server-assigned role" value={account.role_code} />
-        <MetadataItem label="Status" value={account.status} />
-        <MetadataItem
-          label="Facility scope"
-          value={
-            account.facility_scope_mode === "CLIENT_WIDE"
-              ? "Client-wide Access"
-              : "Specific Facilities"
-          }
-        />
-      </dl>
-      {account.facility_scope_mode === "EXPLICIT" ? (
-        <div className="mt-4">
-          <h3 className="text-sm font-semibold text-text-primary">
-            Authorized Facilities
-          </h3>
-          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-text-muted">
-            {facilityLabels.map((facilityLabel) => (
-              <li key={facilityLabel}>{facilityLabel}</li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
+      <fieldset className="space-y-3"><legend className="text-sm font-semibold text-text-primary">Facility scope</legend><div className="flex flex-col gap-3 sm:flex-row"><ScopeOption label="Specific Facilities" checked={scopeMode === "EXPLICIT"} disabled={issue.isPending} onChange={() => { setScopeMode("EXPLICIT"); setFacilityIds([]); }} /><ScopeOption label="Client-wide Access" checked={scopeMode === "CLIENT_WIDE"} disabled={issue.isPending} onChange={() => { setScopeMode("CLIENT_WIDE"); setFacilityIds([]); }} /></div></fieldset>
+      {scopeMode === "EXPLICIT" ? <FacilitySelection facilities={facilities} selected={facilityIds} loading={facilitiesQuery.isLoading} disabled={issue.isPending} onToggle={toggleFacility} /> : <p className="rounded-component border border-border bg-elevated p-3 text-sm text-text-muted">The activated account will have Client-wide authority without per-Facility access rows.</p>}
+      <Button type="submit" disabled={issue.isPending || !clientId || !fullName.trim() || !email.trim() || (scopeMode === "EXPLICIT" && facilityIds.length === 0)}>{issue.isPending ? "Creating invitation..." : "Generate invitation link"}</Button>
+    </form>
+    {notice ? <p className="mt-4 text-sm font-semibold text-text-primary" role="status">{notice}</p> : null}
+    {activationLink ? <div className="mt-4"><label className="text-sm font-semibold" htmlFor="client-poc-activation-link">One-time registration link</label><input className={inputClass} id="client-poc-activation-link" readOnly value={activationLink}/><div className="mt-2 flex flex-wrap gap-2"><Button onClick={copyLink}>Copy registration link</Button><Button onClick={() => setActivationLink(null)} variant="secondary">Close one-time link</Button></div></div> : null}
+    {issue.isError || facilitiesQuery.isError || clientsQuery.isError ? <p className="mt-4 text-sm text-state-error" role="alert">{invitationError(issue.error)}</p> : null}
     </Surface>
-  );
+    <InvitationHistory invitations={(invitationsQuery.data?.invitations ?? []).filter(item => item.client_id === clientId)} facilities={facilities} loading={invitationsQuery.isLoading} error={invitationsQuery.isError} revoking={revoke.isPending} onRevoke={id => revoke.mutate(id)} />
+  </section>;
 }
 
-function ProvisioningErrorAlert({
-  error,
-  localError
-}: {
-  error: Error | null;
-  localError: string | null;
-}) {
-  const message = localError ?? provisioningErrorMessage(error);
-
-  if (!message) {
-    return null;
-  }
-
-  return (
-    <Surface role="alert">
-      <h2 className="text-base font-semibold text-text-primary">
-        Client POC provisioning could not be completed.
-      </h2>
-      <p className="mt-2 text-sm leading-6 text-text-muted">{message}</p>
-    </Surface>
-  );
-}
-
-function provisioningErrorMessage(error: Error | null) {
-  if (!error) {
-    return null;
-  }
-
-  if (!isApiError(error)) {
-    return "Client POC provisioning returned an unexpected error.";
-  }
-
-  if (error.status === 403) {
-    return "You are not authorized to provision Client POC accounts.";
-  }
-
-  if (error.status === 409) {
-    return "A Client POC account already exists for that business email.";
-  }
-
-  if (error.status === 400) {
-    return error.message;
-  }
-
-  if (error.status === 404) {
-    const lowerMessage = error.message.toLowerCase();
-
-    if (lowerMessage.includes("facility")) {
-      return "One or more selected Facilities are unavailable for this Client.";
-    }
-
-    if (lowerMessage.includes("client")) {
-      return "The selected Client is unavailable for provisioning.";
-    }
-
-    return "Client POC provisioning is not currently available.";
-  }
-
-  return "Client POC provisioning failed. Please try again later.";
-}
-
-function FormInput({
-  disabled,
-  label,
-  onChange,
-  type = "text",
-  value
-}: {
-  disabled: boolean;
-  label: string;
-  onChange: (value: string) => void;
-  type?: "email" | "password" | "text";
-  value: string;
-}) {
-  return (
-    <label className="block text-sm font-semibold text-text-primary">
-      {label}
-      <input
-        className={inputClassName}
-        disabled={disabled}
-        onChange={(event) => onChange(event.currentTarget.value)}
-        type={type}
-        value={value}
-      />
-    </label>
-  );
-}
-
-function MetadataItem({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="min-w-0">
-      <dt className="text-xs font-semibold uppercase tracking-wide text-text-muted">
-        {label}
-      </dt>
-      <dd className="mt-1 break-words text-text-primary">{value}</dd>
-    </div>
-  );
-}
-
-function SafeState({
-  title,
-  children,
-  role
-}: {
-  title: string;
-  children: string;
-  role?: "status";
-}) {
-  return (
-    <Surface role={role}>
-      <h1 className="text-xl font-semibold text-text-primary">{title}</h1>
-      <p className="mt-2 text-sm text-text-muted">{children}</p>
-    </Surface>
-  );
-}
-
-function validateForm(formState: ProvisionClientPocFormState) {
-  if (!formState.clientId) {
-    return "Select a Client before provisioning a Client POC account.";
-  }
-
-  if (!formState.fullName.trim()) {
-    return "Enter the Client POC full name.";
-  }
-
-  if (!formState.email.trim()) {
-    return "Enter the Client POC business email.";
-  }
-
-  if (!formState.initialPassword) {
-    return "Enter an initial password.";
-  }
-
-  if (
-    formState.facilityScopeMode === "EXPLICIT" &&
-    formState.explicitFacilityIds.length === 0
-  ) {
-    return "Select at least one Facility for Specific Facilities scope.";
-  }
-
-  return null;
-}
-
-function facilityLabelsForSelection(
-  facilityIds: readonly string[],
-  facilities: readonly RegistrationFacility[]
-) {
-  const facilityNameById = new Map(
-    facilities.map((facility) => [facility.id, facility.facility_name])
-  );
-
-  return facilityIds.map((facilityId) => {
-    const name = facilityNameById.get(facilityId);
-
-    return name ? `${name} (${facilityId})` : facilityId;
-  });
-}
-
-const inputClassName =
-  "mt-1 block min-h-10 w-full rounded-component border border-border bg-surface px-3 py-2 text-sm text-text-primary outline-none focus:border-primary-blue focus:ring-2 focus:ring-focus";
-
-const scopeOptionClassName =
-  "inline-flex min-h-10 items-center gap-2 rounded-component border border-border bg-surface px-3 py-2 text-sm font-semibold text-text-primary";
+function FormInput({ label, value, onChange, disabled, type = "text" }: { label: string; value: string; onChange: (value: string) => void; disabled: boolean; type?: "text" | "email" }) { return <label className="block text-sm font-semibold text-text-primary">{label}<input className={inputClass} disabled={disabled} maxLength={255} required type={type} value={value} onChange={event => onChange(event.currentTarget.value)} /></label>; }
+function ScopeOption({ label, checked, disabled, onChange }: { label: string; checked: boolean; disabled: boolean; onChange: () => void }) { return <label className="inline-flex min-h-10 items-center gap-2 rounded-component border border-border bg-surface px-3 py-2 text-sm font-semibold"><input checked={checked} disabled={disabled} name="facility-scope" onChange={onChange} type="radio" />{label}</label>; }
+function FacilitySelection({ facilities, selected, loading, disabled, onToggle }: { facilities: RegistrationFacility[]; selected: string[]; loading: boolean; disabled: boolean; onToggle: (id: string) => void }) { if (loading) return <p role="status" className="text-sm text-text-muted">Loading Client Facilities.</p>; return <fieldset className="space-y-3"><legend className="text-sm font-semibold">Specific Facilities</legend>{facilities.length ? <div className="grid gap-3 md:grid-cols-2">{facilities.map(facility => <label className="flex items-center gap-3 rounded-component border border-border p-3 text-sm" key={facility.id}><input checked={selected.includes(facility.id)} disabled={disabled} onChange={() => onToggle(facility.id)} type="checkbox"/><span className="font-semibold">{facility.facility_name}</span></label>)}</div> : <p className="text-sm text-text-muted">No active Facilities are available for this Client.</p>}</fieldset>; }
+function InvitationHistory({ invitations, facilities, loading, error, revoking, onRevoke }: { invitations: ClientPocInvitation[]; facilities: RegistrationFacility[]; loading: boolean; error: boolean; revoking: boolean; onRevoke: (id: string) => void }) { const names = new Map(facilities.map(item => [item.id, item.facility_name])); return <Surface><h2 className="text-lg font-semibold text-text-primary">Client POC invitations</h2>{loading ? <p className="mt-3 text-sm text-text-muted" role="status">Loading invitations.</p> : error ? <p className="mt-3 text-sm text-state-error" role="alert">Invitation history could not be loaded.</p> : invitations.length === 0 ? <p className="mt-3 text-sm text-text-muted">No Client POC invitations have been issued.</p> : <ul className="mt-4 space-y-3">{invitations.map(invitation => <li className="rounded-component border border-border p-4" key={invitation.id}><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-semibold text-text-primary">{invitation.full_name}</p><p className="text-sm text-text-muted">{invitation.email}</p><p className="mt-1 text-sm text-text-muted">{invitation.facility_scope.mode === "CLIENT_WIDE" ? "Client-wide Access" : invitation.facility_scope.facility_ids.map(id => names.get(id) ?? "Facility name unavailable").join(", ")}</p><p className="mt-1 text-xs text-text-muted">Issued {formatDate(invitation.issued_at)} · Expires {formatDate(invitation.expires_at)}</p></div><div className="flex items-center gap-2"><span className="rounded-full border border-border px-3 py-1 text-xs font-semibold">{invitation.status}</span>{invitation.status === "ISSUED" ? <Button disabled={revoking} onClick={() => onRevoke(invitation.id)} variant="secondary">Revoke</Button> : null}</div></div></li>)}</ul>}</Surface>; }
+function formatDate(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? "date unavailable" : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date); }
+function invitationError(error: Error | null) { if (!error) return "The invitation could not be completed."; if (isApiError(error) && error.status === 403) return "You are not authorized to invite Client POC accounts."; if (isApiError(error) && error.status === 409) return "That email already has an account or an active registration invitation."; return "The invitation could not be completed. Verify the selected Client and Facility scope."; }
+function SafeState({ title, children }: { title: string; children: string }) { return <Surface><h1 className="text-xl font-semibold text-text-primary">{title}</h1><p className="mt-2 text-sm text-text-muted">{children}</p></Surface>; }

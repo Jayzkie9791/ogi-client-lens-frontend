@@ -13,6 +13,7 @@ import { useAuth } from "../auth/useAuth";
 import { Button } from "../ui/components/Button";
 import { Surface } from "../ui/components/Surface";
 import { IncidentContextRegistration } from "../incidents/IncidentContextRegistration";
+import { AssetRegistrationPanel } from "../assets/AssetRegistrationPanel";
 import {
   ClientContextClient,
   ClientContextFacility,
@@ -25,7 +26,8 @@ import {
   createOperationalEvidenceRecord,
   createOperationalEvidenceDraft,
   OperationalEvidenceCreateRequest,
-  OperationalEvidenceRecord
+  OperationalEvidenceRecord,
+  OetsDraftCreationResolution
 } from "./evidenceSubmissionApi";
 import {
   mapBackendValidationDetails,
@@ -33,7 +35,7 @@ import {
 } from "./evidenceValidation";
 import { OetsRenderer } from "./OetsRenderer";
 import { getCurrentRuntimeTemplate } from "./runtimeTemplateApi";
-import { getOetsContextCandidates, getOetsContextRequirement, resolveOetsContext } from "./contextApi";
+import { getOetsContextCandidates, getOetsContextRequirement, resolveOetsContext, resolveOetsExistingContextRecord } from "./contextApi";
 import {
   OetsDefinition,
   OetsEvidencePayload,
@@ -206,6 +208,10 @@ export function RuntimeTemplatePage({
     resolveFacilityId(availableFacilityIds, selectedFacilityId);
   const activeEditingSession =
     editingSession?.routeTemplateCode === templateCode ? editingSession : null;
+  const creationPresentation = draftCreationPresentation(
+    successRecord?.creation_resolution,
+    successRecord?.template_provenance.template_code
+  );
   const contextAuthority = activeEditingSession ? {
     templateCode: activeEditingSession.runtimeTemplate.template_code,
     templateVersionId: activeEditingSession.runtimeTemplate.template_version_id,
@@ -237,6 +243,23 @@ export function RuntimeTemplatePage({
       return resolveOetsContext({ ...contextAuthority, clientId: effectiveClientId, facilityId, selectedId: selectedContextId });
     }
   });
+  const duplicatePolicy = contextRequirementQuery.data?.duplicate_policy;
+  const supportsExistingRecordPreflight = duplicatePolicy === "ONE_LIVE_RECORD_PER_SUBJECT" || duplicatePolicy === "ONE_ACTIVE_DRAFT_PER_SUBJECT" || duplicatePolicy === "ONE_EVIDENCE_LINEAGE_PER_SUBJECT";
+  const existingContextRecordQuery = useQuery({
+    enabled: !readOnly && Boolean(contextAuthority && effectiveClientId && resolvedContextQuery.data && supportsExistingRecordPreflight),
+    queryKey: ["oets-context-existing-record", contextAuthority, effectiveClientId, facilityId, resolvedContextQuery.data?.requirement_code, resolvedContextQuery.data?.selected_id],
+    retry: false,
+    queryFn: () => {
+      if (!contextAuthority || !effectiveClientId || !resolvedContextQuery.data) throw new Error("Resolved OETS context is unavailable.");
+      return resolveOetsExistingContextRecord({
+        ...contextAuthority,
+        clientId: effectiveClientId,
+        facilityId,
+        requirementCode: resolvedContextQuery.data.requirement_code,
+        selectedId: resolvedContextQuery.data.selected_id
+      });
+    }
+  });
   useEffect(() => {
     setSelectedContextId(initialContextId ?? "");
     setContextSearchInput("");
@@ -253,7 +276,8 @@ export function RuntimeTemplatePage({
   }, [contextCandidatesQuery.data?.pages]);
   const contextCandidateCount = contextCandidatesQuery.data?.pages[0]?.count ?? 0;
   const contextualDefinition = useMemo(() => applyContextFieldPolicy(activeEditingSession?.definition, resolvedContextQuery.data?.field_policy, resolvedContextQuery.data?.required_fields, scopeIsLocked ? stableInitialFieldValues : undefined), [activeEditingSession?.definition, resolvedContextQuery.data?.field_policy, resolvedContextQuery.data?.required_fields, stableInitialFieldValues, scopeIsLocked]);
-  const contextualInitialPayload = useMemo(() => buildContextInitialPayload(contextualDefinition, { ...stableInitialFieldValues, ...resolvedContextQuery.data?.authoritative_values }), [contextualDefinition, stableInitialFieldValues, resolvedContextQuery.data?.authoritative_values]);
+  const contextualInitialPayload = useMemo(() => buildContextInitialPayload(contextualDefinition, { ...stableInitialFieldValues, ...resolvedContextQuery.data?.authoritative_values }, resolvedContextQuery.data?.repeatable_groups ?? []), [contextualDefinition, stableInitialFieldValues, resolvedContextQuery.data?.authoritative_values, resolvedContextQuery.data?.repeatable_groups]);
+  const repeatableSectionControls = useMemo(() => Object.fromEntries((resolvedContextQuery.data?.repeatable_groups ?? []).flatMap((group) => group.sections.map((section) => [section.section_code, { cardinality: group.cardinality, instance_count: group.instance_count }]))), [resolvedContextQuery.data?.repeatable_groups]);
   const contextPresentation = contextRequirementQuery.data?.presentation;
   // An embedded journey must hand off to the persisted record editor before
   // users start completing the form. That editor owns checkpoint saves,
@@ -300,6 +324,9 @@ export function RuntimeTemplatePage({
     onSuccess(record) {
       submitLockedRef.current = false;
       if (onDraftCreated) onDraftCreated(record.id);
+      else if (record.creation_resolution && record.creation_resolution.outcome !== "CREATED_NEW") {
+        setSuccessRecord(record);
+      }
       else {
         const preservedSearch = searchParams.toString();
         navigate({ pathname: routes.evidenceRecordPath(record.id), search: preservedSearch ? `?${preservedSearch}` : "" });
@@ -311,6 +338,22 @@ export function RuntimeTemplatePage({
       else setFormMessage("Audit draft creation failed. Try again later.");
     }
   });
+  const existingContextRecord = existingContextRecordQuery.data?.resolution === "EXISTING_RECORD"
+    ? existingContextRecordQuery.data.record
+    : null;
+  const existingHistoricalAuthorityNotice = existingContextRecord?.version_relation === "HISTORICAL_VERSION"
+    ? historicalVersionNotices.get(`${templateCode ?? ""}@${existingContextRecord.template_version}->${activeEditingSession?.runtimeTemplate.template_version ?? ""}`)
+    : undefined;
+  const openExistingContextRecord = () => {
+    if (!existingContextRecord) return;
+    if (onDraftCreated) {
+      onDraftCreated(existingContextRecord.evidence_record_id);
+      return;
+    }
+    const preservedSearch = searchParams.toString();
+    navigate({ pathname: routes.evidenceRecordPath(existingContextRecord.evidence_record_id), search: preservedSearch ? `?${preservedSearch}` : "" });
+  };
+  const successRecordSearch = searchParams.toString();
 
   if (!templateCode) {
     return (
@@ -351,6 +394,14 @@ export function RuntimeTemplatePage({
       <SafeState title="Evidence context could not be loaded.">
         <p>The form remains unavailable until its context requirement can be verified.</p>
         <Button className="mt-3" onClick={() => contextRequirementQuery.refetch()} variant="secondary">Retry</Button>
+      </SafeState>
+    );
+  }
+
+  if (!readOnly && contextIsLocked && contextRequirementQuery.data?.required !== true) {
+    return (
+      <SafeState title="Evidence context authority mismatch.">
+        This form was opened for a specific governed subject, but the active template does not expose the required context authority. Return to the journey and contact an administrator. Evidence creation is disabled.
       </SafeState>
     );
   }
@@ -476,6 +527,19 @@ export function RuntimeTemplatePage({
               }}
             />
           ) : null}
+          {!contextIsLocked && contextRequirementQuery.data.requirement_code === "ASSET_CONTEXT" && Boolean(facilityId) && auth.canUsePermission("create_asset") ? (
+            <AssetRegistrationPanel
+              disabled={formDirty || contextCandidatesQuery.isFetching}
+              facilityId={facilityId ?? ""}
+              onCreated={(asset) => {
+                void queryClient.invalidateQueries({ queryKey: ["oets-context-candidates", contextAuthority, effectiveClientId, facilityId] }).then(() => {
+                  setContextSearchInput("");
+                  setContextSearchQuery("");
+                  setSelectedContextId(asset.asset_id);
+                });
+              }}
+            />
+          ) : null}
           {!contextIsLocked && contextCandidatesQuery.hasNextPage ? <Button className="mt-2" disabled={contextCandidatesQuery.isFetchingNextPage || formDirty} onClick={() => contextCandidatesQuery.fetchNextPage()} variant="secondary">{contextCandidatesQuery.isFetchingNextPage ? "Loading…" : "Load more"}</Button> : null}
           {!contextIsLocked && resolvedContextQuery.isLoading ? <p className="mt-2 text-sm text-text-muted">Verifying the selected {contextPresentation.candidate_singular.toLowerCase()}…</p> : null}
           {!contextIsLocked && resolvedContextQuery.isError ? <div className="mt-2 rounded-component border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert"><p>The selected {contextPresentation.candidate_singular.toLowerCase()} could not be resolved. {readQueryErrorMessage(resolvedContextQuery.error)}</p><Button className="mt-2" onClick={() => resolvedContextQuery.refetch()} variant="secondary">Retry</Button></div> : null}
@@ -483,11 +547,30 @@ export function RuntimeTemplatePage({
           {formDirty ? <p className="mt-2 text-sm text-amber-700">Save or clear your changes before changing evidence context.</p> : null}
         </Surface>
       ) : null}
-      {contextRequirementQuery.data?.required && !resolvedContextQuery.data ? null : <OetsRenderer
+      {existingContextRecord ? (
+        <Surface className="border-blue-300 bg-blue-50/60">
+          <p className="font-semibold text-primary-navy">
+            {existingContextRecord.access_action === "CONTINUE_DRAFT" ? "Existing Draft found" : "Existing record found"}
+          </p>
+          <p className="mt-1 text-sm text-text-muted">
+            {existingContextRecord.version_relation === "HISTORICAL_VERSION"
+              ? "This governed context already has a v" + existingContextRecord.template_version + " " + existingContextRecord.lifecycle_state + " record. The selected current form is v" + activeEditingSession.runtimeTemplate.template_version + "."
+              : "This governed context already has a v" + existingContextRecord.template_version + " " + existingContextRecord.lifecycle_state + " record."}
+          </p>
+          {existingHistoricalAuthorityNotice ? <p className="mt-2 text-sm font-medium text-amber-800">{existingHistoricalAuthorityNotice}</p> : null}
+          <Button className="mt-3" onClick={openExistingContextRecord}>
+            {existingContextRecord.access_action === "CONTINUE_DRAFT"
+              ? "Continue existing v" + existingContextRecord.template_version + " Draft"
+              : "View existing record"}
+          </Button>
+        </Surface>
+      ) : contextRequirementQuery.data?.required && !resolvedContextQuery.data ? null : <OetsRenderer
         actionPortalId={actionPortalId}
         backendValidation={backendValidation}
         definition={contextualDefinition ?? activeEditingSession.definition}
+        fieldAuthority={resolvedContextQuery.data?.field_authority ?? activeEditingSession.runtimeTemplate.field_authority}
         initialPayload={contextualInitialPayload}
+        repeatableSectionControls={repeatableSectionControls}
         key={`${activeEditingSession.runtimeTemplate.template_version_id}:${resolvedContextQuery.data?.selected_id ?? "unresolved-context"}`}
         formMessage={formMessage}
         isSubmitting={mutation.isPending || draftMutation.isPending}
@@ -515,23 +598,32 @@ export function RuntimeTemplatePage({
         }
         readOnly={readOnly}
         runtimeTemplate={activeEditingSession.runtimeTemplate}
-        submitHelpText={requiresPersistedDraft ? "Begin a persisted draft before completing and submitting this evidence." : undefined}
-        submitLabel={requiresPersistedDraft ? "Begin Evidence" : undefined}
+        submitHelpText={requiresPersistedDraft
+          ? existingContextRecordQuery.isError
+            ? "Existing-record lookup is unavailable. The server will safely open an existing governed record or create a new Draft."
+            : "Begin a persisted draft before completing and submitting this evidence."
+          : undefined}
+        submitLabel={requiresPersistedDraft
+          ? existingContextRecordQuery.isError ? "Open or Begin Evidence" : "Begin Evidence"
+          : undefined}
         submittingLabel={requiresPersistedDraft ? "Beginning..." : undefined}
         submitDisabledReason={readSubmissionDisabledReason(
           effectiveClientId,
           successRecord,
-          contextRequirementQuery.data?.required === true && !resolvedContextQuery.data
+          contextRequirementQuery.data?.required === true && (!resolvedContextQuery.data || existingContextRecordQuery.isLoading)
         )}
         submitSuccess={
           successRecord
             ? {
                 evidenceRecordId: successRecord.id,
                 lifecycleState: successRecord.lifecycle_state,
-                recordHref: routes.evidenceRecordPath(successRecord.id)
+                recordHref: `${routes.evidenceRecordPath(successRecord.id)}${successRecordSearch ? `?${successRecordSearch}` : ""}`
               }
             : null
         }
+        submitSuccessTitle={creationPresentation.title}
+        submitSuccessMessage={creationPresentation.message}
+        submitSuccessLinkLabel={creationPresentation.linkLabel}
       />}
     </div>
   );
@@ -698,7 +790,7 @@ function applyContextFieldPolicy(definition: OetsDefinition | undefined, policy:
   };
 }
 
-function buildContextInitialPayload(definition: OetsDefinition | undefined, values: Record<string, OetsFieldValue> | undefined): Pick<OetsEvidencePayload, "sections"> | undefined {
+function buildContextInitialPayload(definition: OetsDefinition | undefined, values: Record<string, OetsFieldValue> | undefined, repeatableGroups: import("./contextApi").OetsContextRepeatableGroup[] = []): Pick<OetsEvidencePayload, "sections"> | undefined {
   if (!definition || !values) return undefined;
   const sections: OetsEvidencePayload["sections"] = {};
   for (const section of definition.sections) {
@@ -710,8 +802,9 @@ function buildContextInitialPayload(definition: OetsDefinition | undefined, valu
         sectionValues[field.field_code] = value;
       }
     }
-    sections[section.section_code] = sectionValues;
+    sections[section.section_code] = section.repeatable ? [] : sectionValues;
   }
+  for (const group of repeatableGroups) for (const governed of group.sections) sections[governed.section_code] = governed.instances.map((instance) => ({ ...instance }));
   return { sections };
 }
 
@@ -872,6 +965,52 @@ function readQueryErrorMessage(error: unknown) {
   return error instanceof Error && error.message.trim()
     ? error.message
     : "Review the backend response and try again.";
+}
+
+function draftCreationPresentation(
+  resolution: OetsDraftCreationResolution | undefined,
+  templateCode: string | undefined
+) {
+  if (!resolution || resolution.outcome === "CREATED_NEW") return {
+    title: "Draft saved",
+    message: "Draft audit created successfully.",
+    linkLabel: "Open Audit"
+  };
+  if (resolution.outcome === "IDEMPOTENT_REPLAY") return {
+    title: "Existing Draft returned",
+    message: "This Draft-creation request was already completed. Continue to the existing Draft.",
+    linkLabel: `Continue existing v${resolution.returned_template_version} Draft`
+  };
+  const subject = resolution.context_label ? ` for ${resolution.context_label}` : "";
+  const policy = duplicatePolicyExplanation(resolution.duplicate_policy);
+  if (resolution.version_relation === "HISTORICAL_VERSION_REUSED") {
+    const governedNotice = historicalVersionNotices.get(
+      `${templateCode ?? ""}@${resolution.returned_template_version}->${resolution.requested_template_version}`
+    );
+    return {
+      title: "Existing historical-version record found",
+      message: `An existing live ${templateCode ?? "form"} v${resolution.returned_template_version} record already exists${subject}. It was reopened because ${policy} The current form is v${resolution.requested_template_version}, but this record remains governed by v${resolution.returned_template_version}.${governedNotice ? ` ${governedNotice}` : ""}`,
+      linkLabel: `Continue existing v${resolution.returned_template_version} Draft`
+    };
+  }
+  return {
+    title: "Existing record found",
+    message: `An existing live ${templateCode ?? "form"} v${resolution.returned_template_version} record already exists${subject}. It was reopened because ${policy}`,
+    linkLabel: `Continue existing v${resolution.returned_template_version} Draft`
+  };
+}
+
+const historicalVersionNotices = new Map<string, string>([
+  [
+    "OGI_F093_INDIVIDUAL_TRAINING_RECORD@3.3->3.4",
+    "WRI mirroring and Overall WRI calculation are available only in v3.4."
+  ]
+]);
+
+function duplicatePolicyExplanation(policy: OetsDraftCreationResolution["duplicate_policy"]) {
+  if (policy === "ONE_ACTIVE_DRAFT_PER_SUBJECT") return "the form permits only one active Draft for the selected governed subject.";
+  if (policy === "ONE_EVIDENCE_LINEAGE_PER_SUBJECT") return "the form permits only one evidence lineage for the selected governed subject.";
+  return "the form permits only one live record for the selected governed subject.";
 }
 
 const clientContextStorageKey = "client-lens:selected-client-context";

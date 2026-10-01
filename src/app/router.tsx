@@ -15,6 +15,7 @@ import { AdministrationPage } from "./routes/AdministrationPage";
 import { ClientPocProvisioningPage } from "./routes/ClientPocProvisioningPage";
 import { LoginPage } from "./routes/LoginPage";
 import { ForgotPasswordPage, ResetPasswordPage } from "./routes/PasswordResetPages";
+import { PersonnelAccountActivationPage } from "./routes/PersonnelAccountActivationPage";
 import { NotFoundPage } from "./routes/NotFoundPage";
 import { OperationsPage } from "./routes/OperationsPage";
 import { MyDraftsPage, RecordsPage } from "./routes/RecordsPage";
@@ -34,6 +35,13 @@ const RequestTrainingPage = lazy(() => import("../training/RequestTrainingPage")
 const TrainerCommercialEvaluationPage = lazy(() => import("../training/TrainerCommercialEvaluationPage").then((module) => ({ default: module.TrainerCommercialEvaluationPage })));
 const FacilityAssessmentJourneysPage = lazy(() => import("../assessments/FacilityAssessmentJourneysPage").then((module) => ({ default: module.FacilityAssessmentJourneysPage })));
 const AuditorAppointmentsPage = lazy(() => import("../governance/AuditorAppointmentsPage").then((module) => ({ default: module.AuditorAppointmentsPage })));
+const MyProfilePage = lazy(() => import("../self-service/SelfServicePage").then((module) => ({ default: module.MyProfilePage })));
+const MyCredentialsPage = lazy(() => import("../self-service/SelfServicePage").then((module) => ({ default: module.MyCredentialsPage })));
+const MyCertificatePage = lazy(() => import("../self-service/SelfServicePage").then((module) => ({ default: module.MyCertificatePage })));
+const FacilityTeamPage = lazy(() => import("../authorized-workforce/FacilityTeamPage").then((module) => ({ default: module.FacilityTeamPage })));
+const FacilityTeamMemberPage = lazy(() => import("../authorized-workforce/FacilityTeamPage").then((module) => ({ default: module.FacilityTeamMemberPage })));
+const FacilityTeamCertificatePage = lazy(() => import("../authorized-workforce/FacilityTeamPage").then((module) => ({ default: module.FacilityTeamCertificatePage })));
+const InserviceWorkspacePage = lazy(() => import("../inservice/InserviceWorkspacePage").then((module) => ({ default: module.InserviceWorkspacePage })));
 
 function lazyRoute(element: ReactNode) {
   return <Suspense fallback={<p role="status">Loading workspace.</p>}>{element}</Suspense>;
@@ -54,6 +62,10 @@ export const appRoutes: RouteObject[] = [
       {
         path: routes.resetPassword,
         element: <ResetPasswordPage />
+      },
+      {
+        path: routes.activatePersonnelAccount,
+        element: <PersonnelAccountActivationPage />
       }
     ]
   },
@@ -72,6 +84,12 @@ export const appRoutes: RouteObject[] = [
             path: "workbench",
             element: <WorkbenchPage />
           },
+          { path: "workbench/me/profile", element: lazyRoute(<MyProfilePage />) },
+          { path: "workbench/me/credentials", element: lazyRoute(<MyCredentialsPage />) },
+          { path: "workbench/me/credentials/certificates/:issuanceId", element: lazyRoute(<MyCertificatePage />) },
+          { path: "workbench/workforce/facility-team", element: lazyRoute(<FacilityTeamPage />) },
+          { path: "workbench/workforce/facility-team/certificates/:issuanceId", element: lazyRoute(<FacilityTeamCertificatePage />) },
+          { path: "workbench/workforce/facility-team/:staffMemberId", element: lazyRoute(<FacilityTeamMemberPage />) },
           {
             path: "workbench/audit-risk",
             element: <AuditRiskWorkspacePage />
@@ -171,6 +189,10 @@ export const appRoutes: RouteObject[] = [
           {
             path: "workbench/training/journeys",
             element: lazyRoute(<RegistrationTrainingPage workspace="journeys" />)
+          },
+          {
+            path: "workbench/training/inservice",
+            element: lazyRoute(<InserviceWorkspacePage />)
           },
           {
             path: "workbench/training/trainer-evaluations",

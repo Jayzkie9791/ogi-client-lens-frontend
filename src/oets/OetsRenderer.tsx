@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 
@@ -7,11 +8,12 @@ import { Surface } from "../ui/components/Surface";
 import {
   assembleEvidencePayload,
   createEvidenceStateFromPayload,
-  createFieldValues,
   createInitialEvidenceState,
+  createRepeatableSectionInstance,
   EditableOetsState,
   orderedFields,
   orderedSections,
+  repeatableConstraints,
   RepeatableSectionInstance
 } from "./evidenceState";
 import { isSupportedOetsFieldType } from "./definitionGuards";
@@ -35,9 +37,12 @@ import {
   OetsDefinition,
   OetsEvidencePayload,
   OetsField,
+  OetsFieldAuthorityPresentation,
+  OetsFieldAuthorityPresentationField,
   OetsFieldValue,
   OetsTemplateRuntimeDefinition
 } from "./types";
+import { buildFieldAuthorityIndex, fieldAuthorityKey, fieldAuthorityMessage } from "./fieldAuthorityPresentation";
 import {
   fieldErrorKey,
   OetsValidationSummary
@@ -70,6 +75,7 @@ interface OetsRendererProps {
   submitLabel?: string;
   submittingLabel?: string;
   submitSuccessMessage?: string;
+  submitSuccessTitle?: string;
   submitSuccessLinkLabel?: string;
   submitSuccess?: {
     evidenceRecordId: string;
@@ -85,6 +91,13 @@ interface OetsRendererProps {
   onDirtyChange?: (dirty: boolean) => void;
   embedded?: boolean;
   actionPortalId?: string;
+  repeatableSectionControls?: Record<string, { cardinality: "FIXED"; instance_count: number }>;
+  repeatableRowControl?: {
+    sectionCode: string;
+    isLocked: (values: Record<string, OetsFieldValue>) => boolean;
+    renderAction: (values: Record<string, OetsFieldValue>, index: number) => ReactNode;
+  };
+  fieldAuthority?: OetsFieldAuthorityPresentation;
 }
 
 export function OetsRenderer({
@@ -102,6 +115,7 @@ export function OetsRenderer({
   submitLabel = "Create Audit Draft",
   submittingLabel = "Creating...",
   submitSuccessMessage = "Draft audit created successfully.",
+  submitSuccessTitle = "Draft saved",
   submitSuccessLinkLabel = "Open Audit",
   submitSuccess,
   attestations = [],
@@ -111,7 +125,10 @@ export function OetsRenderer({
   onAttest,
   onDirtyChange,
   embedded = false,
-  actionPortalId
+  actionPortalId,
+  repeatableSectionControls,
+  repeatableRowControl,
+  fieldAuthority
 }: OetsRendererProps) {
   const diagnosticsEnabled = isOetsDeveloperDiagnosticsEnabled();
   const [dismissedFormMessage, setDismissedFormMessage] = useState<string | null>(null);
@@ -162,6 +179,18 @@ export function OetsRenderer({
     () => createRenderedSectionProjection(definition, state, fieldVisibilityPolicy),
     [definition, fieldVisibilityPolicy, state]
   );
+  const fieldAuthorityIndex = useMemo(
+    () => fieldAuthority ? buildFieldAuthorityIndex(definition, fieldAuthority) : undefined,
+    [definition, fieldAuthority]
+  );
+  const hasNumericConstraintViolations = useMemo(
+    () => containsNumericConstraintViolation(definition, state, fieldVisibilityPolicy),
+    [definition, fieldVisibilityPolicy, state]
+  );
+  const effectiveSubmitDisabledReason = submitDisabledReason ??
+    (hasNumericConstraintViolations
+      ? "Correct the highlighted numeric values before saving."
+      : null);
   const progressModel = useMemo(
     () =>
       deriveOetsProgress({
@@ -195,7 +224,7 @@ export function OetsRenderer({
         >
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0 flex-1">
-              <p className="font-semibold text-state-success">Draft saved</p>
+              <p className="font-semibold text-state-success">{submitSuccessTitle}</p>
               <p className="mt-1 break-words text-sm leading-5 text-text-primary [overflow-wrap:anywhere]">{submitSuccessMessage}</p>
             </div>
             <button
@@ -263,10 +292,10 @@ export function OetsRenderer({
         {!readOnly && onSubmit ? (
           <>
             <div className="max-w-md text-sm text-text-muted lg:text-right">
-              {submitDisabledReason ?? submitHelpText}
+              {effectiveSubmitDisabledReason ?? submitHelpText}
             </div>
             <Button
-              disabled={isSubmitting || Boolean(submitDisabledReason)}
+              disabled={isSubmitting || Boolean(effectiveSubmitDisabledReason)}
               onClick={() => onSubmit(payload)}
             >
               {isSubmitting ? submittingLabel : submitLabel}
@@ -280,7 +309,7 @@ export function OetsRenderer({
         ? createPortal(
             !readOnly && onSubmit ? (
               <Button
-                disabled={isSubmitting || Boolean(submitDisabledReason)}
+                disabled={isSubmitting || Boolean(effectiveSubmitDisabledReason)}
                 onClick={() => onSubmit(payload)}
               >
                 {isSubmitting ? submittingLabel : submitLabel}
@@ -334,6 +363,7 @@ export function OetsRenderer({
         <div className={`space-y-5 rounded-panel bg-[#EEF3F9] p-3 sm:p-4 ${embedded ? "" : "lg:col-start-1 lg:row-start-1 lg:px-6"}`} data-testid="oets-section-stack">
       {renderedSections.map(({ domId, section, sourceSection, sectionState, sectionValues }) => {
         if (section.repeatable) {
+          const constraints = repeatableConstraints(sourceSection);
           return (
             <div
               className="scroll-mt-[10.5rem] outline-none focus-visible:ring-2 focus-visible:ring-focus lg:scroll-mt-[8.5rem]"
@@ -348,7 +378,13 @@ export function OetsRenderer({
               attestationPending={attestationPending}
               attestations={attestations}
               instances={Array.isArray(sectionState) ? sectionState : []}
+              fixed={repeatableSectionControls?.[section.section_code]?.cardinality === "FIXED"}
+              maximumInstances={constraints.maximumInstances}
+              minimumInstances={constraints.minimumInstances}
+              rowControl={repeatableRowControl?.sectionCode === section.section_code ? repeatableRowControl : undefined}
               onAdd={() => {
+                const existing = state[section.section_code];
+                if (constraints.maximumInstances !== null && Array.isArray(existing) && existing.length >= constraints.maximumInstances) return;
                 const nextIndex = (repeatableCounters[section.section_code] ?? 1) + 1;
 
                 setState((current) => {
@@ -356,15 +392,15 @@ export function OetsRenderer({
                   const instances = Array.isArray(currentInstances)
                     ? currentInstances
                     : [];
+                  if (constraints.maximumInstances !== null && instances.length >= constraints.maximumInstances) {
+                    return current;
+                  }
 
                   return {
                     ...current,
                     [section.section_code]: [
                       ...instances,
-                      {
-                        key: `${section.section_code}-${nextIndex}`,
-                        values: createFieldValues(sourceSection.fields)
-                      }
+                      createRepeatableSectionInstance(sourceSection, nextIndex - 1)
                     ]
                   };
                 });
@@ -422,6 +458,7 @@ export function OetsRenderer({
               section={section}
               validation={backendValidation ?? null}
               developerDiagnostics={diagnosticsEnabled}
+              fieldAuthorityIndex={fieldAuthorityIndex}
             />
             </div>
           );
@@ -466,6 +503,7 @@ export function OetsRenderer({
             section={section}
             validation={backendValidation ?? null}
             developerDiagnostics={diagnosticsEnabled}
+            fieldAuthorityIndex={fieldAuthorityIndex}
             values={sectionValues}
           />
           </div>
@@ -504,6 +542,7 @@ interface OetsSectionCardProps {
   attestationErrorMessage?: string | null;
   onAttest?: (request: CreateEvidenceAttestationRequest) => Promise<unknown>;
   developerDiagnostics: boolean;
+  fieldAuthorityIndex?: ReadonlyMap<string, OetsFieldAuthorityPresentationField>;
 }
 
 function OetsSectionCard({
@@ -517,7 +556,8 @@ function OetsSectionCard({
   attestationPending,
   attestationErrorMessage,
   onAttest,
-  developerDiagnostics
+  developerDiagnostics,
+  fieldAuthorityIndex
 }: OetsSectionCardProps) {
   return (
     <Surface className="overflow-hidden border-[#CFDCEB] bg-white p-0 shadow-[0_2px_8px_rgba(15,45,95,0.06)]">
@@ -536,12 +576,16 @@ function OetsSectionCard({
                 fieldErrorKey(section.section_code, field.field_code)
               ]
             }
+            localErrors={numericConstraintErrors(field, values[field.field_code])}
             field={field}
+            authority={fieldAuthorityIndex?.get(fieldAuthorityKey(section.section_code, field.field_id, field.field_code))}
             key={field.field_id}
             onChange={(value) => onValueChange(field.field_code, value)}
             readOnly={field.field_type === "SIGNATURE"
               ? readOnly && !onAttest
-              : readOnly || field.readonly || isGovernedAttestationProjection(field)}
+              : readOnly || field.readonly || isGovernedAttestationProjection(field) || isAuthorityReadOnly(
+                  fieldAuthorityIndex?.get(fieldAuthorityKey(section.section_code, field.field_id, field.field_code))
+                )}
             sectionInstanceIndex={null}
             value={projectGovernedAttestationValue(field, values[field.field_code], attestations, null)}
             onAttest={onAttest}
@@ -572,6 +616,14 @@ interface RepeatableSectionProps {
   attestationErrorMessage?: string | null;
   onAttest?: (request: CreateEvidenceAttestationRequest) => Promise<unknown>;
   developerDiagnostics: boolean;
+  fixed?: boolean;
+  maximumInstances: number | null;
+  minimumInstances: number;
+  rowControl?: {
+    isLocked: (values: Record<string, OetsFieldValue>) => boolean;
+    renderAction: (values: Record<string, OetsFieldValue>, index: number) => ReactNode;
+  };
+  fieldAuthorityIndex?: ReadonlyMap<string, OetsFieldAuthorityPresentationField>;
 }
 
 function RepeatableSection({
@@ -587,17 +639,22 @@ function RepeatableSection({
   attestationPending,
   attestationErrorMessage,
   onAttest,
-  developerDiagnostics
+  developerDiagnostics,
+  fixed = false,
+  maximumInstances,
+  minimumInstances,
+  rowControl,
+  fieldAuthorityIndex
 }: RepeatableSectionProps) {
   return (
     <Surface className="overflow-hidden border-[#CFDCEB] bg-white p-0 shadow-[0_2px_8px_rgba(15,45,95,0.06)]">
       <div className="relative flex flex-col gap-3 bg-blue-50 sm:flex-row sm:items-center sm:justify-between">
         <SectionHeader section={section} />
-        <div className="px-5 pb-4 sm:pb-0">
-          <Button disabled={readOnly} onClick={onAdd} variant="secondary">
+        {!fixed ? <div className="px-5 pb-4 sm:pb-0">
+          <Button disabled={readOnly || (maximumInstances !== null && instances.length >= maximumInstances)} onClick={onAdd} variant="secondary">
             Add entry
           </Button>
-        </div>
+        </div> : null}
       </div>
 
       <div className="space-y-5 bg-white p-5">
@@ -611,13 +668,16 @@ function RepeatableSection({
               <h3 className="text-sm font-semibold text-text-primary">
                 Entry {index + 1}
               </h3>
-              <Button
-                disabled={readOnly || instances.length <= 1}
+              <div className="flex items-center gap-2">
+              {rowControl?.renderAction(instance.values, index)}
+              {!fixed ? <Button
+                disabled={readOnly || Boolean(rowControl?.isLocked(instance.values)) || instances.length <= minimumInstances}
                 onClick={() => onRemove(instance.key)}
                 variant="secondary"
               >
                 Remove
-              </Button>
+              </Button> : null}
+              </div>
             </div>
             <div className="grid gap-x-6 gap-y-6 md:grid-cols-2">
               {renderableFields(section.fields).map((field) => (
@@ -627,6 +687,7 @@ function RepeatableSection({
                   attestationPending={attestationPending}
                   attestations={attestations}
                   field={field}
+                  authority={fieldAuthorityIndex?.get(fieldAuthorityKey(section.section_code, field.field_id, field.field_code))}
                   key={field.field_id}
                   onChange={(value) =>
                     onValueChange(instance.key, field.field_code, value)
@@ -636,9 +697,12 @@ function RepeatableSection({
                       fieldErrorKey(section.section_code, field.field_code, index)
                     ]
                   }
-                  readOnly={field.field_type === "SIGNATURE"
+                  localErrors={numericConstraintErrors(field, instance.values[field.field_code])}
+                  readOnly={Boolean(rowControl?.isLocked(instance.values)) || (field.field_type === "SIGNATURE"
                     ? readOnly && !onAttest
-                    : readOnly || field.readonly || isGovernedAttestationProjection(field)}
+                    : readOnly || field.readonly || isGovernedAttestationProjection(field) || isAuthorityReadOnly(
+                        fieldAuthorityIndex?.get(fieldAuthorityKey(section.section_code, field.field_id, field.field_code))
+                      ))}
                   sectionInstanceIndex={index}
                   value={projectGovernedAttestationValue(field, instance.values[field.field_code], attestations, index)}
                   onAttest={onAttest}
@@ -651,6 +715,11 @@ function RepeatableSection({
       </div>
     </Surface>
   );
+}
+
+export function isAuthorityReadOnly(authority?: OetsFieldAuthorityPresentationField) {
+  return authority?.presentation_editability === "READ_ONLY" ||
+    authority?.presentation_editability === "UNAVAILABLE";
 }
 
 function visibleSectionFields(
@@ -702,6 +771,7 @@ interface OetsFieldControlProps {
   value: OetsFieldValue | undefined;
   readOnly: boolean;
   errors?: string[];
+  localErrors?: string[];
   onChange: (value: OetsFieldValue) => void;
   attestations: readonly EvidenceAttestation[];
   attestationContext?: GovernedAttestationContext;
@@ -710,6 +780,7 @@ interface OetsFieldControlProps {
   sectionInstanceIndex: number | null;
   onAttest?: (request: CreateEvidenceAttestationRequest) => Promise<unknown>;
   developerDiagnostics: boolean;
+  authority?: OetsFieldAuthorityPresentationField;
 }
 
 function OetsFieldControl({
@@ -717,6 +788,7 @@ function OetsFieldControl({
   value,
   readOnly,
   errors,
+  localErrors,
   onChange,
   attestations,
   attestationContext,
@@ -724,7 +796,8 @@ function OetsFieldControl({
   attestationErrorMessage,
   sectionInstanceIndex,
   onAttest,
-  developerDiagnostics
+  developerDiagnostics,
+  authority
 }: OetsFieldControlProps) {
   if (!isSupportedOetsFieldType(field.field_type)) {
     return <UnsupportedField field={field} reason="Unsupported field type" />;
@@ -748,32 +821,37 @@ function OetsFieldControl({
   const id = sectionInstanceIndex === null
     ? `oets-${field.field_id}`
     : `oets-${field.field_id}-${sectionInstanceIndex}`;
+  const authorityId = authority ? `${id}-authority` : undefined;
 
   if (field.field_type === "BOOLEAN" || field.field_type === "CHECKBOX") {
     return (
-      <div data-oets-invalid={errors?.length ? "true" : undefined} tabIndex={errors?.length ? -1 : undefined} className={errors?.length ? "rounded-component border-l-2 border-state-error pl-3 text-sm" : "text-sm"}>
+      <div data-oets-invalid={errors?.length || localErrors?.length ? "true" : undefined} tabIndex={errors?.length || localErrors?.length ? -1 : undefined} className={errors?.length || localErrors?.length ? "rounded-component border-l-2 border-state-error pl-3 text-sm" : "text-sm"}>
         <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-component border border-transparent bg-blue-50/30 px-3 py-2 text-primary-navy hover:border-blue-200 hover:bg-blue-50 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60" htmlFor={id}>
-          {renderControl(field, id, value, readOnly, onChange)}
+          {renderControl(field, id, value, readOnly, onChange, authorityId)}
           <span className="font-semibold">
             {field.label}
             {field.required ? <span className="ml-1 text-state-error" aria-label="required">*</span> : null}
           </span>
         </label>
         {field.description ? <span className="mt-1 block text-xs text-text-muted">{field.description}</span> : null}
+        {authority ? <span className="mt-1 block text-xs font-medium text-primary-blue" id={authorityId}>{fieldAuthorityMessage(authority)}</span> : null}
+        <ValidationMessages messages={localErrors} />
         {developerDiagnostics ? <ValidationMessages messages={errors} /> : errors?.length ? <span className="mt-2 block text-sm font-semibold text-state-error" role="alert">Review this field.</span> : null}
       </div>
     );
   }
 
   return (
-    <div data-oets-invalid={errors?.length ? "true" : undefined} tabIndex={errors?.length ? -1 : undefined} className={errors?.length ? "rounded-component border-l-2 border-state-error pl-3 text-sm" : "block text-sm"}>
+    <div data-oets-invalid={errors?.length || localErrors?.length ? "true" : undefined} tabIndex={errors?.length || localErrors?.length ? -1 : undefined} className={errors?.length || localErrors?.length ? "rounded-component border-l-2 border-state-error pl-3 text-sm" : "block text-sm"}>
       <label htmlFor={id}><FieldLabel field={field} /></label>
-      {renderControl(field, id, value, readOnly, onChange)}
+      {renderControl(field, id, value, readOnly, onChange, authorityId)}
       {field.description ? (
         <span className="mt-1 block text-xs text-text-muted">
           {field.description}
         </span>
       ) : null}
+      {authority ? <span className="mt-1 block text-xs font-medium text-primary-blue" id={authorityId}>{fieldAuthorityMessage(authority)}</span> : null}
+      <ValidationMessages messages={localErrors} />
       {developerDiagnostics ? <ValidationMessages messages={errors} /> : errors?.length ? <span className="mt-2 block text-sm font-semibold text-state-error" role="alert">Review this field.</span> : null}
     </div>
   );
@@ -813,7 +891,8 @@ function renderControl(
   id: string,
   value: OetsFieldValue | undefined,
   readOnly: boolean,
-  onChange: (value: OetsFieldValue) => void
+  onChange: (value: OetsFieldValue) => void,
+  describedBy?: string
 ) {
   const stringValue =
     typeof value === "string" || typeof value === "number" ? String(value) : "";
@@ -822,6 +901,7 @@ function renderControl(
     case "TEXTAREA":
       return (
         <textarea
+          aria-describedby={describedBy}
           className={inputClassName}
           disabled={readOnly}
           id={id}
@@ -835,6 +915,7 @@ function renderControl(
     case "CHECKBOX":
       return (
         <input
+          aria-describedby={describedBy}
           checked={value === true}
           className="h-5 w-5 rounded border-border text-primary-blue focus:ring-focus disabled:opacity-70"
           disabled={readOnly}
@@ -844,27 +925,27 @@ function renderControl(
         />
       );
     case "RADIO":
-      return renderRadioGroup(field, id, value, readOnly, onChange);
+      return renderRadioGroup(field, id, value, readOnly, onChange, describedBy);
     case "SELECT":
-      return renderSelect(field, id, value, readOnly, onChange);
+      return renderSelect(field, id, value, readOnly, onChange, describedBy);
     case "MULTISELECT":
-      return renderMultiSelect(field, id, value, readOnly, onChange);
+      return renderMultiSelect(field, id, value, readOnly, onChange, describedBy);
     case "DATE":
-      return renderInput(field, id, "date", stringValue, readOnly, onChange);
+      return renderInput(field, id, "date", stringValue, readOnly, onChange, describedBy);
     case "DECIMAL":
     case "NUMBER":
-      return renderInput(field, id, "number", stringValue, readOnly, onChange);
+      return renderInput(field, id, "number", stringValue, readOnly, onChange, describedBy);
     case "EMAIL":
-      return renderInput(field, id, "email", stringValue, readOnly, onChange);
+      return renderInput(field, id, "email", stringValue, readOnly, onChange, describedBy);
     case "PHONE":
-      return renderInput(field, id, "tel", stringValue, readOnly, onChange);
+      return renderInput(field, id, "tel", stringValue, readOnly, onChange, describedBy);
     case "TIME":
-      return renderInput(field, id, "time", stringValue, readOnly, onChange);
+      return renderInput(field, id, "time", stringValue, readOnly, onChange, describedBy);
     case "URL":
-      return renderInput(field, id, "url", stringValue, readOnly, onChange);
+      return renderInput(field, id, "url", stringValue, readOnly, onChange, describedBy);
     case "TEXT":
     default:
-      return renderInput(field, id, "text", stringValue, readOnly, onChange);
+      return renderInput(field, id, "text", stringValue, readOnly, onChange, describedBy);
   }
 }
 
@@ -874,19 +955,75 @@ function renderInput(
   type: string,
   value: string,
   readOnly: boolean,
-  onChange: (value: OetsFieldValue) => void
+  onChange: (value: OetsFieldValue) => void,
+  describedBy?: string
 ) {
+  const minimum = numericValidationBound(field, "minimum");
+  const maximum = numericValidationBound(field, "maximum");
+  const numeric = type === "number";
   return (
     <input
+      aria-describedby={describedBy}
       className={inputClassName}
       disabled={readOnly}
       id={id}
+      max={numeric ? maximum : undefined}
+      min={numeric ? minimum : undefined}
       onChange={(event) => onChange(event.target.value || null)}
       placeholder={field.placeholder}
+      step={numeric ? (field.field_type === "NUMBER" ? 1 : "any") : undefined}
       type={type}
       value={value}
     />
   );
+}
+
+function numericValidationBound(field: OetsField, key: "minimum" | "maximum") {
+  const value = field.validation?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function numericConstraintErrors(field: OetsField, value: OetsFieldValue | undefined) {
+  if ((field.field_type !== "NUMBER" && field.field_type !== "DECIMAL") || value === undefined || value === null || value === "") return [];
+  const numericValue = typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN;
+  if (!Number.isFinite(numericValue)) return [];
+  const minimum = numericValidationBound(field, "minimum");
+  const maximum = numericValidationBound(field, "maximum");
+  if (minimum !== undefined && numericValue < minimum || maximum !== undefined && numericValue > maximum) {
+    if (minimum !== undefined && maximum !== undefined) return [`Enter a value from ${minimum} through ${maximum}.`];
+    if (minimum !== undefined) return [`Enter a value greater than or equal to ${minimum}.`];
+    return [`Enter a value less than or equal to ${maximum}.`];
+  }
+  return [];
+}
+
+function containsNumericConstraintViolation(
+  definition: OetsDefinition,
+  state: EditableOetsState,
+  fieldVisibilityPolicy: OetsFieldVisibilityPolicy | undefined
+) {
+  return orderedSections(definition).some((section) => {
+    const sectionState = state[section.section_code];
+    const editableNumericFields = (values: Record<string, OetsFieldValue>) =>
+      orderedFields(section.fields).filter((field) =>
+        !field.readonly &&
+        (field.field_type === "NUMBER" || field.field_type === "DECIMAL") &&
+        (!fieldVisibilityPolicy || fieldVisibilityPolicy({
+          field,
+          sectionCode: section.section_code,
+          value: values[field.field_code]
+        }))
+      );
+    if (Array.isArray(sectionState)) {
+      return sectionState.some((instance) => editableNumericFields(instance.values).some((field) =>
+        numericConstraintErrors(field, instance.values[field.field_code]).length > 0
+      ));
+    }
+    const values = sectionState ?? {};
+    return editableNumericFields(values).some((field) =>
+      numericConstraintErrors(field, values[field.field_code]).length > 0
+    );
+  });
 }
 
 function renderSelect(
@@ -894,7 +1031,8 @@ function renderSelect(
   id: string,
   value: OetsFieldValue | undefined,
   readOnly: boolean,
-  onChange: (value: OetsFieldValue) => void
+  onChange: (value: OetsFieldValue) => void,
+  describedBy?: string
 ) {
   if (!field.options?.length) {
     return <UnsupportedField field={field} reason="Options are required." />;
@@ -902,6 +1040,7 @@ function renderSelect(
 
   return (
     <select
+      aria-describedby={describedBy}
       className={inputClassName}
       disabled={readOnly}
       id={id}
@@ -923,7 +1062,8 @@ function renderMultiSelect(
   id: string,
   value: OetsFieldValue | undefined,
   readOnly: boolean,
-  onChange: (value: OetsFieldValue) => void
+  onChange: (value: OetsFieldValue) => void,
+  describedBy?: string
 ) {
   if (!field.options?.length) {
     return <UnsupportedField field={field} reason="Options are required." />;
@@ -932,7 +1072,7 @@ function renderMultiSelect(
   const selectedValues = Array.isArray(value) ? value : [];
 
   return (
-    <fieldset aria-labelledby={`${id}-label`} className="grid gap-2 rounded-component border-2 border-[#9db3ca] bg-[#f3f7fc] p-3 shadow-sm sm:grid-cols-2" id={id}>
+    <fieldset aria-describedby={describedBy} aria-labelledby={`${id}-label`} className="grid gap-2 rounded-component border-2 border-[#9db3ca] bg-[#f3f7fc] p-3 shadow-sm sm:grid-cols-2" id={id}>
       <legend className="sr-only" id={`${id}-label`}>{field.label}</legend>
       {orderedOptions(field).map((option) => {
         const checked = selectedValues.includes(option.value);
@@ -958,7 +1098,8 @@ function renderRadioGroup(
   id: string,
   value: OetsFieldValue | undefined,
   readOnly: boolean,
-  onChange: (value: OetsFieldValue) => void
+  onChange: (value: OetsFieldValue) => void,
+  describedBy?: string
 ) {
   if (!field.options?.length) {
     return <UnsupportedField field={field} reason="Options are required." />;
@@ -980,6 +1121,7 @@ function renderRadioGroup(
             key={option.value}
           >
             <input
+              aria-describedby={describedBy}
               checked={checked}
               className="h-4 w-4 accent-primary-blue"
               disabled={readOnly}

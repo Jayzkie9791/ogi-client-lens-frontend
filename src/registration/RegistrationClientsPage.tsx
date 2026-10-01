@@ -25,7 +25,8 @@ import {
   RegistrationEditableSection,
   RegistrationMetadataGroup,
   RegistrationMetadataItem,
-  RegistrationStatusBadge
+  RegistrationStatusBadge,
+  RegistrationTechnicalDetails
 } from "./RegistrationWorkspaceUi";
 
 const permissions = {
@@ -252,12 +253,7 @@ function ClientDetailsPanel({
 
   return (
       <div className="space-y-4">
-        <RegistrationMetadataGroup description="System references and record history remain available for traceability.">
-          <RegistrationMetadataItem
-            label="Administrative Client ID"
-            subtle
-            value={client.id}
-          />
+        <RegistrationMetadataGroup description="Record history for this Client organization.">
           <RegistrationMetadataItem
             label="Created"
             value={formatRegistrationDateTime(client.created_at)}
@@ -267,6 +263,9 @@ function ClientDetailsPanel({
             value={formatRegistrationDateTime(client.updated_at)}
           />
         </RegistrationMetadataGroup>
+        <RegistrationTechnicalDetails>
+          <RegistrationMetadataItem label="Client ID" subtle value={client.id} />
+        </RegistrationTechnicalDetails>
 
         {canUpdate ? (
           <RegistrationEditableSection

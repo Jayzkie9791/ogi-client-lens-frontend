@@ -128,6 +128,9 @@ const journeyDraft = {
   clientId: clientB.id,
   facilityIds: [facilityB.id],
   primaryFacilityId: facilityB.id,
+  facilityPositions: { [facilityB.id]: "Lifeguard" },
+  facilityDuties: { [facilityB.id]: "OPERATIONAL_LIFEGUARD" },
+  clientEmployeeNumber: "BW-EMP-001",
   fullName: "Morgan Lee",
   email: "morgan.lee@example.test",
   phone: "+1 555 0100",
@@ -503,7 +506,7 @@ describe("Registration Personnel frontend", () => {
       "aria-selected",
       "true"
     );
-    expect(screen.getByRole("tab", { name: "Records" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Authority & records" })).toBeInTheDocument();
     expect(await screen.findByDisplayValue("Ana Santos")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Next Profile card" }));
@@ -641,6 +644,7 @@ describe("Registration Personnel frontend", () => {
 
     expect(body).toEqual({
       client_id: clientB.id,
+      client_employee_number: "BW-EMP-001",
       full_name: "Morgan Lee",
       email: "morgan.lee@example.test",
       phone_number: "+1 555 0100",
@@ -676,11 +680,16 @@ describe("Registration Personnel frontend", () => {
     const user = userEvent.setup();
     const updatedStaffMember: RegistrationPersonnel = {
       ...staffA,
+      client_employee_number: "OGI-EMP-ANA-001",
       full_name: "Ana Santos Updated",
       employment_status: "SUSPENDED",
       notes: "Temporary suspension"
     };
     const { calls } = mockFetchRoutes(standardRoutes([
+      {
+        url: `/api/v1/registration/personnel/${staffA.id}`,
+        responses: [{ status: 200, body: { ...staffA, client_employee_number: "OGI-EMP-ANA-001" } }]
+      },
       {
         method: "PATCH",
         url: `/api/v1/registration/personnel/${staffA.id}`,
@@ -861,6 +870,9 @@ describe("Registration Personnel frontend", () => {
           clientId: clientA.id,
           facilityIds: [facilityA.id],
           primaryFacilityId: facilityA.id,
+          clientEmployeeNumber: "OGI-EMP-ANA-001",
+          facilityPositions: { [facilityA.id]: "Training operations" },
+          facilityDuties: { [facilityA.id]: "OTHER_DUTY" },
           fullName: "Ana Santos"
         }) }]
       },

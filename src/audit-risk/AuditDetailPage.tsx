@@ -13,6 +13,7 @@ import { AuditRiskMetadataGrid, AuditRiskPageHeader, AuditRiskSectionCard, Audit
 
 export function AuditDetailPage() {
   const canView = useCan("view_audit");
+  const canViewExecution = useCan("create_audit");
   const { auditId } = useParams();
   const query = useQuery({
     queryKey: auditQueryKeys.detail(auditId ?? ""),
@@ -48,12 +49,12 @@ export function AuditDetailPage() {
           {audit.completed_at ? <Context label="Completed at" value={formatDateTime(audit.completed_at)} /> : null}
         </AuditRiskMetadataGrid>
       </AuditRiskSectionCard>
-      <AuditRiskSectionCard heading="Audit execution" headingId="audit-execution-action-heading">
-        <p className="mt-1 text-sm text-text-muted">Open the authoritative execution definition, persisted responses, completeness, and Finding context.</p>
-        <Button asChild className="mt-4" variant={audit.audit_status === "IN_PROGRESS" ? "primary" : "secondary"}>
-          <Link to={routes.auditExecutionPath(audit.id)}>{audit.audit_status === "IN_PROGRESS" ? "Open Audit execution" : "View Audit execution"}</Link>
-        </Button>
-      </AuditRiskSectionCard>
+      {canViewExecution ? <AuditRiskSectionCard heading="Audit execution" headingId="audit-execution-action-heading">
+          <p className="mt-1 text-sm text-text-muted">Open the authoritative execution definition, persisted responses, completeness, and Finding context.</p>
+          <Button asChild className="mt-4" variant={audit.audit_status === "IN_PROGRESS" ? "primary" : "secondary"}>
+            <Link to={routes.auditExecutionPath(audit.id)}>{audit.audit_status === "IN_PROGRESS" ? "Open Audit execution" : "View Audit execution"}</Link>
+          </Button>
+        </AuditRiskSectionCard> : null}
     </section>
   );
 }

@@ -189,7 +189,14 @@ export function RegisterTrainingWizard({
     queryFn: listTrainingSessions,
     retry: false,
   });
-  const requestsQuery = useQuery({ queryKey: ["approved-training-requests", "register-wizard"], queryFn: listApprovedTrainingRequests, retry: false });
+  const requestsQuery = useQuery({
+    queryKey: ["approved-training-requests", "register-wizard"],
+    queryFn: listApprovedTrainingRequests,
+    retry: false,
+    // Approval can occur immediately before this dialog is opened. Never let a
+    // previously cached empty result hide newly governed request authority.
+    refetchOnMount: "always",
+  });
   const programsQuery = useQuery({
     queryKey: ["training-programs"],
     queryFn: listTrainingPrograms,
@@ -318,6 +325,7 @@ export function RegisterTrainingWizard({
     update({
       clientId,
       facilityId: "",
+      trainingRequestId: "",
       sessionId: "",
       conductedByUserId: "",
       instructorStaffMemberId: "",
@@ -327,6 +335,7 @@ export function RegisterTrainingWizard({
   function changeFacility(facilityId: string) {
     update({
       facilityId,
+      trainingRequestId: "",
       sessionId: "",
       conductedByUserId: "",
       instructorStaffMemberId: "",
@@ -527,7 +536,8 @@ export function RegisterTrainingWizard({
             failed={sessionsQuery.isError}
             canCreateSession={canCreateSession}
             requests={approvedRequests}
-            requestsLoading={requestsQuery.isLoading}
+            requestsLoading={requestsQuery.isLoading || requestsQuery.isFetching}
+            requestsFailed={requestsQuery.isError}
             changeMode={changeSessionMode}
             update={update}
           />
@@ -1104,6 +1114,7 @@ function SessionStep({
   canCreateSession,
   requests,
   requestsLoading,
+  requestsFailed,
   changeMode,
   update,
 }: {
@@ -1114,6 +1125,7 @@ function SessionStep({
   canCreateSession: boolean;
   requests: readonly { readonly id: string; readonly business_identifier: string }[];
   requestsLoading: boolean;
+  requestsFailed: boolean;
   changeMode: (mode: SessionMode) => void;
   update: (patch: Partial<WizardState>) => void;
 }) {
@@ -1206,12 +1218,25 @@ function SessionStep({
           ) : null}
         </>
       ) : state.facilityId ? (
-        <Field label="Approved Training Request">
-          <select className={control} disabled={requestsLoading} onChange={(event) => update({ trainingRequestId: event.currentTarget.value })} value={state.trainingRequestId}>
-            <option value="">{requestsLoading ? "Loading approved requests…" : "Select an approved F020 request"}</option>
-            {requests.map((request) => <option key={request.id} value={request.id}>{request.business_identifier}</option>)}
-          </select>
-        </Field>
+        <>
+          <Field label="Approved Training Request">
+            <select className={control} disabled={requestsLoading || requestsFailed} onChange={(event) => update({ trainingRequestId: event.currentTarget.value })} value={state.trainingRequestId}>
+              <option value="">{requestsLoading ? "Loading approved requests…" : "Select an approved F020 request"}</option>
+              {requests.map((request) => <option key={request.id} value={request.id}>{request.business_identifier}</option>)}
+            </select>
+          </Field>
+          {requestsFailed ? (
+            <div className="rounded-component border border-red-200 bg-red-50 p-4 text-sm text-red-900" role="alert">
+              <p className="font-semibold">Approved Training Requests could not be loaded.</p>
+              <p className="mt-1">The system could not verify F-020 approval and scope. Close and reopen this registration after checking the connection.</p>
+            </div>
+          ) : !requestsLoading && requests.length === 0 ? (
+            <div className="rounded-component border border-dashed border-border bg-blue-50/40 p-4 text-sm">
+              <p className="font-semibold text-primary-navy">No governance-approved F-020 request matches this Client and Facility.</p>
+              <p className="mt-1 text-text-muted">Only an F-020 request with exact governed approval and compatible Client and Facility authority can create a new Training Session.</p>
+            </div>
+          ) : null}
+        </>
       ) : (
         <p
           className="rounded-component border border-accent-red/30 bg-red-50 p-4 text-sm font-medium text-red-800"

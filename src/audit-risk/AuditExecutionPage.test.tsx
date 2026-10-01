@@ -13,7 +13,7 @@ import { formatDateTime } from "./auditRiskTypes";
 const auditId = "00000000-0000-4000-8000-000000000101";
 const templateId = "00000000-0000-4000-8000-000000000201";
 const findingId = "00000000-0000-4000-8000-000000000601";
-const session = { id: "00000000-0000-4000-8000-000000000001", email: "auditor@example.test", username: null, fullName: "Audit User", status: "ACTIVE", clientId: "00000000-0000-4000-8000-000000000401", facilityScopeMode: "CLIENT_WIDE", facilityIds: [], roles: ["Auditor"], permissions: ["view_audit", "submit_audit_response", "complete_audit", "view_finding"] };
+const session = { id: "00000000-0000-4000-8000-000000000001", email: "auditor@example.test", username: null, fullName: "Audit User", status: "ACTIVE", clientId: null, facilityScopeMode: null, facilityIds: [], roles: ["OGI_OFFICER"], permissions: ["view_audit", "create_audit", "submit_audit_response", "complete_audit", "view_finding"] };
 
 beforeEach(() => {
   window.sessionStorage.clear();
@@ -289,7 +289,7 @@ describe("authoritative Audit execution workspace", () => {
   });
 
   it("independently removes edit, complete, and Finding-link affordances", async () => {
-    mockRoutes([...authRoutes({ ...session, permissions: ["view_audit"] }), route(executionPath(), execution({ complete: true }))]);
+    mockRoutes([...authRoutes({ ...session, permissions: ["view_audit", "create_audit"] }), route(executionPath(), execution({ complete: true }))]);
     renderExecution();
     expect(await screen.findByRole("heading", { name: "AUDIT-2026-000001" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Save/ })).not.toBeInTheDocument();
@@ -331,6 +331,7 @@ function execution(overrides: { responses?: readonly unknown[]; complete?: boole
     responses: overrides.responses ?? [canonicalResponse(3, { boolean_check: false, compliance: true, text_note: "Persisted note", choice: "A", date: "2026-08-30", signature: true })],
     findings: [{ id: findingId, business_identifier: "AUDIT-FINDING-2026-000001", is_resolved: false, source_section_code: "OPERATIONS", source_field_id: "boolean_check", source_condition: "PASSING" }],
     completeness: overrides.complete ? { is_complete: true, incomplete: [] } : { is_complete: false, incomplete: [{ section_code: "OPERATIONS", field_id: "long_note" }] },
+    execution_authority: { state: "ACTIVE", mutation_allowed: true, reason: null, appointment_id: "00000000-0000-4000-8000-000000000902", appointment_identifier: "AUDITOR-APPOINTMENT-2026-000001", audit_number: "AUDIT-2026-000001" },
     completion_eligible: Boolean(overrides.complete && status === "IN_PROGRESS"), legacy_history_excluded: true
   };
 }

@@ -40,7 +40,7 @@ export function AdministrationPage() {
   return (
     <WorkspaceShell
       description="Use the administrative capabilities available through your current server-authorized session."
-      headerActions={canProvisionClientPoc ? <Button asChild><Link to={routes.administrationClientPocs}>Provision Client POC</Link></Button> : null}
+      headerActions={canProvisionClientPoc ? <Button asChild><Link to={routes.administrationClientPocs}>Invite Client POC</Link></Button> : null}
       headingId="administration-users-heading"
       navigation={null}
       sectionDescription="Review the user accounts visible to your administrative authority."

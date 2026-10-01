@@ -7,12 +7,14 @@ import {
   AuditFindingReadProjection,
   AuditFindingSeverity,
   AuditEligibleFacilityList,
+  AuditEligibleAppointmentList,
   AuditTemplateSelector,
   AuditCompletionResult,
   AuditExecutionProjection,
   AuditResponseCommandResult,
   isAuditCompletionResult,
   isAuditEligibleFacilityList,
+  isAuditEligibleAppointmentList,
   isAuditExecutionProjection,
   isAuditFindingListResponse,
   isAuditFindingReadProjection,
@@ -29,6 +31,7 @@ export interface AuditListFilters {
 export interface StartAuditCommand {
   readonly templateId: string;
   readonly facilityId: string;
+  readonly appointmentId: string;
 }
 
 export interface SaveAuditResponseCommand {
@@ -57,6 +60,7 @@ export const auditQueryKeys = {
   detail: (auditId: string) => ["audits", "detail", auditId] as const,
   execution: (auditId: string) => ["audit-execution", auditId] as const,
   eligibleFacilities: ["audits", "selectors", "eligible-facilities"] as const,
+  eligibleAppointments: (facilityId: string) => ["audits", "selectors", "eligible-appointments", facilityId] as const,
   templates: ["audits", "selectors", "templates"] as const
 };
 
@@ -69,6 +73,12 @@ export function listAudits(filters: AuditListFilters = {}) {
 export function listEligibleAuditFacilities() {
   return apiRequest<AuditEligibleFacilityList>("/api/v1/audits/eligible-facilities", {
     validate: isAuditEligibleFacilityList
+  });
+}
+
+export function listEligibleAuditAppointments(facilityId: string) {
+  return apiRequest<AuditEligibleAppointmentList>(`/api/v1/audits/eligible-appointments?facility_id=${encodeURIComponent(facilityId)}`, {
+    validate: isAuditEligibleAppointmentList
   });
 }
 

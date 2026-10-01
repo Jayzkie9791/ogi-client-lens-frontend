@@ -31,7 +31,8 @@ import {
   RegistrationEditableSection,
   RegistrationMetadataGroup,
   RegistrationMetadataItem,
-  RegistrationStatusBadge
+  RegistrationStatusBadge,
+  RegistrationTechnicalDetails
 } from "./RegistrationWorkspaceUi";
 
 const permissions = {
@@ -359,12 +360,14 @@ function FacilityDetailsPanel({
           />
         </RegistrationMetadataGroup>
 
-        <RegistrationMetadataGroup description="System references and record history remain available for traceability.">
-          <RegistrationMetadataItem label="Administrative Facility ID" value={facility.id} subtle />
-          <RegistrationMetadataItem label="Administrative Client ID" value={facility.client_id} subtle />
+        <RegistrationMetadataGroup description="Record history for this Facility.">
           <RegistrationMetadataItem label="Created" value={formatRegistrationDateTime(facility.created_at)} />
           <RegistrationMetadataItem label="Updated" value={formatRegistrationDateTime(facility.updated_at)} />
         </RegistrationMetadataGroup>
+        <RegistrationTechnicalDetails>
+          <RegistrationMetadataItem label="Facility ID" value={facility.id} subtle />
+          <RegistrationMetadataItem label="Client ID" value={facility.client_id} subtle />
+        </RegistrationTechnicalDetails>
 
         {canUpdate ? (
           <RegistrationEditableSection
@@ -486,8 +489,9 @@ function FacilityForm({
   onChange: (formState: FacilityFormState) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
-  const canSubmit =
-    formState.facilityName.trim().length > 0 && formState.clientId.trim().length > 0;
+  const timezoneValid = isIanaTimezone(formState.timezone);
+  const canSubmit = formState.facilityName.trim().length > 0 &&
+    formState.clientId.trim().length > 0 && timezoneValid;
 
   return (
     <form aria-label={actionLabel} className="space-y-4" id={formId} onSubmit={onSubmit}>
@@ -575,6 +579,9 @@ function FacilityForm({
           onChange={(timezone) => onChange({ ...formState, timezone })}
           value={formState.timezone}
         />
+        {!timezoneValid ? <p className="text-sm text-state-error" role="alert">
+          Use a valid IANA timezone such as Asia/Manila or America/Nassau.
+        </p> : null}
       </div>
       <label className="block text-sm font-semibold text-text-primary">
         Notes
@@ -603,6 +610,12 @@ function FacilityForm({
       </div>
     </form>
   );
+}
+
+function isIanaTimezone(value:string) {
+  if (!value.trim()) return true;
+  try { new Intl.DateTimeFormat("en-US", { timeZone:value.trim() }); return true; }
+  catch { return false; }
 }
 
 function FormInput({
@@ -739,7 +752,7 @@ function buildClientNameMap(clients: RegistrationClient[]) {
 function clientLabel(clientId: string, clientNameById: Map<string, string>) {
   const name = clientNameById.get(clientId);
 
-  return name ?? clientId;
+  return name ?? "Client name unavailable";
 }
 
 function displayCode(value: string) {

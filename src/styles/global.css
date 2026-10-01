@@ -119,12 +119,12 @@
     border: 1px solid color-mix(in srgb, var(--cl-catalog-accent) 35%, white);
     border-radius: 9999px;
     background: var(--cl-catalog-accent-soft);
-    padding: 0.2rem 0.6rem;
+    padding: 0.35rem 0.85rem;
     color: var(--cl-catalog-accent);
-    font-size: 0.75rem;
-    font-weight: 700;
+    font-size: 1.125rem;
+    font-weight: 800;
     letter-spacing: var(--cl-type-label-tracking);
-    line-height: 1.25rem;
+    line-height: 1.5rem;
   }
 
   .cl-catalog-title {

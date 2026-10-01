@@ -6,6 +6,7 @@ import { routes } from "../routePaths";
 import { AuthenticatedSession } from "../../auth/types";
 import { useAuth } from "../../auth/useAuth";
 import { listGovernanceQueue } from "../../oets/governanceApi";
+import { evidencePathWithReturn } from "../../oets/evidenceReturnContext";
 import { listOperationalEvidenceRecords } from "../../oets/recordsApi";
 import { listRecentTrainingRegistrations, TrainingEnrollment } from "../../training/trainingApi";
 import { Button } from "../../ui/components/Button";
@@ -219,13 +220,13 @@ function ContinueYourWork() {
     id: record.evidence_record_id,
     label: record.presentation?.template_name ?? humanizeCode(record.template_code),
     meta: [record.presentation?.subject?.display_name, `Updated ${formatOverviewDate(record.updated_at)}`].filter(Boolean).join(" · "),
-    to: routes.evidenceRecordPath(record.evidence_record_id)
+    to: evidencePathWithReturn(record.evidence_record_id, { kind: "WORKBENCH" })
   }));
   const reviews: ContinueWorkItem[] = (reviewsQuery.data ?? []).slice(0, 3).map((item) => ({
     id: item.evidence_record.id,
     label: item.display_context?.template_name ?? humanizeCode(item.evidence_record.template_provenance.template_code),
     meta: [item.display_context?.subject_name, item.active_claim?.claimed_by_user_id === userId ? "Claimed by you" : item.active_claim ? "Claimed" : "Available"].filter(Boolean).join(" · "),
-    to: routes.evidenceRecordPath(item.evidence_record.id)
+    to: evidencePathWithReturn(item.evidence_record.id, { kind: "WORKBENCH" })
   }));
   const activeEnrollments = (trainingQuery.data?.enrollments ?? []).filter((enrollment) => enrollment.journey_progress?.next_action !== "DIGITAL_CREDENTIAL_ISSUED");
   const trainingEnrollments = activeEnrollments.filter((enrollment) => isTrainingAction(enrollment.journey_progress?.next_action));

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { getOperationalEvidenceRecord } from "./evidenceSubmissionApi";
+import { createOperationalEvidenceDraft, getOperationalEvidenceRecord } from "./evidenceSubmissionApi";
 
 describe("Operational Evidence existing-context response guard", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -32,6 +32,26 @@ describe("Operational Evidence existing-context response guard", () => {
 
     await expect(getOperationalEvidenceRecord("record-1")).rejects.toMatchObject({ code: "MALFORMED_RESPONSE" });
   });
+
+  it("accepts exact historical contextual-reuse resolution metadata", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({
+      ...record(null),
+      creation_resolution: {
+        outcome: "REUSED_EXISTING_CONTEXT_RECORD",
+        requested_template_version: "3.4",
+        returned_template_version: "3.3",
+        version_relation: "HISTORICAL_VERSION_REUSED",
+        duplicate_policy: "ONE_LIVE_RECORD_PER_SUBJECT",
+        context_kind: "STAFF_MEMBER",
+        context_label: "Elmer Miranda",
+        user_message_code: "HISTORICAL_RECORD_REUSED"
+      }
+    })));
+
+    await expect(createOperationalEvidenceDraft({} as Parameters<typeof createOperationalEvidenceDraft>[0])).resolves.toMatchObject({
+      creation_resolution: { outcome: "REUSED_EXISTING_CONTEXT_RECORD", returned_template_version: "3.3" }
+    });
+  });
 });
 
 function record(context: unknown) {
@@ -50,7 +70,15 @@ function record(context: unknown) {
     updated_at: "2026-09-15T00:00:00.000Z",
     scope_kind: "CLIENT_SCOPED",
     training_context: null,
-    context
+    context,
+    field_authority: {
+      projection_version: "OETS_FIELD_AUTHORITY_PRESENTATION_V1",
+      template_code: "OGI_TEST",
+      template_version: "1.0",
+      template_version_id: "version-1",
+      fields: [],
+      projection_checksum: "a".repeat(64)
+    }
   };
 }
 

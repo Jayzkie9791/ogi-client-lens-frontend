@@ -7,12 +7,12 @@ import { Button } from "../../ui/components/Button";
 import { Surface } from "../../ui/components/Surface";
 import { displayLifecycleStatus } from "../../oets/displayLabels";
 import { evidenceLifecycleStyle, formatEvidenceDateTime, humanizeEvidenceTemplateCode } from "../../oets/evidencePresentation";
+import { evidencePathWithReturn } from "../../oets/evidenceReturnContext";
 import {
   listOperationalEvidenceRecords,
   OperationalEvidenceRecordSummary,
   OperationalEvidenceRecordsFilters
 } from "../../oets/recordsApi";
-import { routes } from "../routePaths";
 import { useAuth } from "../../auth/useAuth";
 
 const recordsPageSize = 25;
@@ -146,7 +146,7 @@ export function MyDraftsPage() {
           <p className="mt-2 text-sm text-text-muted">New evidence appears here after Begin Evidence succeeds.</p>
         </Surface>
       ) : (
-        <RecordsList records={records} continueDraft />
+        <RecordsList records={records} continueDraft returnKind="MY_DRAFTS" />
       )}
       {pagination ? (
         <RecordsPagination
@@ -237,10 +237,12 @@ function RecordsFilters({
 
 function RecordsList({
   records,
-  continueDraft = false
+  continueDraft = false,
+  returnKind = "RECORDS"
 }: {
   records: OperationalEvidenceRecordSummary[];
   continueDraft?: boolean;
+  returnKind?: "RECORDS" | "MY_DRAFTS";
 }) {
   return (
     <ul aria-label="Operational Evidence records" className="space-y-3">
@@ -281,7 +283,7 @@ function RecordsList({
             </div>
             <div className="flex shrink-0 lg:pt-1">
               <Button asChild>
-                <Link to={routes.evidenceRecordPath(record.evidence_record_id)}>
+                <Link to={evidencePathWithReturn(record.evidence_record_id, { kind: returnKind })}>
                   {continueDraft ? "Continue Draft" : "View Record"}
                 </Link>
               </Button>

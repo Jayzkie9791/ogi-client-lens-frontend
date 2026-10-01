@@ -46,6 +46,29 @@ const findingViewerSession = {
   permissions: ["view_finding"]
 };
 
+const lifeguardSession = {
+  ...session,
+  roles: ["CLIENT_LIFEGUARD"],
+  permissions: ["view_own_personnel_profile", "view_own_credentials"]
+};
+
+const leadLifeguardSession = {
+  ...session,
+  roles: ["CLIENT_LEAD_LIFEGUARD"],
+  permissions: [
+    "view_own_personnel_profile",
+    "view_own_credentials",
+    "view_authorized_facility_personnel",
+    "view_authorized_facility_credentials"
+  ]
+};
+
+const clientPocSession = {
+  ...session,
+  roles: ["CLIENT_ADMIN"],
+  permissions: ["view_audit", "view_audit_appointment", "view_training_request", "submit_training_request"]
+};
+
 const administrationUsersResponse = [
   {
     id: "00000000-0000-4000-8000-000000000901",
@@ -128,6 +151,36 @@ const catalogResponse = {
       last_synchronized_at: null
     }
   ]
+};
+
+const f908CatalogResponse = {
+  templates: [{
+    template_registry_id: "00000000-0000-4000-8000-000000009080",
+    template_version_id: "00000000-0000-4000-8000-000000009081",
+    template_code: "OGI_F908_ARMAS_COMPLIANCE_SCORECARD",
+    template_name: "ARMAS Compliance Scorecard",
+    template_archetype: "ASSESSMENT_SCORECARD",
+    module: "OGI_APP_MODULE_09_RISK_MANAGEMENT_SAFETY_AUDITS",
+    template_version: "3.1",
+    schema_version: "1.0",
+    checksum: "a".repeat(64),
+    registry_status: "ACTIVE",
+    version_status: "ACTIVE",
+    description: "One immutable executive facility compliance evidence snapshot.",
+    business_context: {
+      enterprise_capability: "RISK_INTELLIGENCE",
+      supporting_capabilities: ["OPERATIONAL_GOVERNANCE"],
+      operational_domain: "Audit, compliance, and executive risk intelligence",
+      business_process: "ARMAS compliance scorecard snapshot governance",
+      evidence_type: "ASSESSMENT",
+      governance_scope: "FACILITY",
+      description: "Manual facility scorecard evidence."
+    },
+    document_number: "OGI F-908",
+    document_revision: "2.0",
+    registered_at: "2026-08-26T00:00:00.000Z",
+    last_synchronized_at: "2026-08-26T00:00:00.000Z"
+  }]
 };
 
 
@@ -850,7 +903,7 @@ describe("Client Lens authentication foundation", () => {
     expect(screen.getByRole("button", { name: "Claim Review" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open Record" })).toHaveAttribute(
       "href",
-      routes.evidenceRecordPath(queueEvidenceRecord.id)
+      `${routes.evidenceRecordPath(queueEvidenceRecord.id)}?return=governance-queue`
     );
     expect(screen.queryByText("begin_ogi_review")).not.toBeInTheDocument();
     expect(screen.queryByText("UNDER_OGI_REVIEW")).not.toBeInTheDocument();
@@ -921,7 +974,7 @@ describe("Client Lens authentication foundation", () => {
     expect(await screen.findByText("OGI · Claimed by you")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Continue Review" })).toHaveAttribute(
       "href",
-      routes.evidenceRecordPath(queueEvidenceRecord.id)
+      `${routes.evidenceRecordPath(queueEvidenceRecord.id)}?return=governance-queue`
     );
     expect(screen.queryByRole("button", { name: "Claim Review" })).not.toBeInTheDocument();
 
@@ -956,7 +1009,7 @@ describe("Client Lens authentication foundation", () => {
     expect(await screen.findByText("Claimed by another reviewer.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "View Record" })).toHaveAttribute(
       "href",
-      routes.evidenceRecordPath(queueEvidenceRecord.id)
+      `${routes.evidenceRecordPath(queueEvidenceRecord.id)}?return=governance-queue`
     );
     expect(screen.queryByRole("button", { name: "Claim Review" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Continue Review" })).not.toBeInTheDocument();
@@ -1197,6 +1250,52 @@ describe("Client Lens authentication foundation", () => {
     expect(await screen.findByRole("link", { name: "Audit & Risk" })).toHaveAttribute("href", routes.auditFindings);
   });
 
+  it("Run 5 exposes only self-service navigation to a Client Lifeguard", async () => {
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: lifeguardSession }
+    ]);
+    renderWithRoute(routes.workbench);
+
+    await userEvent.click(await screen.findByRole("button", { name: "My Account" }));
+    expect(screen.getByRole("link", { name: "My Profile" })).toHaveAttribute("href", routes.myProfile);
+    expect(screen.getByRole("link", { name: "My Credentials" })).toHaveAttribute("href", routes.myCredentials);
+    expect(screen.queryByRole("button", { name: "Workforce" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Governance" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "System" })).not.toBeInTheDocument();
+  });
+
+  it("Run 5 adds only authorized Facility Team navigation for a Lead Lifeguard", async () => {
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: leadLifeguardSession }
+    ]);
+    renderWithRoute(routes.workbench);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Workforce" }));
+    expect(screen.getByRole("link", { name: "Facility Team" })).toHaveAttribute("href", routes.facilityTeam);
+    expect(screen.queryByRole("link", { name: "Personnel Masterlist" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Governance" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "System" })).not.toBeInTheDocument();
+  });
+
+  it("Run 5 keeps Client POC Audit navigation read-only by permission composition", async () => {
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: clientPocSession }
+    ]);
+    renderWithRoute(routes.workbench);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Governance" }));
+    expect(screen.getByRole("link", { name: "Audit & Risk" })).toHaveAttribute("href", routes.auditRisk);
+    expect(screen.getByRole("link", { name: "Auditor Appointments" })).toHaveAttribute("href", routes.auditorAppointments);
+    expect(screen.queryByRole("link", { name: "Operations" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "System" })).not.toBeInTheDocument();
+  });
+
   it("routes view-only actors to the existing read-only runtime form", async () => {
     window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
     mockFetchQueue([
@@ -1216,6 +1315,48 @@ describe("Client Lens authentication foundation", () => {
       `${routes.oetsTemplatePath("OGI_F001_WEEKLY_SAFETY_AUDIT_CHECKLIST")}?mode=readonly`
     );
     expect(screen.queryByRole("link", { name: "Open Form" })).not.toBeInTheDocument();
+  });
+
+  it("I-B discovers exact F-908 v3.1 outside ORI and separates view-only from submit-capable runtime actions", async () => {
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: session },
+      { status: 200, body: f908CatalogResponse }
+    ]);
+    const viewOnly = renderWithRoute(routes.operations);
+
+    await screen.findByRole("heading", { name: "Forms & Audits" });
+    await userEvent.selectOptions(
+      screen.getByLabelText("Module"),
+      "OGI_APP_MODULE_09_RISK_MANAGEMENT_SAFETY_AUDITS"
+    );
+    expect(screen.getByRole("heading", { name: "ARMAS Compliance Scorecard" })).toBeInTheDocument();
+    expect(screen.getByText("OGI F-908 / 2.0")).toBeInTheDocument();
+    expect(screen.getByText("Template version").nextElementSibling).toHaveTextContent("3.1");
+    expect(screen.getByRole("link", { name: "View Form" })).toHaveAttribute(
+      "href",
+      `${routes.oetsTemplatePath("OGI_F908_ARMAS_COMPLIANCE_SCORECARD")}?mode=readonly`
+    );
+    expect(screen.queryByRole("link", { name: "Open Form" })).not.toBeInTheDocument();
+
+    viewOnly.unmount();
+    mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: submitCapableSession },
+      { status: 200, body: f908CatalogResponse }
+    ]);
+    renderWithRoute(routes.operations);
+    await screen.findByRole("heading", { name: "Forms & Audits" });
+    await userEvent.selectOptions(
+      screen.getByLabelText("Module"),
+      "OGI_APP_MODULE_09_RISK_MANAGEMENT_SAFETY_AUDITS"
+    );
+    expect(screen.getByRole("link", { name: "Open Form" })).toHaveAttribute(
+      "href",
+      routes.oetsTemplatePath("OGI_F908_ARMAS_COMPLIANCE_SCORECARD")
+    );
+    expect(screen.queryByRole("link", { name: "View Form" })).not.toBeInTheDocument();
   });
 
   it("does not reveal Operations from role names without the required permission", async () => {
@@ -1266,7 +1407,7 @@ describe("Client Lens authentication foundation", () => {
     expect(screen.getByText("North Pool")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "View Record" })).toHaveAttribute(
       "href",
-      routes.evidenceRecordPath("00000000-0000-4000-8000-000000000501")
+      `${routes.evidenceRecordPath("00000000-0000-4000-8000-000000000501")}?return=records`
     );
     expect(screen.queryByText("payload-checksum-1")).not.toBeInTheDocument();
     expect(screen.queryByText("Claim Review")).not.toBeInTheDocument();
@@ -1343,7 +1484,7 @@ describe("Client Lens authentication foundation", () => {
     expect(screen.getByText("Sky Ranch")).toBeInTheDocument();
     expect(await screen.findByRole("link", { name: "Continue Draft" })).toHaveAttribute(
       "href",
-      routes.evidenceRecordPath("00000000-0000-4000-8000-000000000501")
+      `${routes.evidenceRecordPath("00000000-0000-4000-8000-000000000501")}?return=my-drafts`
     );
     expect(calls.map(({ url }) => url)).toEqual([
       "/api/v1/auth/refresh",

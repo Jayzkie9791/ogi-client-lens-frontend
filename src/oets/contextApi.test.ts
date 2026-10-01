@@ -1,11 +1,40 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { getOetsContextCandidates, getOetsContextRequirement, resolveOetsContext } from "./contextApi";
+import { getOetsContextCandidates, getOetsContextRequirement, resolveOetsContext, resolveOetsExistingContextRecord } from "./contextApi";
 
 const authority = { templateCode: "OGI_F048_DIGITAL_CREDENTIAL_ISSUANCE_FORM", templateVersionId: "3462dcff-6892-4bf1-b6e1-0b52363c39da", checksum: "a".repeat(64) };
 
 describe("OETS context API authority guards", () => {
   afterEach(() => vi.unstubAllGlobals());
+
+  it("accepts the recurring-subject active-draft duplicate policy", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({ required: true, requirement_code: "ASSET_CONTEXT", selection_mode: "EXPLICIT", presentation: { label: "Asset context", help_text: "Select one.", candidate_singular: "Asset", candidate_plural: "Assets" }, duplicate_policy: "ONE_ACTIVE_DRAFT_PER_SUBJECT", successor_policy: "CLONE_IMMUTABLE_CONTEXT" })));
+    await expect(getOetsContextRequirement({ ...authority, templateCode: "OGI_F081_EQUIPMENT_INSPECTION_REPORT" })).resolves.toMatchObject({ duplicate_policy: "ONE_ACTIVE_DRAFT_PER_SUBJECT" });
+  });
+
+  it("accepts the one-lineage Audit Appointment duplicate policy", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({
+      required: true,
+      requirement_code: "AUDIT_APPOINTMENT_CONTEXT",
+      selection_mode: "EXPLICIT",
+      presentation: {
+        label: "Audit Appointment context",
+        help_text: "Select the exact active Audit Appointment that governs this audit effort.",
+        candidate_singular: "Audit Appointment",
+        candidate_plural: "Audit Appointments"
+      },
+      duplicate_policy: "ONE_EVIDENCE_LINEAGE_PER_SUBJECT",
+      successor_policy: "CLONE_IMMUTABLE_CONTEXT"
+    })));
+
+    await expect(getOetsContextRequirement({
+      ...authority,
+      templateCode: "OGI_F003_ARMAS_OPERATIONAL_AUDIT_INSTRUMENT"
+    })).resolves.toMatchObject({
+      requirement_code: "AUDIT_APPOINTMENT_CONTEXT",
+      duplicate_policy: "ONE_EVIDENCE_LINEAGE_PER_SUBJECT"
+    });
+  });
 
   it("loads a required explicit-selection contract and preserves zero/one/many without choosing", async () => {
     const candidate = { id: "certification-1", primary_label: "OGI-CERT-2026-0001", secondary_label: "Aurelia Guard · OGI_L1_POOL_LIFEGUARD", context_kind: "CERTIFICATION", holder_kind: "TRAINEE" };
@@ -75,6 +104,56 @@ describe("OETS context API authority guards", () => {
     await expect(resolveOetsContext({ ...authority, clientId: "client-1", selectedId: "certification-1" })).rejects.toMatchObject({ code: "MALFORMED_RESPONSE" });
     await expect(resolveOetsContext({ ...authority, clientId: "client-1", selectedId: "certification-1" })).rejects.toMatchObject({ code: "MALFORMED_RESPONSE" });
   });
+
+  it("accepts bounded fixed repeatable groups and rejects cardinality drift", async () => {
+    const summary = { id: "session-1", primary_label: "Session 1", secondary_label: "Training", context_kind: "TRAINING_SESSION" };
+    const base = { requirement_code: "TRAINING_SESSION_CONTEXT", selected_id: "session-1", summary, field_policy: {}, authoritative_values: {}, required_fields: [] };
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(json({ ...base, repeatable_groups: [{ group_code: "ROSTER", cardinality: "FIXED", instance_count: 2, max_instances: 100, sections: [{ section_code: "PARTICIPANTS", instances: [{ NAME: "Alpha" }, { NAME: "Bravo" }] }, { section_code: "ATTENDANCE", instances: [{}, {}] }] }] }))
+      .mockResolvedValueOnce(json({ ...base, repeatable_groups: [{ group_code: "ROSTER", cardinality: "FIXED", instance_count: 2, max_instances: 100, sections: [{ section_code: "PARTICIPANTS", instances: [{ NAME: "Alpha" }] }] }] })));
+    await expect(resolveOetsContext({ ...authority, clientId: "client-1", selectedId: "session-1" })).resolves.toMatchObject({ repeatable_groups: [{ instance_count: 2 }] });
+    await expect(resolveOetsContext({ ...authority, clientId: "client-1", selectedId: "session-1" })).rejects.toMatchObject({ code: "MALFORMED_RESPONSE" });
+  });
+
+  it("posts exact contextual preflight authority and accepts an accessible historical Draft", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(json({
+      resolution: "EXISTING_RECORD",
+      duplicate_policy: "ONE_LIVE_RECORD_PER_SUBJECT",
+      record: {
+        evidence_record_id: "record-1",
+        lifecycle_state: "DRAFT",
+        template_version: "3.3",
+        version_relation: "HISTORICAL_VERSION",
+        access_action: "CONTINUE_DRAFT"
+      }
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(resolveOetsExistingContextRecord({
+      ...authority,
+      templateCode: "OGI_F093_INDIVIDUAL_TRAINING_RECORD",
+      clientId: "client-1",
+      facilityId: "facility-1",
+      requirementCode: "PERSONNEL_CONTEXT",
+      selectedId: "staff-1"
+    })).resolves.toMatchObject({ resolution: "EXISTING_RECORD", record: { template_version: "3.3" } });
+
+    const request = fetchMock.mock.calls[0];
+    expect(String(request?.[0])).toContain("/context-record-resolution");
+    expect(request?.[1]).toMatchObject({ method: "POST" });
+    expect(JSON.parse(String(request?.[1]?.body))).toEqual({
+      template_version_id: authority.templateVersionId,
+      checksum: authority.checksum,
+      client_id: "client-1",
+      facility_id: "facility-1",
+      context: { requirement_code: "PERSONNEL_CONTEXT", selected_id: "staff-1" }
+    });
+  });
 });
 
-function json(value: unknown) { return new Response(JSON.stringify(value), { status: 200, headers: { "Content-Type": "application/json" } }); }
+function json(value: unknown) {
+  const enriched = value && typeof value === "object" && !Array.isArray(value) && "selected_id" in value
+    ? { ...value, field_authority: { projection_version: "OETS_FIELD_AUTHORITY_PRESENTATION_V1", template_code: authority.templateCode, template_version: "1.0", template_version_id: authority.templateVersionId, fields: [], projection_checksum: "a".repeat(64) } }
+    : value;
+  return new Response(JSON.stringify(enriched), { status: 200, headers: { "Content-Type": "application/json" } });
+}

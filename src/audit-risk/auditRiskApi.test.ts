@@ -147,7 +147,7 @@ describe("Audit read API", () => {
   });
 
   it("sends the exact governed command and Idempotency-Key", async () => {
-    const command = { templateId: audit.template.id, facilityId: audit.facility.id };
+    const command = { templateId: audit.template.id, facilityId: audit.facility.id, appointmentId: "00000000-0000-4000-8000-000000000902" };
     const key = "00000000-0000-4000-8000-000000000901";
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const requestUrl = new URL(String(input), window.location.origin);
@@ -157,7 +157,7 @@ describe("Audit read API", () => {
       expect(init?.method).toBe("POST");
       expect(headers.get("Idempotency-Key")).toBe(key);
       expect(JSON.parse(String(init?.body))).toEqual(command);
-      expect(Object.keys(JSON.parse(String(init?.body))).sort()).toEqual(["facilityId", "templateId"]);
+      expect(Object.keys(JSON.parse(String(init?.body))).sort()).toEqual(["appointmentId", "facilityId", "templateId"]);
       return jsonResponse(audit);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -231,13 +231,15 @@ function executionProjection() {
   return {
     audit,
     definition: { template_id: audit.template.id, version: 2, checksum: "a".repeat(64), schema: { sections: [{ section_code: "OPERATIONS", title: "Operations", fields: [{ field_id: "check", label: "Check", type: "boolean", required: true, source_required: true, edit_authority: "USER_RESPONSE", response_kind: "BOOLEAN" }] }] } },
-    responses: [], findings: [], completeness: { is_complete: false, incomplete: [{ section_code: "OPERATIONS", field_id: "check" }] }, completion_eligible: false, legacy_history_excluded: true
+    responses: [], findings: [], completeness: { is_complete: false, incomplete: [{ section_code: "OPERATIONS", field_id: "check" }] }, execution_authority: activeAuthority(), completion_eligible: false, legacy_history_excluded: true
   };
 }
 
 function responseResult(version: number) {
   return { response: { id: "00000000-0000-4000-8000-000000000801", audit_id: auditId, template_id: audit.template.id, section_code: "OPERATIONS", response_payload: { check: false }, version, checksum: "b".repeat(64), submitted_by: { id: "00000000-0000-4000-8000-000000000901", name: "Response Submitter" }, submitted_at: "2026-08-30T03:00:00.000Z" }, completeness: { is_complete: true, incomplete: [] } };
 }
+
+function activeAuthority() { return { state: "ACTIVE", mutation_allowed: true, reason: null, appointment_id: "00000000-0000-4000-8000-000000000902", appointment_identifier: "AUDITOR-APPOINTMENT-2026-000001", audit_number: "AUDIT-2026-000001" }; }
 
 function jsonResponse(body: unknown) {
   return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });

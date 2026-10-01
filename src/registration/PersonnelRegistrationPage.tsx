@@ -11,6 +11,7 @@ import { OgiPersonnelCreatePanel } from "./OgiPersonnelCreatePanel";
 import { getCurrentPersonnelRegistrationIntent } from "./personnelRegistrationJourneyApi";
 import { listRegistrationClients } from "./registrationClientApi";
 import { RegistrationWorkspaceShell } from "./RegistrationWorkspaceShell";
+import { InviteLifeguardPanel } from "./InviteLifeguardPanel";
 
 type RegistrationMode = "CLIENT" | "OGI" | null;
 
@@ -20,6 +21,9 @@ export function PersonnelRegistrationPage() {
   const canCreate = auth.canUsePermission("create_staff_member");
   const canCreateOgi = auth.canUsePermission("manage_personnel_operational_authorization") && auth.session?.clientId === null;
   const canViewClients = auth.canUsePermission("view_client");
+  const canInviteNewLifeguard = auth.canUsePermission("manage_personnel_account_activation") &&
+    auth.canUsePermission("create_staff_member") && auth.canUsePermission("create_facility_assignment") &&
+    auth.canUsePermission("create_user");
   const [mode, setMode] = useState<RegistrationMode>(null);
   const [message, setMessage] = useState<string | null>(null);
   const clientsQuery = useQuery({ queryKey: ["registration-clients"], queryFn: listRegistrationClients, enabled: canViewClients, retry: false });
@@ -45,6 +49,7 @@ export function PersonnelRegistrationPage() {
     title="Register Personnel"
   >
     {message ? <Surface role="status"><p className="font-semibold text-text-primary">{message}</p><Link className="mt-3 inline-flex font-semibold text-primary-blue underline" to={routes.personnelMasterlist}>Open Personnel Masterlist</Link></Surface> : null}
+    {canInviteNewLifeguard ? <Surface><InviteLifeguardPanel clients={clients} initialClientId={auth.session?.clientId ?? clients[0]?.id ?? ""} /></Surface> : null}
     {!mode ? <Surface><h2 className="text-lg font-semibold text-primary-navy">Choose a registration action</h2><p className="mt-2 text-sm leading-6 text-text-muted">Registration creates a Personnel record. Existing Personnel records are reviewed and maintained in the Workforce masterlist.</p></Surface> : null}
     {mode === "CLIENT" ? <ClientPersonnelRegistrationWizard clients={clients} initialClientId={auth.session?.clientId ?? clients[0]?.id ?? ""} onCancel={() => setMode(null)} onComplete={(personnel) => finish(personnel.id, "Personnel registration completed successfully.")} /> : null}
     {mode === "OGI" ? <OgiPersonnelCreatePanel onCancel={() => setMode(null)} onCreated={(personnel) => finish(personnel.id, "OGI Personnel registration completed successfully.")} /> : null}

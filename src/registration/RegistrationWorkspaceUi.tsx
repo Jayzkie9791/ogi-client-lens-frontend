@@ -185,6 +185,15 @@ export function RegistrationMetadataGroup({
   );
 }
 
+export function RegistrationTechnicalDetails({ children }: { children: ReactNode }) {
+  return (
+    <details className="rounded-component border border-border bg-surface p-4">
+      <summary className="cursor-pointer text-sm font-semibold text-primary-navy">Technical record details</summary>
+      <dl className="mt-4 grid gap-x-5 gap-y-4 text-sm sm:grid-cols-2">{children}</dl>
+    </details>
+  );
+}
+
 export function RegistrationEditableSection({
   children,
   description,

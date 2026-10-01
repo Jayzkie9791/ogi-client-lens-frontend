@@ -1,5 +1,6 @@
 import {
   OetsDefinition,
+  OetsFieldAuthorityPresentation,
   OetsField,
   OetsOption,
   OetsSection,
@@ -38,8 +39,37 @@ export function isOetsTemplateRuntimeDefinition(
     isNonEmptyString(value.schema_version) &&
     isNonEmptyString(value.checksum) &&
     isNonEmptyString(value.status) &&
-    "definition_jsonb" in value
+    "definition_jsonb" in value &&
+    isOetsFieldAuthorityPresentation(value.field_authority)
   );
+}
+
+const authorityKinds = new Set(["OPERATOR_RECORDED", "CONTEXT_PROJECTED", "SERVER_GENERATED", "SERVER_CALCULATED", "GOVERNED_ATTESTATION", "ATTESTATION_PROJECTED", "DOWNSTREAM_UNAVAILABLE"]);
+const authorityStates = new Set(["DECLARED", "EFFECTIVE", "UNAVAILABLE"]);
+const authorityDispositions = new Set(["ACTIVE", "FORMULA_ABSENT", "SEMANTICS_BLOCKED", "CONTEXT_BLOCKED", "UNAVAILABLE_POST_ISSUANCE", "TEMPLATE_READ_ONLY_UNCLASSIFIED"]);
+const authorityEditability = new Set(["EDITABLE", "READ_ONLY", "ACTION_CONTROLLED", "UNAVAILABLE"]);
+const authorityReasonCodes = new Set(["OPERATOR_RECORDED", "OPERATOR_RECORDED_FORMULA_ABSENT", "OPERATOR_RECORDED_SEMANTICS_BLOCKED", "OPERATOR_RECORDED_CONTEXT_BLOCKED", "TEMPLATE_READ_ONLY_AUTHORITY_UNCLASSIFIED", "GOVERNED_CONTEXT_PROJECTION_DECLARED", "GOVERNED_CONTEXT_PROJECTION_EFFECTIVE", "GOVERNED_AGGREGATE_PROJECTION", "GENERATED_AT_DRAFT_CREATION", "CALCULATED_BY_SERVER", "GOVERNED_ATTESTATION_ACTION", "DERIVED_FROM_GOVERNED_ATTESTATION", "GOVERNED_ARTIFACT_DEFERRED", "UNAVAILABLE_POST_ISSUANCE"]);
+
+export function isOetsFieldAuthorityPresentation(value: unknown): value is OetsFieldAuthorityPresentation {
+  return isRecord(value) &&
+    value.projection_version === "OETS_FIELD_AUTHORITY_PRESENTATION_V1" &&
+    isNonEmptyString(value.template_code) &&
+    isNonEmptyString(value.template_version) &&
+    (value.template_version_id === null || isNonEmptyString(value.template_version_id)) &&
+    Array.isArray(value.fields) && value.fields.every((field) =>
+      isRecord(field) &&
+      isNonEmptyString(field.section_code) &&
+      isNonEmptyString(field.field_id) &&
+      isNonEmptyString(field.field_code) &&
+      typeof field.repeatable === "boolean" &&
+      typeof field.visible === "boolean" &&
+      authorityKinds.has(String(field.authority_kind)) &&
+      authorityStates.has(String(field.authority_state)) &&
+      authorityDispositions.has(String(field.disposition)) &&
+      authorityEditability.has(String(field.presentation_editability)) &&
+      authorityReasonCodes.has(String(field.reason_code))
+    ) &&
+    typeof value.projection_checksum === "string" && /^[a-f0-9]{64}$/.test(value.projection_checksum);
 }
 
 export interface DefinitionNarrowingResult {

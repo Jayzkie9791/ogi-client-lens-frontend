@@ -236,6 +236,12 @@ const enrollmentA: TrainingEnrollment = {
   created_at: "2026-08-17T04:00:00.000Z",
   updated_at: "2026-08-17T04:00:00.000Z",
   deleted_at: null,
+  lifecycle_control: {
+    started: false,
+    certification_authority_exists: false,
+    allowed_action: "CANCELLED",
+    blocked_reason: null
+  },
   trainee: {
     id: traineeAId,
     student_number: null,
@@ -315,6 +321,12 @@ const independentEnrollmentB: TrainingEnrollment = {
   created_at: "2026-08-18T04:00:00.000Z",
   updated_at: "2026-08-18T04:00:00.000Z",
   deleted_at: null,
+  lifecycle_control: {
+    started: false,
+    certification_authority_exists: false,
+    allowed_action: "CANCELLED",
+    blocked_reason: null
+  },
   trainee: {
     id: traineeBId,
     student_number: "OGI-STU-2026-0002",
@@ -400,6 +412,7 @@ function attendanceEvidenceWorkspace(
     active_draft: overrides.active_draft ?? null,
     history: overrides.history ?? [],
     can_create_draft: overrides.can_create_draft ?? true,
+    create_draft_blocked_reason: overrides.create_draft_blocked_reason ?? (overrides.active_draft ? "ACTIVE_SESSION_DRAFT" : null),
     can_replace_active_draft: overrides.can_replace_active_draft ?? false
   };
 }
@@ -585,20 +598,36 @@ function runtimeTemplateRoute(templateCode: string, templateVersionId: string): 
           schema_version: "1.0",
           checksum: `checksum-${templateVersionId}`,
           status: "ACTIVE",
-          definition_jsonb: oetsDefinition(templateCode)
+          definition_jsonb: oetsDefinition(templateCode),
+          field_authority: trainingEvidenceFieldAuthority(templateCode, templateVersionId)
         }
       }
     ]
   };
 }
 
-function operationalEvidenceRecordRoute(
+function operationalEvidenceRecordRoutes(
   record: ReturnType<typeof operationalEvidenceRecordResponse>
-): MockRoute {
-  return {
-    url: `/api/v1/operational-evidence/records/${record.id}`,
-    responses: [{ status: 200, body: record }]
-  };
+): MockRoute[] {
+  return [
+    {
+      url: `/api/v1/operational-evidence/records/${record.id}`,
+      responses: [{ status: 200, body: record }]
+    },
+    {
+      url: `/api/v1/operational-evidence/records/${record.id}/actions`,
+      responses: [{
+        status: 200,
+        body: {
+          projection_version: "EVIDENCE_RECORD_ACTIONS_V1",
+          evidence_record_id: record.id,
+          lifecycle_state: record.lifecycle_state,
+          revision: `${record.updated_at}:test`,
+          actions: []
+        }
+      }]
+    }
+  ];
 }
 
 function operationalEvidenceRecordResponse({
@@ -654,6 +683,7 @@ function operationalEvidenceRecordResponse({
       }
     },
     payload_checksum: "sha256:contextual-training-evidence",
+    field_authority: trainingEvidenceFieldAuthority(templateCode, templateVersionId),
     scope_kind: "TRAINING_SCOPED",
     training_context: {
       id: `context-${evidenceRecordId}`,
@@ -682,6 +712,48 @@ function operationalEvidenceRecordResponse({
     created_at: "2026-08-18T05:00:00.000Z",
     submitted_at: submittedAt,
     updated_at: "2026-08-18T05:00:00.000Z"
+  };
+}
+
+function trainingEvidenceFieldAuthority(templateCode: string, templateVersionId: string) {
+  const hasAssessmentNumber =
+    templateCode === "OGI_F023_OPERATIONAL_SKILLS_ASSESSMENT" ||
+    templateCode === "OGI_F024_OPERATIONAL_KNOWLEDGE_ASSESSMENT_RECORD";
+
+  return {
+    projection_version: "OETS_FIELD_AUTHORITY_PRESENTATION_V1" as const,
+    template_code: templateCode,
+    template_version: "1.0",
+    template_version_id: templateVersionId,
+    fields: [
+      ...(hasAssessmentNumber
+        ? [{
+            section_code: "ASSESSMENT_INFORMATION",
+            field_id: `field-assessment-number-${templateCode}`,
+            field_code: "ASSESSMENT_NUMBER",
+            repeatable: false,
+            visible: true,
+            authority_kind: "SERVER_GENERATED" as const,
+            authority_state: "EFFECTIVE" as const,
+            disposition: "ACTIVE" as const,
+            presentation_editability: "READ_ONLY" as const,
+            reason_code: "GENERATED_AT_DRAFT_CREATION" as const
+          }]
+        : []),
+      {
+        section_code: "GENERAL_EVIDENCE",
+        field_id: "field-text",
+        field_code: "TEXT_FIELD",
+        repeatable: false,
+        visible: true,
+        authority_kind: "OPERATOR_RECORDED" as const,
+        authority_state: "DECLARED" as const,
+        disposition: "ACTIVE" as const,
+        presentation_editability: "EDITABLE" as const,
+        reason_code: "OPERATOR_RECORDED" as const
+      }
+    ],
+    projection_checksum: "a".repeat(64)
   };
 }
 
@@ -1155,6 +1227,8 @@ describe("Registration Training frontend", () => {
     expect(programRequirements).toHaveTextContent("None");
     await user.click(within(dialog).getByRole("button", { name: "Next →" }));
     await user.click(within(dialog).getByRole("radio", { name: "Create New Training Session" }));
+    expect(await within(dialog).findByRole("option", { name: "OGI-TRNREQ-2026-000001" })).toBeInTheDocument();
+    expect(within(dialog).queryByText(/No governance-approved F-020 request matches/)).not.toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "Next →" }));
     await user.type(within(dialog).getByLabelText("Session title"), "Governed L1 cohort");
     expect(within(dialog).queryByRole("region", { name: "Selected Program Requirements" })).not.toBeInTheDocument();
@@ -1496,6 +1570,10 @@ describe("Registration Training frontend", () => {
         responses: [{ status: 200, body: { personnel: [staffA, staffB] } }]
       },
       {
+        url: "/api/v1/registration/clients",
+        responses: [{ status: 200, body: { clients: [clientA, clientB] } }]
+      },
+      {
         method: "POST",
         url: `/api/v1/training/trainees/${traineeAId}/staff-member-links`,
         responses: [{ status: 201, body: linkedTraineeA.staff_member_links[0] }]
@@ -1506,7 +1584,8 @@ describe("Registration Training frontend", () => {
 
     await user.click(await screen.findByRole("button", { name: "Link Personnel" }));
     expect(screen.queryByLabelText(/uuid/i)).not.toBeInTheDocument();
-    expect(screen.getByRole("option", { name: /Ana Santos/ })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: `${staffA.full_name} - ${staffA.email} - ${clientA.organization_name}` })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: new RegExp(clientAId) })).not.toBeInTheDocument();
 
     await user.selectOptions(screen.getByLabelText("Personnel record"), staffAId);
     await user.click(screen.getByRole("button", { name: "Save Personnel Link" }));
@@ -1890,7 +1969,7 @@ describe("Registration Training frontend", () => {
             }
           ]
         },
-        operationalEvidenceRecordRoute(draftRecord),
+        ...operationalEvidenceRecordRoutes(draftRecord),
         runtimeTemplateRoute(templateCode, templateVersionId)
       ]);
 
@@ -1973,7 +2052,7 @@ describe("Registration Training frontend", () => {
           trainingEvidenceSlot("READINESS", independentEnrollmentB)
         ])
       ]),
-      operationalEvidenceRecordRoute(draftRecord),
+      ...operationalEvidenceRecordRoutes(draftRecord),
       runtimeTemplateRoute("OGI_F023_OPERATIONAL_SKILLS_ASSESSMENT", "template-version-skills")
     ]);
 
@@ -2003,7 +2082,7 @@ describe("Registration Training frontend", () => {
 
       mockFetchRoutes([
         ...authRoutes(baseSession),
-        operationalEvidenceRecordRoute(record),
+        ...operationalEvidenceRecordRoutes(record),
         runtimeTemplateRoute("OGI_F023_OPERATIONAL_SKILLS_ASSESSMENT", "template-version-skills")
       ]);
 
@@ -2032,7 +2111,7 @@ describe("Registration Training frontend", () => {
 
     mockFetchRoutes([
       ...authRoutes(unauthorizedSession),
-      operationalEvidenceRecordRoute(record),
+      ...operationalEvidenceRecordRoutes(record),
       runtimeTemplateRoute("OGI_F023_OPERATIONAL_SKILLS_ASSESSMENT", "template-version-skills")
     ]);
 
@@ -2432,7 +2511,7 @@ describe("Registration Training frontend", () => {
 
     expect(await screen.findByText("Attendance evidence draft created.")).toBeInTheDocument();
     expect(screen.getByText("Active Attendance Draft")).toBeInTheDocument();
-    expect(screen.getAllByRole("link", { name: "Open Attendance Draft" })[0]).toHaveAttribute("href", routes.evidenceRecordPath(attendanceDraftId));
+    expect(screen.getAllByRole("link", { name: "Open Attendance Draft" })[0]).toHaveAttribute("href", `${routes.evidenceRecordPath(attendanceDraftId)}?return=training`);
 
     const createCall = calls.find((call) =>
       call.url.endsWith("/attendance-evidence-drafts")
@@ -2549,7 +2628,7 @@ describe("Registration Training frontend", () => {
     expect(await screen.findByText("F-022 History")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "View Attendance Evidence" })).toHaveAttribute(
       "href",
-      routes.evidenceRecordPath(attendanceSubmittedId)
+      `${routes.evidenceRecordPath(attendanceSubmittedId)}?return=training`
     );
     await user.click(screen.getByText("Persisted roster"));
     expect(screen.getAllByText(/Jane Smith/).length).toBeGreaterThan(0);

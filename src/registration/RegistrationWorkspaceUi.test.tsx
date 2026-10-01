@@ -11,6 +11,7 @@ import {
   RegistrationMetadataGroup,
   RegistrationMetadataItem,
   RegistrationStatusBadge,
+  RegistrationTechnicalDetails,
   RegistrationWorkspaceFrame
 } from "./RegistrationWorkspaceUi";
 
@@ -179,5 +180,19 @@ describe("Registration workspace presentation", () => {
     expect(operationalHeading.closest("[data-registration-section]"))
       .toHaveAttribute("data-registration-section", "operational");
     expect(screen.getByLabelText("Full name")).toHaveValue("Marvin Alcantara");
+  });
+
+  it("keeps exact record identifiers in collapsed technical details", async () => {
+    const user = userEvent.setup();
+    const recordId = "00000000-0000-4000-8000-000000000001";
+    render(<RegistrationTechnicalDetails>
+      <RegistrationMetadataItem label="Personnel ID" subtle value={recordId} />
+    </RegistrationTechnicalDetails>);
+
+    const disclosure = screen.getByText("Technical record details").closest("details");
+    expect(disclosure).not.toHaveAttribute("open");
+    expect(disclosure).toHaveTextContent(recordId);
+    await user.click(screen.getByText("Technical record details"));
+    expect(disclosure).toHaveAttribute("open");
   });
 });

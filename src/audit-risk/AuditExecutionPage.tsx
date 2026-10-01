@@ -23,6 +23,7 @@ type StaleReconciliation = "IDLE" | "PENDING" | "FAILED";
 export function AuditExecutionPage() {
   const { auditId } = useParams();
   const canView = useCan("view_audit");
+  const canViewExecution = useCan("create_audit");
   const canSubmit = useCan("submit_audit_response");
   const canComplete = useCan("complete_audit");
   const canViewFinding = useCan("view_finding");
@@ -39,7 +40,7 @@ export function AuditExecutionPage() {
   const query = useQuery({
     queryKey: auditQueryKeys.execution(auditId ?? ""),
     queryFn: () => getAuditExecution(auditId ?? ""),
-    enabled: canView && Boolean(auditId),
+    enabled: canView && canViewExecution && Boolean(auditId),
     retry: false
   });
 
@@ -100,6 +101,7 @@ export function AuditExecutionPage() {
     }
   });
 
+  if (!canViewExecution) return <AuditState title="Audit execution unavailable.">Internal Audit forms are restricted to authorized OGI personnel.</AuditState>;
   if (!canView) return <AuditState title="You are not authorized to view Audit execution.">Your current session does not include Audit viewing authority.</AuditState>;
   if (!auditId) return <AuditState title="Audit execution unavailable.">No Audit UUID was provided.</AuditState>;
   if (query.isLoading) return <AuditState role="status" title="Loading Audit execution.">Loading the authoritative execution state.</AuditState>;
@@ -107,7 +109,7 @@ export function AuditExecutionPage() {
   if (!query.data) return <AuditState title="Audit execution unavailable.">The service did not return authoritative execution state.</AuditState>;
 
   const execution = query.data;
-  const responseWritable = execution.audit.audit_status === "IN_PROGRESS" && canSubmit;
+  const responseWritable = execution.audit.audit_status === "IN_PROGRESS" && canSubmit && execution.execution_authority.mutation_allowed;
   const editable = responseWritable && staleReconciliation === "IDLE";
   const anySavePending = saveMutation.isPending;
   const completionAllowed = execution.audit.audit_status === "IN_PROGRESS" && canComplete && execution.completion_eligible && !anySavePending && saveAttempt === null && staleReconciliation === "IDLE";
@@ -166,6 +168,19 @@ export function AuditExecutionPage() {
       <AuditRiskNavigation />
       <Link className="text-sm font-semibold text-primary-blue hover:underline" to={routes.auditDetailPath(execution.audit.id)}>← Back to Audit detail</Link>
       <AuditRiskPageHeader eyebrow="Audit & Risk · Execution" headingId="audit-execution-heading" status={<AuditRiskStatusBadge value={execution.audit.audit_status} />} summary={`Immutable template v${execution.definition.version} · ${editable ? "Editable execution" : "Read-only execution"}`} title={execution.audit.business_identifier} />
+
+      {!execution.execution_authority.mutation_allowed ? (
+        <Surface className="border-amber-300 bg-amber-50 shadow-none">
+          <h2 className="font-semibold text-primary-navy">Audit available for reference only</h2>
+          <p className="mt-1 text-sm text-text-muted">
+            {execution.execution_authority.state === "HISTORICAL_UNBOUND"
+              ? "This Audit predates governed appointment binding. To continue grading, obtain a valid appointment and start a new Audit through the normal Audit workflow."
+              : execution.execution_authority.reason === "AUDIT_EXECUTION_BOUND_TO_ANOTHER_AUDITOR"
+                ? "This Audit is bound to another appointed OGI auditor."
+                : "This Audit is read-only because its governing auditor authority is no longer active. To continue grading, obtain a valid appointment and start a new Audit through the normal Audit workflow."}
+          </p>
+        </Surface>
+      ) : null}
 
       <Surface className="border-blue-100 bg-blue-50/60 shadow-none">
         <AuditRiskMetadataGrid className="lg:grid-cols-4">
@@ -241,7 +256,7 @@ function AuditField({ disabled, execution, field, onChange, value }: { disabled:
 
 function ReadOnlyField({ execution, field }: { execution: AuditExecutionProjection; field: ExecutionField }) {
   let content: ReactNode = "System-managed field. No user response is accepted.";
-  if (field.type === "risk_matrix") content = <>Deferred Risk Matrix context: {field.risk_categories?.join(", ")}. No likelihood, consequence, score, or ORI value is calculated here.</>;
+  if (field.type === "risk_matrix") content = <>Deferred Risk Matrix context: {field.risk_categories?.join(", ")}. No likelihood, consequence, score, or ARI value is calculated here.</>;
   if (field.type === "findings_workspace") content = <>{execution.findings.length} authoritative Finding occurrence{execution.findings.length === 1 ? "" : "s"} currently projected.</>;
   if (field.type === "corrective_action_workspace") content = "Corrective Action relationships are governed outside Audit execution.";
   if (field.type === "percentage") content = "System-derived percentage; no authoritative value is supplied by this execution projection.";

@@ -47,8 +47,10 @@ import { OetsContextFieldPolicy } from "./contextApi";
 import { mapBackendValidationDetails } from "./evidenceValidation";
 import { getRuntimeTemplateVersion } from "./runtimeTemplateApi";
 import { evidenceReturnDestination, evidenceReturnLabel, readEvidenceReturnContext } from "./evidenceReturnContext";
+import { formatEvidenceDateTime, humanizeEvidenceTemplateCode } from "./evidencePresentation";
 import { resolveGovernanceAuthorityCode } from "./governanceAuthorityResolver";
 import { OetsDefinition, OetsEvidencePayload, OetsFieldValue } from "./types";
+import { registerInspectionFinding } from "./inspectionFindingApi";
 import {
   createEvidenceAttestation,
   CreateEvidenceAttestationRequest,
@@ -158,10 +160,12 @@ interface ClaimedReviewConclusionInput {
 export function OperationalEvidenceRecordPage({
   embeddedRecordId,
   onDirtyChange,
+  onRecordIdentityChange,
   actionPortalId = "training-journey-record-actions"
 }: {
   readonly embeddedRecordId?: string;
   readonly onDirtyChange?: (dirty: boolean) => void;
+  readonly onRecordIdentityChange?: (recordId: string) => void;
   readonly actionPortalId?: string;
 } = {}) {
   const location = useLocation();
@@ -232,6 +236,11 @@ export function OperationalEvidenceRecordPage({
   const correctionAction = (actionProjectionQuery.data?.actions ?? []).find((action) =>
     action.action === "CREATE_CORRECTION_DRAFT" || action.action === "CONTINUE_CORRECTION_DRAFT"
   );
+  const approvedF104Correction = record?.lifecycle_state === "GOVERNANCE_APPROVED" &&
+    record.template_provenance.template_code === "OGI_F104_EMERGENCY_CONTACT_REGISTRY";
+  const correctionActionLabel = correctionAction?.action === "CONTINUE_CORRECTION_DRAFT"
+    ? approvedF104Correction ? "Continue registry correction" : "Continue correction draft"
+    : approvedF104Correction ? "Create registry correction" : "Create correction draft";
   const revisionAction = (actionProjectionQuery.data?.actions ?? []).find((action) =>
     action.action === "CREATE_REVISION_DRAFT" || action.action === "CONTINUE_REVISION_DRAFT"
   );
@@ -240,15 +249,35 @@ export function OperationalEvidenceRecordPage({
       if (!record) throw new Error("Returned evidence is required.");
       return createOperationalEvidenceCorrectionDraft(record.id);
     },
-    onSuccess: (draft) => navigate({ pathname: routes.evidenceRecordPath(draft.id), search: location.search }, { state: location.state })
+    onSuccess: (draft) => {
+      if (embeddedRecordId && onRecordIdentityChange) {
+        setDraftDirty(false);
+        onDirtyChange?.(false);
+        onRecordIdentityChange(draft.id);
+        return;
+      }
+      navigate({ pathname: routes.evidenceRecordPath(draft.id), search: location.search }, { state: location.state });
+    }
   });
   const revisionMutation = useMutation({
     mutationFn: () => {
       if (!record) throw new Error("Submitted F-100 evidence is required.");
       return createOperationalEvidenceRevisionDraft(record.id);
     },
-    onSuccess: (draft) => navigate({ pathname: routes.evidenceRecordPath(draft.id), search: location.search }, { state: location.state })
+    onSuccess: (draft) => {
+      if (embeddedRecordId && onRecordIdentityChange) {
+        setDraftDirty(false);
+        onDirtyChange?.(false);
+        onRecordIdentityChange(draft.id);
+        return;
+      }
+      navigate({ pathname: routes.evidenceRecordPath(draft.id), search: location.search }, { state: location.state });
+    }
   });
+  function beginPlanRevision() {
+    if (revisionAction?.action === "CREATE_REVISION_DRAFT" && !window.confirm("Create another plan revision only if the submitted plan must be changed. Continue?")) return;
+    revisionMutation.mutate();
+  }
   const governanceTransitions = Array.from(new Map(
     (actionProjectionQuery.data?.actions ?? [])
       .filter((action) => action.governance_authority_code && action.transition_trigger && action.target_state)
@@ -350,6 +379,7 @@ export function OperationalEvidenceRecordPage({
         queryKey: ["operational-evidence-record", recordId]
       });
       void queryClient.invalidateQueries({ queryKey: ["operational-evidence-record-actions", recordId] });
+      void queryClient.invalidateQueries({ queryKey: ["training-competency-form-completeness"] });
     }
   });
   const discardMutation = useMutation({
@@ -394,6 +424,16 @@ export function OperationalEvidenceRecordPage({
         queryKey: ["operational-evidence-attestations", updatedRecord.id]
       });
       void queryClient.invalidateQueries({ queryKey: ["operational-evidence-record-actions", updatedRecord.id] });
+    }
+  });
+  const inspectionFindingMutation = useMutation({
+    mutationFn: (sourceRowKey: string) => {
+      if (!record) throw new Error("F-081 Draft is unavailable.");
+      return registerInspectionFinding(record.id, sourceRowKey);
+    },
+    onSuccess() {
+      void queryClient.invalidateQueries({ queryKey: ["operational-evidence-record", recordId] });
+      void queryClient.invalidateQueries({ queryKey: ["operational-evidence-record-actions", recordId] });
     }
   });
   const attestationMutation = useMutation({
@@ -496,6 +536,7 @@ export function OperationalEvidenceRecordPage({
       void queryClient.invalidateQueries({
         queryKey: actionProjectionQueryKey
       });
+      void queryClient.invalidateQueries({ queryKey: ["training-competency-form-completeness"] });
     }
   });
 
@@ -564,6 +605,7 @@ export function OperationalEvidenceRecordPage({
     markTrainingAssessmentNumberReadonly(narrowing.definition, record),
     record.context?.field_policy
   );
+  const repeatableSectionControls = Object.fromEntries((record.context?.repeatable_groups ?? []).flatMap((group) => group.sections.map((section) => [section.section_code, { cardinality: group.cardinality, instance_count: group.instance_count }])));
   const fieldVisibilityPolicy = trainingContextualFieldVisibilityPolicy(record);
   const canEditDraft =
     isDraftRecord &&
@@ -640,7 +682,7 @@ export function OperationalEvidenceRecordPage({
 
   return (
     <div className="space-y-4">
-      {standaloneReturnDestination && (!draftPayloadMutation.isSuccess || draftDirty) ? <div><Button onClick={() => { if (draftDirty && !window.confirm("Leave this evidence record with unsaved changes?")) return; navigate(standaloneReturnDestination); }} type="button" variant="secondary">← {standaloneReturnLabel}</Button></div> : null}
+      {standaloneReturnDestination ? <div><Button onClick={() => { if (draftDirty && !window.confirm("Leave this evidence record with unsaved changes?")) return; navigate(standaloneReturnDestination); }} type="button" variant="secondary">← {standaloneReturnLabel}</Button></div> : null}
       {embeddedActionTarget ? createPortal(
         <>
           <span className={`inline-flex min-h-10 items-center rounded-component border px-3 text-sm font-semibold ${record.lifecycle_state === "GOVERNANCE_APPROVED" ? "border-green-300 bg-green-50 text-green-800" : "border-blue-200 bg-blue-50 text-primary-navy"}`}>
@@ -658,12 +700,12 @@ export function OperationalEvidenceRecordPage({
           ))}
           {correctionAction ? (
             <Button disabled={correctionMutation.isPending} onClick={() => correctionMutation.mutate()} variant="primary">
-              {correctionMutation.isPending ? "Opening…" : correctionAction.action === "CONTINUE_CORRECTION_DRAFT" ? "Continue correction draft" : "Create correction draft"}
+              {correctionMutation.isPending ? "Opening…" : correctionActionLabel}
             </Button>
           ) : null}
           {revisionAction ? (
-            <Button disabled={revisionMutation.isPending} onClick={() => revisionMutation.mutate()} variant="primary">
-              {revisionMutation.isPending ? "Opening…" : revisionAction.action === "CONTINUE_REVISION_DRAFT" ? "Continue plan revision" : "Create plan revision"}
+            <Button disabled={revisionMutation.isPending} onClick={beginPlanRevision} variant="secondary">
+              {revisionMutation.isPending ? "Opening…" : revisionAction.action === "CONTINUE_REVISION_DRAFT" ? "Continue plan revision" : "Create another plan revision"}
             </Button>
           ) : null}
           {governanceActionStates.length > 0 ? (
@@ -680,10 +722,10 @@ export function OperationalEvidenceRecordPage({
       {!embeddedRecordId ? <RecordIdentityPanel record={record} /> : null}
       {!embeddedRecordId && correctionAction ? (
         <Surface className="border-amber-300 bg-amber-50/60">
-          <p className="font-semibold text-primary-navy">Correction successor required</p>
-          <p className="mt-1 text-sm text-text-muted">This returned submission remains immutable. Continue in an editable correction draft.</p>
+          <p className="font-semibold text-primary-navy">{approvedF104Correction ? "Registry correction available" : "Correction successor required"}</p>
+          <p className="mt-1 text-sm text-text-muted">{approvedF104Correction ? "The approved registry remains immutable. Create an editable governed successor when its information must be corrected." : "This returned submission remains immutable. Continue in an editable correction draft."}</p>
           <Button className="mt-3" disabled={correctionMutation.isPending} onClick={() => correctionMutation.mutate()}>
-            {correctionMutation.isPending ? "Opening…" : correctionAction.action === "CONTINUE_CORRECTION_DRAFT" ? "Continue correction draft" : "Create correction draft"}
+            {correctionMutation.isPending ? "Opening…" : correctionActionLabel}
           </Button>
           {correctionMutation.error ? <p className="mt-2 text-sm text-red-700">{correctionMutation.error instanceof Error ? correctionMutation.error.message : "Correction draft could not be created."}</p> : null}
         </Surface>
@@ -691,18 +733,24 @@ export function OperationalEvidenceRecordPage({
       {!embeddedRecordId && revisionAction ? (
         <Surface className="border-blue-300 bg-blue-50/60">
           <p className="font-semibold text-primary-navy">Plan revision available</p>
-          <p className="mt-1 text-sm text-text-muted">The submitted F-100 remains immutable. Revise it in a linked Draft that preserves its governed Emergency Plan identity.</p>
-          <Button className="mt-3" disabled={revisionMutation.isPending} onClick={() => revisionMutation.mutate()}>
-            {revisionMutation.isPending ? "Opening…" : revisionAction.action === "CONTINUE_REVISION_DRAFT" ? "Continue plan revision" : "Create plan revision"}
+          <p className="mt-1 text-sm text-text-muted">This plan is complete and submitted. Create another revision only when its information must change; the submitted F-100 remains immutable.</p>
+          <Button className="mt-3" disabled={revisionMutation.isPending} onClick={beginPlanRevision} variant="secondary">
+            {revisionMutation.isPending ? "Opening…" : revisionAction.action === "CONTINUE_REVISION_DRAFT" ? "Continue plan revision" : "Create another plan revision"}
           </Button>
           {revisionMutation.error ? <p className="mt-2 text-sm text-red-700">{revisionMutation.error instanceof Error ? revisionMutation.error.message : "Plan revision could not be created."}</p> : null}
+        </Surface>
+      ) : null}
+      {embeddedRecordId && record.lifecycle_state === "SUBMITTED" && record.template_provenance.template_code === "OGI_F100_EMERGENCY_PREPAREDNESS_OPERATIONAL_CONTINUITY_PLAN" ? (
+        <Surface className="border-teal-300 bg-teal-50/60">
+          <p className="font-semibold text-teal-900">Plan submitted</p>
+          <p className="mt-1 text-sm text-teal-900">This F-100 is complete for the current journey. Use Back to Facility Assessment Journey unless the plan information must be changed again.</p>
         </Surface>
       ) : null}
       {!embeddedRecordId && record.lifecycle_state === "SUBMITTED" && record.template_provenance.template_code === "OGI_F100_EMERGENCY_PREPAREDNESS_OPERATIONAL_CONTINUITY_PLAN" ? (
         <Surface className="border-teal-300 bg-teal-50/60">
           <p className="font-semibold text-primary-navy">F-100 evidence is ready for assessment</p>
           <p className="mt-1 text-sm text-text-muted">Submission preserves the plan as evidence. The Emergency Preparedness Form Assessment and category final remain separate governed steps.</p>
-          <Button asChild className="mt-3"><Link to={routes.facilityAssessmentJourneys}>Continue to Emergency Preparedness assessment →</Link></Button>
+          <Button asChild className="mt-3"><Link to={durableReturnContext?.kind === "FACILITY_ASSESSMENT" ? evidenceReturnDestination(durableReturnContext) : routes.facilityAssessmentJourneys}>Continue to Emergency Preparedness assessment →</Link></Button>
         </Surface>
       ) : null}
       {embeddedRecordId && governanceActionStates.length > 0 ? (
@@ -760,6 +808,27 @@ export function OperationalEvidenceRecordPage({
           </div>
         ) : null}
 
+        {canDiscardDraft ? (
+          <Surface>
+            <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">Draft management</p>
+            <p className="mt-1 text-sm text-text-muted">Discard this unsubmitted Draft without deleting its audit history.</p>
+            <Button
+              className="mt-3"
+              disabled={draftDirty || draftPayloadMutation.isPending || discardMutation.isPending}
+              onClick={() => {
+                if (window.confirm("Discard this Draft? This preserves the record as read-only history and cannot be undone.")) {
+                  discardMutation.mutate();
+                }
+              }}
+              type="button"
+              variant="secondary"
+            >
+              {discardMutation.isPending ? "Discarding…" : "Discard Draft"}
+            </Button>
+            {discardMutation.isError ? <p className="mt-2 text-sm text-red-700" role="alert">Draft could not be discarded. Reload it and try again.</p> : null}
+          </Surface>
+        ) : null}
+
         {isDraftRecord && actionProjectionQuery.isLoading ? (
           <p className="text-sm text-text-muted" role="status">Loading available lifecycle actions…</p>
         ) : null}
@@ -771,6 +840,11 @@ export function OperationalEvidenceRecordPage({
         ) : null}
         {isDraftRecord && !draftDirty && !draftPayloadMutation.isPending && !actionProjectionQuery.isLoading && !actionProjectionQuery.isError && visibleDirectTransitions.length === 0 ? (
           <p className="rounded-component border border-border bg-elevated px-4 py-3 text-sm text-text-muted">No lifecycle action is currently available for this Draft and your authority.</p>
+        ) : null}
+        {inspectionFindingMutation.error ? (
+          <div className="rounded-component border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert">
+            {inspectionFindingMutation.error instanceof Error ? inspectionFindingMutation.error.message : "Inspection Finding could not be registered."}
+          </div>
         ) : null}
 
         <OetsRenderer
@@ -793,6 +867,7 @@ export function OperationalEvidenceRecordPage({
           embedded={Boolean(embeddedRecordId)}
           actionPortalId={embeddedRecordId ? actionPortalId : undefined}
           definition={renderedDefinition}
+          fieldAuthority={record.field_authority}
           backendValidation={
             draftPayloadMutation.error &&
             isApiError(draftPayloadMutation.error) &&
@@ -813,6 +888,21 @@ export function OperationalEvidenceRecordPage({
           onAttest={canAttestDraft && !draftDirty && !draftPayloadMutation.isPending ? (request) => attestationMutation.mutateAsync(request) : undefined}
           onDirtyChange={(dirty) => { setDraftDirty(dirty); onDirtyChange?.(dirty); }}
           readOnly={!canEditDraft}
+          repeatableSectionControls={repeatableSectionControls}
+          repeatableRowControl={record.template_provenance.template_code === "OGI_F081_EQUIPMENT_INSPECTION_REPORT" && record.template_provenance.template_version === "3.5" ? {
+            sectionCode: "INSPECTION_FINDINGS",
+            isLocked: (values) => typeof values.FINDING_NUMBER === "string" && values.FINDING_NUMBER.length > 0,
+            renderAction: (values) => {
+              const registered = typeof values.FINDING_NUMBER === "string" && values.FINDING_NUMBER.length > 0;
+              const complete = typeof values.FINDING_CLASSIFICATION === "string" && values.FINDING_CLASSIFICATION.length > 0 && typeof values.DESCRIPTION === "string" && values.DESCRIPTION.trim().length > 0;
+              const rowKey = typeof values.FINDING_SOURCE_ROW_KEY === "string" ? values.FINDING_SOURCE_ROW_KEY : "";
+              return registered
+                ? <span className="rounded-component border border-teal-300 bg-teal-50 px-3 py-2 text-sm font-semibold text-teal-800">Registered</span>
+                : canEditDraft && auth.canUsePermission("register_inspection_finding")
+                  ? <Button disabled={draftDirty || !complete || !rowKey || inspectionFindingMutation.isPending} onClick={() => inspectionFindingMutation.mutate(rowKey)} variant="secondary">{inspectionFindingMutation.isPending ? "Registering…" : "Register Finding"}</Button>
+                  : <span className="text-sm text-text-muted">Unregistered</span>;
+            }
+          } : undefined}
           runtimeTemplate={templateQuery.data}
           submitHelpText="Save Draft changes before submitting this Operational Evidence record."
           submitDisabledReason={!draftDirty ? "No unsaved changes." : null}
@@ -841,26 +931,6 @@ export function OperationalEvidenceRecordPage({
 
         transitions={embeddedRecordId ? [] : headerTransitions}
       />
-      {canDiscardDraft ? (
-        <Surface>
-          <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">Draft management</p>
-          <p className="mt-1 text-sm text-text-muted">Discard this unsubmitted Draft without deleting its audit history.</p>
-          <Button
-            className="mt-3"
-            disabled={draftDirty || draftPayloadMutation.isPending || discardMutation.isPending}
-            onClick={() => {
-              if (window.confirm("Discard this Draft? This preserves the record as read-only history and cannot be undone.")) {
-                discardMutation.mutate();
-              }
-            }}
-            type="button"
-            variant="secondary"
-          >
-            {discardMutation.isPending ? "Discarding…" : "Discard Draft"}
-          </Button>
-          {discardMutation.isError ? <p className="mt-2 text-sm text-red-700" role="alert">Draft could not be discarded. Reload it and try again.</p> : null}
-        </Surface>
-      ) : null}
       <div className="scroll-mt-28" id={embeddedRecordId ? undefined : "embedded-governance-actions"}>
         {!embeddedRecordId ? governanceReviewActions : null}
         {shouldLoadReviewConclusions ? (
@@ -1003,6 +1073,8 @@ function RecordIdentityPanel({
 }: {
   record: Awaited<ReturnType<typeof getOperationalEvidenceRecord>>;
 }) {
+  const presentation = record.presentation;
+  const subject = presentation?.subject;
   return (
     <Surface className="space-y-4">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -1011,11 +1083,14 @@ function RecordIdentityPanel({
             Record Detail
           </p>
           <h1 className="mt-1 break-words text-2xl font-semibold text-text-primary">
-            {record.template_provenance.template_code}
+            {presentation?.template_name ?? humanizeEvidenceTemplateCode(record.template_provenance.template_code)}
           </h1>
-          <p className="mt-2 break-all text-sm text-text-muted">
-            Record {record.id}
-          </p>
+          {subject ? (
+            <p className="mt-2 text-sm text-text-muted">
+              {subject.display_name}
+              {subject.reference_number ? ` · ${subject.reference_number}` : ""}
+            </p>
+          ) : null}
         </div>
         <div className="rounded-component border border-border bg-canvas px-4 py-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
@@ -1028,9 +1103,9 @@ function RecordIdentityPanel({
       </div>
       <MetadataGrid
         entries={[
-          ["Client ID", record.client_id ?? "OGI Direct / Independent"],
-          ["Facility ID", record.facility_id ?? "No facility context"],
-          [record.lifecycle_state === "REPLACED" ? "Replaced record timestamp" : "Submitted at", record.submitted_at],
+          ["Client", presentation?.client_name ?? (record.client_id ? "Client name unavailable" : "OGI Direct / Independent")],
+          ["Facility", presentation?.facility_name ?? (record.facility_id ? "Facility name unavailable" : "No facility context")],
+          [record.lifecycle_state === "REPLACED" ? "Replaced record timestamp" : "Submitted at", formatEvidenceDateTime(record.submitted_at)],
           ["Template version", record.template_provenance.template_version]
         ]}
       />
@@ -1070,9 +1145,9 @@ function RecordProvenanceDisclosure({
               ["Template checksum", record.template_provenance.checksum],
               ["Created by", record.created_by_user_id],
               ["Submitted by", record.submitted_by_user_id],
-              ["Created at", record.created_at],
-              ["Submitted at", record.submitted_at],
-              ["Updated at", record.updated_at]
+              ["Created at", `${formatEvidenceDateTime(record.created_at)} · ${record.created_at}`],
+              ["Submitted at", `${formatEvidenceDateTime(record.submitted_at)} · ${record.submitted_at}`],
+              ["Updated at", `${formatEvidenceDateTime(record.updated_at)} · ${record.updated_at}`]
             ]}
           />
         </div>
@@ -1675,10 +1750,6 @@ function ReviewConclusionDetails({
   return (
     <dl className="mt-2 grid gap-2 text-sm md:grid-cols-2">
       <div>
-        <dt className="font-semibold text-text-muted">Conclusion ID</dt>
-        <dd className="break-all text-text-primary">{conclusion.id}</dd>
-      </div>
-      <div>
         <dt className="font-semibold text-text-muted">Authority</dt>
         <dd className="text-text-primary">
           {displayReviewAuthority(conclusion.reviewer_authority_code)}
@@ -1692,11 +1763,26 @@ function ReviewConclusionDetails({
       </div>
       <div>
         <dt className="font-semibold text-text-muted">Created at</dt>
-        <dd className="text-text-primary">{conclusion.created_at}</dd>
+        <dd className="text-text-primary">{formatEvidenceDateTime(conclusion.created_at)}</dd>
       </div>
-      <div>
-        <dt className="font-semibold text-text-muted">Review claim ID</dt>
-        <dd className="break-all text-text-primary">{conclusion.review_claim_id}</dd>
+      <div className="md:col-span-2">
+        <details>
+          <summary className="cursor-pointer font-semibold text-text-muted">Technical review details</summary>
+          <dl className="mt-2 grid gap-2 md:grid-cols-2">
+            <div>
+              <dt className="font-semibold text-text-muted">Conclusion ID</dt>
+              <dd className="break-all text-text-primary">{conclusion.id}</dd>
+            </div>
+            <div>
+              <dt className="font-semibold text-text-muted">Review claim ID</dt>
+              <dd className="break-all text-text-primary">{conclusion.review_claim_id}</dd>
+            </div>
+            <div className="md:col-span-2">
+              <dt className="font-semibold text-text-muted">Exact created timestamp</dt>
+              <dd className="break-all text-text-primary">{conclusion.created_at}</dd>
+            </div>
+          </dl>
+        </details>
       </div>
     </dl>
   );

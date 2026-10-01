@@ -1,11 +1,27 @@
 import { apiRequest } from "../api/client";
 
 export type DomainApplicabilityState = "UNRESOLVED" | "APPLICABLE" | "NOT_APPLICABLE";
+export interface DomainEvidencePresentation {
+  readonly schemaVersion: "DOMAIN_EVIDENCE_PRESENTATION_V1";
+  readonly mode: "GENERIC" | "GOVERNED_CONTEXT";
+  readonly primaryLabel: string;
+  readonly secondaryLabel: string | null;
+  readonly contextKind: string;
+  readonly contextReference: string;
+  readonly timestamp: { readonly label: "Submitted" | "Finalized"; readonly value: string | null };
+}
 
 export interface DomainContribution {
   readonly sourceKind: string;
   readonly sourceId: string;
   readonly sourceAt: string | null;
+  readonly templateVersion?: string;
+  readonly lifecycleState?: string;
+  readonly assessmentVersion?: number;
+  readonly subjectKind?: string;
+  readonly subjectKey?: string;
+  readonly href?: string;
+  readonly presentation?: DomainEvidencePresentation;
 }
 
 export interface DomainApplicability {
@@ -20,6 +36,7 @@ export interface DomainAssessmentWorkspaceRecord {
   readonly id: string;
   readonly assessmentVersion: number;
   readonly lifecycle: string;
+  readonly period?: { readonly start: string | null; readonly end: string | null; readonly evidenceCutoffAt: string | null };
   readonly root: { readonly domainCode: string };
   readonly scope: { readonly id: string; readonly displayName: string };
   readonly professionalDetermination: {
@@ -34,9 +51,24 @@ export interface DomainAssessmentWorkspaceRecord {
 export interface DomainCandidate {
   readonly id: string;
   readonly sourceKind: string;
+  readonly templateCode?: string;
   readonly templateVersion?: string;
   readonly lifecycleState?: string;
+  readonly assessmentVersion?: number;
+  readonly subjectKind?: string;
+  readonly subjectKey?: string;
+  readonly sourceChecksum?: string;
   readonly sourceAt: string | null;
+  readonly href?: string;
+  readonly presentation?: DomainEvidencePresentation;
+}
+export interface EmergencyCandidateDerivationResult {
+  readonly assessmentId: string;
+  readonly formCode: "F100" | "F104";
+  readonly sourceEvidenceRecordId: string;
+  readonly derivedAssessment: { readonly id: string; readonly finalizer: { readonly finalizedAt: string } };
+  readonly replayed: boolean;
+  readonly cutoffRefreshRequired: boolean;
 }
 
 export interface DomainReviewContext {
@@ -97,7 +129,8 @@ export const bindDomainWorkforceSupport=(id:string)=>apiRequest<DomainWorkforceS
 export const createDomainAssessmentSuccessor = (assessment: DomainAssessmentWorkspaceRecord, displayName: string) => { const now = new Date(), start = new Date(Date.UTC(now.getUTCFullYear(), 0, 1)).toISOString(), end = now.toISOString(); return apiRequest<{ assessment: DomainAssessmentWorkspaceRecord }>(`/api/v1/domain-assessment-scopes/${encodeURIComponent(assessment.scope.id)}/assessments`, { method: "POST", headers: { "idempotency-key": crypto.randomUUID() }, body: { periodStart: start, periodEnd: end, evidenceCutoffAt: end, initiationKind: "CLIENT_REQUEST", initiationRationale: `Successor facility-wide ${displayName} assessment.`, predecessorDomainAssessmentId: assessment.id }, validate: (value): value is { assessment: DomainAssessmentWorkspaceRecord } => valid(value) && assessmentValid(value.assessment) }); };
 export const createDomainAssessmentRevision = (assessment: DomainAssessmentWorkspaceRecord) => apiRequest<{ assessment: DomainAssessmentWorkspaceRecord }>(`/api/v1/domain-assessments/${encodeURIComponent(assessment.id)}/revisions`, { method: "POST", headers: { "idempotency-key": crypto.randomUUID() }, body: { initiationRationale: "Correction of returned facility-wide category assessment." }, validate: (value): value is { assessment: DomainAssessmentWorkspaceRecord } => valid(value) && assessmentValid(value.assessment) });
 export const listDomainCandidates = (id: string, formCode: string) => apiRequest<{ candidates: DomainCandidate[] }>(`/api/v1/domain-assessments/${encodeURIComponent(id)}/candidates/${encodeURIComponent(formCode)}`, { validate: (value): value is { candidates: DomainCandidate[] } => valid(value) && Array.isArray(value.candidates) });
-export const resolveDomainApplicability = (id: string, formCode: string, body: { state: DomainApplicabilityState; reasonCode?: "NOT_APPLICABLE_OTHER"; rationale?: string }) => apiRequest<DomainAssessmentWorkspaceRecord>(`/api/v1/domain-assessments/${encodeURIComponent(id)}/applicability/${encodeURIComponent(formCode)}`, { method: "PUT", body, validate: assessmentValid });
+export const deriveEmergencyDomainCandidate = (id: string, formCode: "F100" | "F104") => apiRequest<EmergencyCandidateDerivationResult>(`/api/v1/domain-assessments/${encodeURIComponent(id)}/candidates/${formCode}/derive`, { method: "POST", headers: { "idempotency-key": crypto.randomUUID() }, body: { finalizationRationale: `Explicit ${formCode} derivation requested from the Emergency Preparedness assessment journey.` }, validate: (value): value is EmergencyCandidateDerivationResult => valid(value) && value.assessmentId === id && value.formCode === formCode && typeof value.sourceEvidenceRecordId === "string" && valid(value.derivedAssessment) && typeof value.derivedAssessment.id === "string" && valid(value.derivedAssessment.finalizer) && typeof value.derivedAssessment.finalizer.finalizedAt === "string" && typeof value.replayed === "boolean" && typeof value.cutoffRefreshRequired === "boolean" });
+export const resolveDomainApplicability = (id: string, formCode: string, body: { state: DomainApplicabilityState; reasonCode?: "NOT_TRIGGERED" | "NOT_APPLICABLE_OTHER"; rationale?: string }) => apiRequest<DomainAssessmentWorkspaceRecord>(`/api/v1/domain-assessments/${encodeURIComponent(id)}/applicability/${encodeURIComponent(formCode)}`, { method: "PUT", body, validate: assessmentValid });
 export const bindDomainSource = (id: string, sourceId: string, sourceKind: string) => apiRequest<DomainAssessmentWorkspaceRecord>(`/api/v1/domain-assessments/${encodeURIComponent(id)}/${sourceKind === "OPERATIONAL_EVIDENCE" ? "evidence-bindings" : "bindings"}/${encodeURIComponent(sourceId)}`, { method: "PUT", validate: assessmentValid });
 export const unbindDomainSource = (id: string, sourceId: string, sourceKind: string) => apiRequest<DomainAssessmentWorkspaceRecord>(`/api/v1/domain-assessments/${encodeURIComponent(id)}/${sourceKind === "OPERATIONAL_EVIDENCE" ? "evidence-bindings" : "bindings"}/${encodeURIComponent(sourceId)}`, { method: "DELETE", validate: assessmentValid });
 export const determineDomainAssessment = (id: string, body: { professionalCategoryIndex?: string; lmhc?: "LOW" | "MODERATE" | "HIGH" | "CRITICAL"; synthesis: string }) => apiRequest<DomainAssessmentWorkspaceRecord>(`/api/v1/domain-assessments/${encodeURIComponent(id)}`, { method: "PATCH", body, validate: assessmentValid });

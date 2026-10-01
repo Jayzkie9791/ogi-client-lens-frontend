@@ -124,7 +124,7 @@ describe("Audit workspace read paths", () => {
     expect(screen.queryByText("Completed at")).not.toBeInTheDocument();
     expect(calls).not.toContain("/api/v1/audits");
     expect(calls).toContain(`/api/v1/audits/${auditId}`);
-    expect(screen.getByRole("link", { name: "Open Audit execution" })).toHaveAttribute("href", routes.auditExecutionPath(auditId));
+    expect(screen.queryByRole("link", { name: "Open Audit execution" })).not.toBeInTheDocument();
   });
 
   it.each([
@@ -141,13 +141,23 @@ describe("Audit workspace read paths", () => {
     const execution = {
       audit,
       definition: { template_id: audit.template.id, version: 2, checksum: "a".repeat(64), schema: { sections: [{ section_code: "S", title: "Section", fields: [{ field_id: "note", label: "Note", type: "text", required: false, source_required: false, edit_authority: "USER_RESPONSE", response_kind: "TEXT" }] }] } },
-      responses: [], findings: [], completeness: { is_complete: true, incomplete: [] }, completion_eligible: true, legacy_history_excluded: true
+      responses: [], findings: [], completeness: { is_complete: true, incomplete: [] }, execution_authority: { state: "ACTIVE", mutation_allowed: false, reason: "AUDIT_EXECUTION_BOUND_TO_ANOTHER_AUDITOR", appointment_id: "00000000-0000-4000-8000-000000000902", appointment_identifier: "AUDITOR-APPOINTMENT-2026-000001", audit_number: "AUDIT-2026-000001" }, completion_eligible: false, legacy_history_excluded: true
     };
-    const { calls } = mockRoutes([...authRoutes(), route(`/api/v1/audits/${auditId}/execution`, execution)]);
+    const internalSession = { ...session, roles: ["OGI_OFFICER"], permissions: ["view_audit", "create_audit"] };
+    const { calls } = mockRoutes([...authRoutes(internalSession), route(`/api/v1/audits/${auditId}/execution`, execution)]);
     renderRoute(routes.auditExecutionPath(auditId));
     expect(await screen.findByRole("heading", { name: audit.business_identifier })).toBeInTheDocument();
     expect(calls).toContain(`/api/v1/audits/${auditId}/execution`);
     expect(screen.queryByRole("button", { name: /Save Section/ })).not.toBeInTheDocument();
+  });
+
+  it("does not request Audit execution for a Client viewer using a known UUID", async () => {
+    const clientSession = { ...session, roles: ["CLIENT_ADMIN"], permissions: ["view_audit"] };
+    const { calls } = mockRoutes(authRoutes(clientSession));
+    renderRoute(routes.auditExecutionPath(auditId));
+    expect(await screen.findByRole("heading", { name: "Audit execution unavailable." })).toBeInTheDocument();
+    expect(screen.getByText("Internal Audit forms are restricted to authorized OGI personnel.")).toBeInTheDocument();
+    expect(calls).not.toContain(`/api/v1/audits/${auditId}/execution`);
   });
 
   it.each([

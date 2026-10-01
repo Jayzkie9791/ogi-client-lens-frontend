@@ -17,6 +17,7 @@ export interface RegistrationPersonnel {
   organizational_affiliation?: "CLIENT" | "OGI";
   user_id: string | null;
   full_name: string;
+  client_employee_number?: string | null;
   email?: string | null;
   phone_number?: string | null;
   employment_status: RegistrationPersonnelEmploymentStatus;
@@ -38,6 +39,7 @@ export interface RegistrationPersonnelListFilters {
 }
 
 export interface RegistrationPersonnelMutationRequest {
+  client_employee_number?: string;
   full_name?: string;
   email?: string | null;
   phone_number?: string | null;
@@ -49,6 +51,7 @@ export interface RegistrationPersonnelMutationRequest {
 export interface CreateRegistrationPersonnelRequest
   extends RegistrationPersonnelMutationRequest {
   client_id: string;
+  client_employee_number?: string;
   full_name: string;
 }
 
@@ -139,6 +142,7 @@ export function isRegistrationPersonnel(value: unknown): value is RegistrationPe
     (value.organizational_affiliation === undefined || value.organizational_affiliation === "CLIENT" || value.organizational_affiliation === "OGI") &&
     isNullableString(value.user_id) &&
     typeof value.full_name === "string" &&
+    isNullableString(value.client_employee_number) &&
     isNullableString(value.email) &&
     isNullableString(value.phone_number) &&
     isRegistrationPersonnelEmploymentStatus(value.employment_status) &&

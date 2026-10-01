@@ -55,13 +55,18 @@ export interface AuditCanonicalResponse { readonly id: string; readonly audit_id
 export type AuditExecutionSourceCondition = "FAILING" | "PASSING" | "UNKNOWN";
 export interface AuditExecutionFinding { readonly id: string; readonly business_identifier: string; readonly is_resolved: boolean; readonly source_section_code: string; readonly source_field_id: string; readonly source_condition: AuditExecutionSourceCondition; }
 export interface AuditCompleteness { readonly is_complete: boolean; readonly incomplete: readonly { readonly section_code: string; readonly field_id: string }[]; }
-export interface AuditExecutionProjection { readonly audit: AuditReadProjection; readonly definition: AuditExecutionDefinition; readonly responses: readonly AuditCanonicalResponse[]; readonly findings: readonly AuditExecutionFinding[]; readonly completeness: AuditCompleteness; readonly completion_eligible: boolean; readonly legacy_history_excluded: true; }
+export interface AuditExecutionAuthority { readonly state: "ACTIVE" | "INACTIVE" | "HISTORICAL_UNBOUND"; readonly mutation_allowed: boolean; readonly reason: string | null; readonly appointment_id: string | null; readonly appointment_identifier: string | null; readonly audit_number: string | null; }
+export interface AuditExecutionProjection { readonly audit: AuditReadProjection; readonly definition: AuditExecutionDefinition; readonly responses: readonly AuditCanonicalResponse[]; readonly findings: readonly AuditExecutionFinding[]; readonly completeness: AuditCompleteness; readonly execution_authority: AuditExecutionAuthority; readonly completion_eligible: boolean; readonly legacy_history_excluded: true; }
 export interface AuditResponseCommandResult { readonly response: AuditCanonicalResponse; readonly completeness: AuditCompleteness; }
 export interface AuditCompletionResult { readonly audit: AuditReadProjection; readonly findings: readonly AuditExecutionFinding[]; readonly replayed: boolean; }
 export interface AuditBackendErrorEnvelope { readonly statusCode: number; readonly code: string; readonly message: string; }
 
 export function isAuditExecutionProjection(value: unknown): value is AuditExecutionProjection {
-  return isRecord(value) && isAuditReadProjection(value.audit) && isAuditExecutionDefinition(value.definition) && Array.isArray(value.responses) && value.responses.every(isAuditCanonicalResponse) && Array.isArray(value.findings) && value.findings.every(isAuditExecutionFinding) && isAuditCompleteness(value.completeness) && typeof value.completion_eligible === "boolean" && value.legacy_history_excluded === true;
+  return isRecord(value) && isAuditReadProjection(value.audit) && isAuditExecutionDefinition(value.definition) && Array.isArray(value.responses) && value.responses.every(isAuditCanonicalResponse) && Array.isArray(value.findings) && value.findings.every(isAuditExecutionFinding) && isAuditCompleteness(value.completeness) && isAuditExecutionAuthority(value.execution_authority) && typeof value.completion_eligible === "boolean" && value.legacy_history_excluded === true;
+}
+
+function isAuditExecutionAuthority(value: unknown): value is AuditExecutionAuthority {
+  return isRecord(value) && typeof value.state === "string" && ["ACTIVE", "INACTIVE", "HISTORICAL_UNBOUND"].includes(value.state) && typeof value.mutation_allowed === "boolean" && (value.reason === null || typeof value.reason === "string") && ["appointment_id", "appointment_identifier", "audit_number"].every((key) => value[key] === null || typeof value[key] === "string");
 }
 
 export function isAuditResponseCommandResult(value: unknown): value is AuditResponseCommandResult {
@@ -194,6 +199,9 @@ export interface AuditEligibleFacilityList {
   readonly facilities: readonly AuditEligibleFacility[];
 }
 
+export interface AuditEligibleAppointment { readonly id: string; readonly appointment_identifier: string; readonly audit_number: string; readonly profile: string; readonly scope_mode: string; readonly valid_from: string; readonly valid_until: string | null; }
+export interface AuditEligibleAppointmentList { readonly appointments: readonly AuditEligibleAppointment[]; }
+
 export function isAuditTemplateList(value: unknown): value is readonly AuditTemplateSelector[] {
   return Array.isArray(value) && value.every(isAuditTemplateSelector);
 }
@@ -258,6 +266,10 @@ export function isAuditReadProjection(value: unknown): value is AuditReadProject
     isGovernedReference(value.client) &&
     (value.auditor === null || isAuditActorReference(value.auditor))
   );
+}
+
+export function isAuditEligibleAppointmentList(value: unknown): value is AuditEligibleAppointmentList {
+  return isRecord(value) && Array.isArray(value.appointments) && value.appointments.every((item) => isRecord(item) && isUuid(item.id) && isNonEmptyString(item.appointment_identifier) && isNonEmptyString(item.audit_number) && isNonEmptyString(item.profile) && isNonEmptyString(item.scope_mode) && typeof item.valid_from === "string" && (item.valid_until === null || typeof item.valid_until === "string"));
 }
 
 export function isAuditActorReference(value: unknown): value is AuditActorReference {

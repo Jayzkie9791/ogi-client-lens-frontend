@@ -3,6 +3,7 @@ export const routes = {
   login: "/login",
   forgotPassword: "/forgot-password",
   resetPassword: "/reset-password",
+  activatePersonnelAccount: "/activate-personnel-account",
   workbench: "/workbench",
   auditRisk: "/workbench/audit-risk",
   auditDetail: "/workbench/audit-risk/audits/:auditId",
@@ -26,6 +27,22 @@ export const routes = {
   clientMasterlist: "/workbench/organizations/clients",
   facilityMasterlist: "/workbench/organizations/facilities",
   personnelMasterlist: "/workbench/workforce/personnel",
+  personnelAuthority: "/workbench/workforce/personnel?tab=authority",
+  personnelAuthorityPath: (staffMemberId: string) =>
+    `/workbench/workforce/personnel?personnel=${encodeURIComponent(staffMemberId)}&tab=authority`,
+  myProfile: "/workbench/me/profile",
+  myCredentials: "/workbench/me/credentials",
+  myCredentialCertificate: "/workbench/me/credentials/certificates/:issuanceId",
+  myCredentialCertificatePath: (issuanceId: string) =>
+    `/workbench/me/credentials/certificates/${encodeURIComponent(issuanceId)}`,
+  facilityTeam: "/workbench/workforce/facility-team",
+  facilityTeamMember: "/workbench/workforce/facility-team/:staffMemberId",
+  facilityTeamMemberPath: (staffMemberId: string) =>
+    `/workbench/workforce/facility-team/${encodeURIComponent(staffMemberId)}`,
+  facilityTeamCertificate:
+    "/workbench/workforce/facility-team/certificates/:issuanceId",
+  facilityTeamCertificatePath: (issuanceId: string) =>
+    `/workbench/workforce/facility-team/certificates/${encodeURIComponent(issuanceId)}`,
   facilityAssessmentJourneys: "/workbench/assessments/facility-journeys",
   personnelProfilePath: (staffMemberId: string) =>
     `/workbench/workforce/personnel?personnel=${encodeURIComponent(staffMemberId)}`,
@@ -36,6 +53,7 @@ export const routes = {
   trainingRequests: "/workbench/training/requests",
   trainingRegister: "/workbench/training/register",
   trainingJourneys: "/workbench/training/journeys",
+  inservice: "/workbench/training/inservice",
   trainingJourneyPath: (enrollmentId: string) =>
     `/workbench/training/journeys?enrollment=${encodeURIComponent(enrollmentId)}`,
   trainerCommercialEvaluations: "/workbench/training/trainer-evaluations",

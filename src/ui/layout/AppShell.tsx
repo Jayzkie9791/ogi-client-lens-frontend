@@ -16,6 +16,10 @@ export function AppShell() {
   const [collapsed, setCollapsed] = useState(() => window.localStorage.getItem(sidebarPreferenceKey) === "true");
   const groups: SidebarGroup[] = [
     { label: "Workspace", items: [{ label: "Overview", to: routes.workbench, end: true }] },
+    { label: "My Account", items: [
+      { label: "My Profile", to: routes.myProfile, permission: "view_own_personnel_profile" },
+      { label: "My Credentials", to: routes.myCredentials, permission: "view_own_credentials" }
+    ] },
     { label: "Registration", items: [
       { label: "Register Client", to: routes.registrationClients, permission: "create_client" }, { label: "Register Facility", to: routes.registrationFacilities, permission: "create_facility" }, { label: "Register Personnel", to: routes.registrationPersonnel, permission: personnelRegistrationPermission(auth) }
     ] },
@@ -23,10 +27,11 @@ export function AppShell() {
       { label: "Client Masterlist", to: routes.clientMasterlist, permission: "view_client" }, { label: "Facility Masterlist", to: routes.facilityMasterlist, permission: "view_facility" }
     ] },
     { label: "Workforce", items: [
-      { label: "Personnel Masterlist", to: routes.personnelMasterlist, permission: "view_staff_member" }
+      { label: "Personnel Masterlist", to: routes.personnelMasterlist, permission: "view_staff_member" },
+      { label: "Facility Team", to: routes.facilityTeam, permission: "view_authorized_facility_personnel" }
     ] },
     { label: "Training", items: [
-      { label: "Request Training", to: routes.trainingRequests, permission: "view_training_request" }, { label: "Trainee Reconciliation", to: routes.trainingTrainees, permission: "view_training" }, { label: "Training Sessions", to: routes.trainingSessions, permission: "view_training" }, { label: "Register Training", to: routes.trainingRegister, permission: "create_training_enrollment" }, { label: "Training Journeys", to: routes.trainingJourneys, permission: "view_training" }, { label: "Trainer Evaluations", to: routes.trainerCommercialEvaluations, permission: "record_training_assessment" }
+      { label: "Request Training", to: routes.trainingRequests, permission: "view_training_request" }, { label: "Trainee Reconciliation", to: routes.trainingTrainees, permission: "view_training" }, { label: "Training Sessions", to: routes.trainingSessions, permission: "view_training" }, { label: "Register Training", to: routes.trainingRegister, permission: "create_training_enrollment" }, { label: "Training Journeys", to: routes.trainingJourneys, permission: "view_training" }, { label: "In-service Training", to: routes.inservice, permission: inservicePermission(auth) }, { label: "Trainer Evaluations", to: routes.trainerCommercialEvaluations, permission: "record_training_assessment" }
     ] },
     { label: "Assessment", items: [
       { label: "Facility Assessment Journeys", to: routes.facilityAssessmentJourneys, permission: "view_domain_assessment" }
@@ -96,6 +101,7 @@ function closePreviewAfterFocusLeaves(event: FocusEvent<HTMLElement>, close: () 
 function GroupIcon({ group }: { group: string }) {
   const paths: Record<string, ReactNode> = {
     Workspace: <><rect height="6" rx="1" width="6" x="3" y="3" /><rect height="6" rx="1" width="6" x="15" y="3" /><rect height="6" rx="1" width="6" x="3" y="15" /><rect height="6" rx="1" width="6" x="15" y="15" /></>,
+    "My Account": <><circle cx="12" cy="8" r="4" /><path d="M4 21c.8-4.4 3.5-7 8-7s7.2 2.6 8 7" /></>,
     Registration: <><path d="M8 7h13M8 12h13M8 17h8" /><path d="m3.5 7 .8.8L6 6M3.5 12l.8.8L6 11M3.5 17l.8.8L6 16" /></>,
     Workforce: <><circle cx="12" cy="8" r="4" /><path d="M4 21c.8-4.4 3.5-7 8-7s7.2 2.6 8 7" /></>,
     Organizations: <><path d="M4 21V5h10v16M14 9h6v12M7 9h4M7 13h4M7 17h4M17 13h1M17 17h1" /></>,
@@ -114,3 +120,4 @@ function auditRiskPermission(auth: ReturnType<typeof useAuth>) { return auth.can
 function administrationPermission(auth: ReturnType<typeof useAuth>) { return auth.canUsePermission("view_users") ? "view_users" : "create_user"; }
 function personnelRegistrationPermission(auth: ReturnType<typeof useAuth>) { return auth.canUsePermission("create_staff_member") ? "create_staff_member" : "manage_personnel_operational_authorization"; }
 function appointmentPermission(auth: ReturnType<typeof useAuth>) { return auth.canUsePermission("view_audit_appointment") ? "view_audit_appointment" : auditRiskPermission(auth); }
+function inservicePermission(auth: ReturnType<typeof useAuth>) { return auth.canUsePermission("create_training_log") ? "create_training_log" : auth.canUsePermission("approve_inservice_event") ? "approve_inservice_event" : auth.canUsePermission("approve_training_log") ? "approve_training_log" : "evaluate_inservice_monthly_result"; }

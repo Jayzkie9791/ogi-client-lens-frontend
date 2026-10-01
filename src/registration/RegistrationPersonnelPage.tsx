@@ -33,12 +33,15 @@ import { listRegistrationFacilityAssignments } from "./registrationFacilityAssig
 import { getPersonnelRegistrationIntent } from "./personnelRegistrationJourneyApi";
 import { OgiOperationalAuthorityPanel } from "./OgiOperationalAuthorityPanel";
 import { OgiInstructorQualificationPanel } from "./OgiInstructorQualificationPanel";
+import { PersonnelAccountAccessPanel } from "./PersonnelAccountAccessPanel";
+import {InviteLifeguardPanel} from "./InviteLifeguardPanel";
 import { formatRegistrationDate, formatRegistrationDateTime } from "./registrationPresentation";
 import {
   RegistrationEditableSection,
   RegistrationMetadataGroup,
   RegistrationMetadataItem,
-  RegistrationStatusBadge
+  RegistrationStatusBadge,
+  RegistrationTechnicalDetails
 } from "./RegistrationWorkspaceUi";
 
 const permissions = {
@@ -56,12 +59,17 @@ const permissions = {
   ,viewInstructorRegistry: "view_instructor_registry"
   ,manageInstructorRegistry: "manage_instructor_registry"
   ,viewTraining: "view_training"
+  ,manageAccountActivation: "manage_personnel_account_activation"
+  ,createStaffMember:"create_staff_member"
+  ,createFacilityAssignment:"create_facility_assignment"
+  ,createUser:"create_user"
 } as const;
 
 type PersonnelSecondaryTab = "profile" | "training" | "records";
 
 interface PersonnelFormState {
   clientId: string;
+  clientEmployeeNumber: string;
   fullName: string;
   email: string;
   phoneNumber: string;
@@ -92,6 +100,9 @@ export function RegistrationPersonnelPage() {
   const canIssueCertification = auth.canUsePermission(permissions.issueCertification) && auth.session?.clientId === null;
   const canViewInstructorRegistry = auth.canUsePermission(permissions.viewInstructorRegistry) && auth.session?.clientId === null;
   const canManageInstructorRegistry = auth.canUsePermission(permissions.manageInstructorRegistry) && auth.session?.clientId === null;
+  const canManageAccountActivation=auth.canUsePermission(permissions.manageAccountActivation);
+  const canInviteNewLifeguard=canManageAccountActivation&&auth.canUsePermission(permissions.createStaffMember)&&
+    auth.canUsePermission(permissions.createFacilityAssignment)&&auth.canUsePermission(permissions.createUser);
   const [clientFilter, setClientFilter] = useState("");
   const [facilityFilter, setFacilityFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<
@@ -153,6 +164,10 @@ export function RegistrationPersonnelPage() {
       setSelectedPersonnelId(requestedPersonnelId);
     }
   }, [personnel, searchParams]);
+
+  useEffect(() => {
+    if (searchParams.get("tab") === "authority") setSelectedTab("records");
+  }, [searchParams]);
 
   useEffect(() => {
     if (
@@ -267,6 +282,8 @@ export function RegistrationPersonnelPage() {
 
       <RegistrationErrorAlert error={updateMutation.error} />
 
+      {canInviteNewLifeguard?<InviteLifeguardPanel clients={clients} initialClientId={clientFilter}/>:null}
+
       <PersonnelFilters
         canViewClients={canViewClients}
         canViewFacilities={canViewFacilities}
@@ -298,6 +315,7 @@ export function RegistrationPersonnelPage() {
               canViewTraining={canViewTraining}
               canRegisterTraining={canRegisterTraining}
               canViewPersonnelCertificates={canViewPersonnelCertificates}
+              canManageAccountActivation={canManageAccountActivation}
               clientNameById={clientNameById}
               clients={clients}
               editForm={editForm}
@@ -424,6 +442,7 @@ function PersonnelDetailsPanel({
   canViewFacilityAssignments,
   canViewPersonnelCertificates,
   canViewTraining,
+  canManageAccountActivation,
   clientNameById,
   clients,
   editForm,
@@ -445,6 +464,7 @@ function PersonnelDetailsPanel({
   canViewFacilityAssignments: boolean;
   canViewPersonnelCertificates: boolean;
   canViewTraining: boolean;
+  canManageAccountActivation:boolean;
   clientNameById: Map<string, string>;
   clients: RegistrationClient[];
   editForm: PersonnelFormState | null;
@@ -513,6 +533,8 @@ function PersonnelDetailsPanel({
               section={profileCard}
               staffMember={staffMember}
             /> : null}
+          {selectedTab==="profile"&&profileCard==="administrative"&&canManageAccountActivation&&isClientPersonnel?
+            <PersonnelAccountAccessPanel assignments={assignmentsQuery.data?.assignments??[]} personnel={staffMember}/>:null}
         </div>
       </Surface>
 
@@ -552,8 +574,8 @@ function PersonnelRegistrationSummary({assignments,clientName,facilities,intent,
     {loading?<p className="mt-4 text-sm text-text-muted">Loading Registration details…</p>:<dl className="mt-4 grid gap-x-6 gap-y-4 sm:grid-cols-2">
       <RegistrationSummaryItem label="Client" value={clientName}/>
       <RegistrationSummaryItem label="Personnel type" value="Client Personnel"/>
-      <RegistrationSummaryItem label="Assigned Facilities" value={active.length?active.map(item=>nameById.get(item.facility_id)??item.facility_id).join(", "):"No active Facility assignment"}/>
-      <RegistrationSummaryItem label="Primary Facility" value={primary?(nameById.get(primary.facility_id)??primary.facility_id):"Not designated"}/>
+      <RegistrationSummaryItem label="Assigned Facilities" value={active.length?active.map(item=>nameById.get(item.facility_id)??"Facility name unavailable").join(", "):"No active Facility assignment"}/>
+      <RegistrationSummaryItem label="Primary Facility" value={primary?(nameById.get(primary.facility_id)??"Facility name unavailable"):"Not designated"}/>
       <RegistrationSummaryItem label="Platform access" value={access}/>
       <RegistrationSummaryItem label="Completed" value={intent?.completed_at?formatRegistrationDateTime(intent.completed_at):"Not completed"}/>
     </dl>}
@@ -641,7 +663,7 @@ function PersonnelSecondaryNavigation({
           Training
         </button>
       ) : null}
-      <button aria-controls="personnel-records-panel" aria-selected={selectedTab === "records"} className={tabClassName(selectedTab === "records")} id="personnel-records-tab" onClick={() => onTabChange("records")} role="tab" type="button">Records</button>
+      <button aria-controls="personnel-records-panel" aria-selected={selectedTab === "records"} className={tabClassName(selectedTab === "records")} id="personnel-records-tab" onClick={() => onTabChange("records")} role="tab" type="button">Authority &amp; records</button>
     </div>
   );
 }
@@ -680,18 +702,20 @@ function PersonnelOverview({
       id="personnel-profile-panel"
       role="tabpanel"
     >
-      {section === "administrative" ? <RegistrationMetadataGroup description="System relationships and record history remain secondary to the employment profile.">
-        <RegistrationMetadataItem label="Administrative Personnel ID" value={staffMember.id} subtle />
+      {section === "administrative" ? <><RegistrationMetadataGroup description="Account relationship and record history remain secondary to the employment profile.">
         <RegistrationMetadataItem label="Affiliation" value={personnelAffiliation(staffMember)} />
-        <RegistrationMetadataItem label="Administrative Client ID" value={staffMember.client_id ?? "Not client-affiliated"} subtle />
+        <RegistrationMetadataItem label="Client" value={personnelAffiliation(staffMember) === "OGI" ? "Ocean Guard International" : clientLabel(staffMember.client_id, clientNameById)} />
         <RegistrationMetadataItem
-          label="Platform user"
-          value={staffMember.user_id ?? "No linked user account"}
-          subtle={Boolean(staffMember.user_id)}
+          label="Platform account"
+          value={staffMember.user_id ? "Linked user account" : "No linked user account"}
         />
         <RegistrationMetadataItem label="Created" value={formatRegistrationDateTime(staffMember.created_at)} />
         <RegistrationMetadataItem label="Updated" value={formatRegistrationDateTime(staffMember.updated_at)} />
-      </RegistrationMetadataGroup> : null}
+      </RegistrationMetadataGroup><RegistrationTechnicalDetails>
+        <RegistrationMetadataItem label="Personnel ID" value={staffMember.id} subtle />
+        <RegistrationMetadataItem label="Client ID" value={staffMember.client_id ?? "Not client-affiliated"} subtle />
+        <RegistrationMetadataItem label="User ID" value={staffMember.user_id ?? "Not linked"} subtle />
+      </RegistrationTechnicalDetails></> : null}
 
       {section === "employment" && canUpdate ? (
         <RegistrationEditableSection
@@ -768,6 +792,7 @@ function PersonnelForm({
   showActions?: boolean;
 }) {
   const canSubmit =
+    formState.clientEmployeeNumber.trim().length > 0 &&
     formState.fullName.trim().length > 0 &&
     (lockClientSelection || formState.clientId.trim().length > 0);
 
@@ -796,6 +821,12 @@ function PersonnelForm({
             </select>
           )}
         </label>
+        <FormInput
+          label="Client employee number"
+          onChange={(clientEmployeeNumber) => onChange({ ...formState, clientEmployeeNumber })}
+          required
+          value={formState.clientEmployeeNumber}
+        />
         <FormInput
           label="Full name"
           onChange={(fullName) => onChange({ ...formState, fullName })}
@@ -907,6 +938,7 @@ function PersonnelReadOnlyDetails({
       title="Employment profile"
     >
       <RegistrationMetadataItem label="Full name" value={staffMember.full_name} />
+      <RegistrationMetadataItem label="Client employee number" value={staffMember.client_employee_number ?? "Not specified"} />
       <RegistrationMetadataItem
         label="Employment status"
         value={displayCode(staffMember.employment_status)}
@@ -933,7 +965,9 @@ function RegistrationErrorAlert({ error }: { error: Error | null }) {
   return (
     <Surface role="alert">
       <p className="text-sm font-semibold text-text-primary">
-        {isApiError(error) ? error.message : "Registration request failed."}
+        {isApiError(error) && error.status === 409 && error.message.includes("operational-lifeguard Facility Assignments")
+          ? "End every open operational-lifeguard Facility Assignment using its actual last covered date, then retry this Personnel status change."
+          : isApiError(error) ? error.message : "Registration request failed."}
       </p>
     </Surface>
   );
@@ -976,6 +1010,7 @@ function buildUpdateRequest(
   formState: PersonnelFormState
 ): RegistrationPersonnelMutationRequest {
   return {
+    client_employee_number: formState.clientEmployeeNumber.trim(),
     full_name: formState.fullName.trim(),
     email: nullableText(formState.email),
     phone_number: nullableText(formState.phoneNumber),
@@ -990,6 +1025,7 @@ function formStateFromPersonnel(
 ): PersonnelFormState {
   return {
     clientId: staffMember.client_id ?? "",
+    clientEmployeeNumber: staffMember.client_employee_number ?? "",
     fullName: staffMember.full_name,
     email: staffMember.email ?? "",
     phoneNumber: staffMember.phone_number ?? "",
@@ -1007,7 +1043,7 @@ function clientLabel(clientId: string | null, clientNameById: Map<string, string
   if (!clientId) return "Not client-affiliated";
   const name = clientNameById.get(clientId);
 
-  return name ?? clientId;
+  return name ?? "Client name unavailable";
 }
 
 function personnelAffiliation(staffMember: RegistrationPersonnel): "CLIENT" | "OGI" {

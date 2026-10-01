@@ -82,6 +82,8 @@ const activePrimaryAssignment: RegistrationFacilityAssignment = {
   assigned_from: "2026-02-01",
   assigned_to: null,
   is_primary_assignment: true,
+  position_title: "Lead Lifeguard",
+  duty_code: null,
   notes: "Primary training placement",
   created_at: "2026-08-13T00:00:00.000Z",
   updated_at: "2026-08-14T00:00:00.000Z",
@@ -96,6 +98,8 @@ const activeSecondaryAssignment: RegistrationFacilityAssignment = {
   assigned_from: "2026-03-01",
   assigned_to: null,
   is_primary_assignment: false,
+  position_title: "Lifeguard",
+  duty_code: "OPERATIONAL_LIFEGUARD",
   notes: null,
   created_at: "2026-08-15T00:00:00.000Z",
   updated_at: "2026-08-16T00:00:00.000Z",
@@ -110,6 +114,8 @@ const completedAssignment: RegistrationFacilityAssignment = {
   assigned_from: "2026-01-01",
   assigned_to: "2026-01-31",
   is_primary_assignment: false,
+  position_title: "Seasonal Lifeguard",
+  duty_code: null,
   notes: "Historical placement",
   created_at: "2026-08-17T00:00:00.000Z",
   updated_at: "2026-08-18T00:00:00.000Z",
@@ -323,7 +329,7 @@ describe("Registration Facility Assignment frontend", () => {
     ).toBe(false);
   });
 
-  it("renders Facility Assignment history with Facility labels, fallback IDs, and multiple active assignments", async () => {
+  it("renders Facility Assignment history with Facility labels, readable missing-name fallback, and multiple active assignments", async () => {
     const user = userEvent.setup();
     const session = sessionWithFacilityAssignmentPermissions(["view_facility_assignment"]);
     mockFetchRoutes(standardRoutesForSession(session, assignmentRoutes([
@@ -338,7 +344,8 @@ describe("Registration Facility Assignment frontend", () => {
     expect(await screen.findByRole("heading", { name: "Facility Assignments" })).toBeInTheDocument();
     expect(await screen.findByLabelText("Facility Assignment Makati Training Pool")).toBeInTheDocument();
     expect(await screen.findByLabelText("Facility Assignment Bluewater Beach Zone")).toBeInTheDocument();
-    expect(screen.getByText(completedAssignment.facility_id)).toBeInTheDocument();
+    expect(screen.getByText("Facility name unavailable")).toBeInTheDocument();
+    expect(screen.queryByText(completedAssignment.facility_id)).not.toBeInTheDocument();
     expect(within(await screen.findByLabelText("Facility Assignment Makati Training Pool")).getByText("Active")).toBeInTheDocument();
     expect(within(await screen.findByLabelText("Facility Assignment Bluewater Beach Zone")).getByText("Active")).toBeInTheDocument();
     expect(screen.getByText("Completed")).toBeInTheDocument();
@@ -352,6 +359,8 @@ describe("Registration Facility Assignment frontend", () => {
     expect(screen.getByText(formatRegistrationDate(completedAssignmentEndDate))).toBeInTheDocument();
     expect(screen.queryByText(completedAssignmentEndDate)).not.toBeInTheDocument();
     expect(screen.getByText("Primary training placement")).toBeInTheDocument();
+    expect(screen.getByText("Primary Facility Assignment")).toBeInTheDocument();
+    expect(screen.queryByText("Not primary")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add Facility Assignment" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Set Primary" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "End Assignment" })).not.toBeInTheDocument();
@@ -394,6 +403,8 @@ describe("Registration Facility Assignment frontend", () => {
     expect(within(addForm).getByLabelText("Primary assignment")).not.toBeChecked();
     await within(addForm).findByRole("option", { name: "Bluewater Beach Zone" });
     await user.selectOptions(within(addForm).getByLabelText("Facility"), facilityB.id);
+    await user.type(within(addForm).getByLabelText("Position"), "Weekend Lifeguard");
+    await user.selectOptions(within(addForm).getByLabelText("Governed duty"), "OPERATIONAL_LIFEGUARD");
     await user.type(within(addForm).getByLabelText("Assigned From"), "2026-04-01");
     await user.type(within(addForm).getByLabelText("Notes"), "Weekend rotation");
     await user.click(
@@ -416,6 +427,8 @@ describe("Registration Facility Assignment frontend", () => {
 
     expect(body).toEqual({
       facility_id: facilityB.id,
+      position_title: "Weekend Lifeguard",
+      duty_code: "OPERATIONAL_LIFEGUARD",
       assigned_from: "2026-04-01",
       notes: "Weekend rotation"
     });
@@ -463,6 +476,8 @@ describe("Registration Facility Assignment frontend", () => {
     });
     await within(addForm).findByRole("option", { name: "Makati Training Pool" });
     await user.selectOptions(within(addForm).getByLabelText("Facility"), facilityA.id);
+    await user.type(within(addForm).getByLabelText("Position"), "Lead Lifeguard");
+    await user.selectOptions(within(addForm).getByLabelText("Governed duty"), "OTHER_DUTY");
     await user.type(within(addForm).getByLabelText("Assigned From"), "2026-02-01");
     await user.click(within(addForm).getByLabelText("Primary assignment"));
     await user.click(
@@ -479,12 +494,14 @@ describe("Registration Facility Assignment frontend", () => {
 
     expect(body).toEqual({
       facility_id: facilityA.id,
+      position_title: "Lead Lifeguard",
+      duty_code: "OTHER_DUTY",
       assigned_from: "2026-02-01",
       is_primary_assignment: true
     });
   });
 
-  it("reconciles duplicate create conflicts with a safe 409 error", async () => {
+  it.each(["OTHER_DUTY", "OPERATIONAL_LIFEGUARD"] as const)("reconciles duplicate create conflicts with a safe 409 error for %s", async duty => {
     const user = userEvent.setup();
     const session = sessionWithFacilityAssignmentPermissions([
       "view_facility_assignment",
@@ -517,6 +534,8 @@ describe("Registration Facility Assignment frontend", () => {
     });
     await within(addForm).findByRole("option", { name: "Makati Training Pool" });
     await user.selectOptions(within(addForm).getByLabelText("Facility"), facilityA.id);
+    await user.type(within(addForm).getByLabelText("Position"), "Lead Lifeguard");
+    await user.selectOptions(within(addForm).getByLabelText("Governed duty"), duty);
     await user.type(within(addForm).getByLabelText("Assigned From"), "2026-02-01");
     await user.click(
       within(addForm).getByRole("button", { name: "Add Facility Assignment" })
@@ -526,6 +545,8 @@ describe("Registration Facility Assignment frontend", () => {
       "Facility Assignment conflict detected. Assignment history has been refreshed."
     );
     expect(screen.queryByText("Raw duplicate message")).not.toBeInTheDocument();
+    const createCall = calls.find(call => call.url === `/api/v1/registration/personnel/${staffA.id}/facility-assignments` && call.init?.method === "POST");
+    expect(JSON.parse(String(createCall?.init?.body))).toMatchObject({ facility_id: facilityA.id, duty_code: duty });
     await waitFor(() =>
       expect(
         calls.filter(
@@ -569,10 +590,11 @@ describe("Registration Facility Assignment frontend", () => {
       "Facility Assignment Bluewater Beach Zone"
     );
     const completedRow = await screen.findByLabelText(
-      `Facility Assignment ${completedAssignment.facility_id}`
+      "Facility Assignment Facility name unavailable"
     );
 
-    expect(within(primaryRow).getAllByText("Primary").length).toBeGreaterThan(0);
+    expect(within(primaryRow).getByText("Primary Facility Assignment")).toBeInTheDocument();
+    expect(within(primaryRow).queryByText("Not primary")).not.toBeInTheDocument();
     expect(within(primaryRow).queryByRole("button", { name: "Set Primary" })).not.toBeInTheDocument();
     expect(within(secondaryRow).getByRole("button", { name: "Set Primary" })).toBeInTheDocument();
     expect(within(completedRow).queryByRole("button", { name: "Set Primary" })).not.toBeInTheDocument();
@@ -615,7 +637,7 @@ describe("Registration Facility Assignment frontend", () => {
 
     const activeRow = await screen.findByLabelText("Facility Assignment Makati Training Pool");
     const completedRow = await screen.findByLabelText(
-      `Facility Assignment ${completedAssignment.facility_id}`
+      "Facility Assignment Facility name unavailable"
     );
 
     expect(within(activeRow).getByRole("button", { name: "End Assignment" })).toBeInTheDocument();

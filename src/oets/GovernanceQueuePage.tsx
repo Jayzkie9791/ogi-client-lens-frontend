@@ -2,7 +2,7 @@ import { FormEvent, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
-import { routes } from "../app/routePaths";
+import { evidencePathWithReturn } from "./evidenceReturnContext";
 import { useAuth } from "../auth/useAuth";
 import { isApiError } from "../api/errors";
 import { Button } from "../ui/components/Button";
@@ -310,7 +310,7 @@ function QueueItemAction({
   item: GovernanceQueueItem;
   onClaim: (item: GovernanceQueueItem) => void;
 }) {
-  const recordPath = routes.evidenceRecordPath(item.evidence_record.id);
+  const recordPath = evidencePathWithReturn(item.evidence_record.id, { kind: "GOVERNANCE_QUEUE" });
 
   if (!item.active_claim) {
     return (

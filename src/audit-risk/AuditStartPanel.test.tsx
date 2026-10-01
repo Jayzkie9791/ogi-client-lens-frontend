@@ -12,6 +12,7 @@ import { auditQueryKeys } from "./auditRiskApi";
 const auditId = "00000000-0000-4000-8000-000000000101";
 const templateId = "00000000-0000-4000-8000-000000000201";
 const facilityId = "00000000-0000-4000-8000-000000000301";
+const appointmentId = "00000000-0000-4000-8000-000000000501";
 const audit = {
   id: auditId,
   business_identifier: "AUDIT-2026-000001",
@@ -26,6 +27,7 @@ const audit = {
 };
 const facilities = { facilities: [{ ...audit.facility, operational_status: "ACTIVE", client: audit.client }] };
 const templates = [{ ...audit.template, description: "Annual review", is_active: true }];
+const appointments = { appointments: [{ id: appointmentId, appointment_identifier: "AUDITOR-APPOINTMENT-2026-000001", audit_number: "AUDIT-2026-000001", profile: "LEAD_AUDITOR", scope_mode: "FACILITY_SPECIFIC", valid_from: "2026-09-20T00:00:00.000Z", valid_until: null }] };
 
 afterEach(() => {
   configureApiAuth(null);
@@ -53,6 +55,7 @@ describe("governed Audit start intent", () => {
     const form = await readyForm();
 
     await user.selectOptions(within(form).getByRole("combobox", { name: "Eligible Facility" }), facilityId);
+    await user.selectOptions(await within(form).findByRole("combobox", { name: "Audit Appointment" }), appointmentId);
     await user.selectOptions(within(form).getByRole("combobox", { name: "Audit template" }), templateId);
     fireEvent.submit(form);
     fireEvent.submit(form);
@@ -116,7 +119,7 @@ describe("governed Audit start intent", () => {
     [400, "The Audit command was rejected as invalid."],
     [422, "The Audit command was rejected as invalid."],
     [403, "You are not authorized to start this Audit."],
-    [404, "The selected Facility or template is unavailable."]
+    [404, "The selected Facility, Audit Appointment, or template is unavailable."]
   ] as const)("maps definitive %s without exposing backend detail", async (status, message) => {
     mockAuditStartFetch([], () => Promise.resolve(errorResponse(status, "sensitive backend detail")));
     renderPanel(createQueryClient());
@@ -165,6 +168,7 @@ function mockAuditStartFetch(requests: CapturedRequest[], startResponse: () => P
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = semanticPath(input);
     if (path === "/api/v1/audits/eligible-facilities") return jsonResponse(facilities);
+    if (path === `/api/v1/audits/eligible-appointments?facility_id=${facilityId}`) return jsonResponse(appointments);
     if (path === "/api/v1/audit-templates") return jsonResponse(templates);
     if (path === "/api/v1/audits/start") {
       const headers = new Headers(init?.headers);
@@ -184,6 +188,7 @@ async function readyForm() {
 
 async function selectCommand(user: ReturnType<typeof userEvent.setup>, form: HTMLElement) {
   await user.selectOptions(within(form).getByRole("combobox", { name: "Eligible Facility" }), facilityId);
+  await user.selectOptions(await within(form).findByRole("combobox", { name: "Audit Appointment" }), appointmentId);
   await user.selectOptions(within(form).getByRole("combobox", { name: "Audit template" }), templateId);
 }
 

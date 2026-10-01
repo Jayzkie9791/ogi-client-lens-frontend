@@ -267,7 +267,7 @@ export interface ClientTrainingRequestInput {
   readonly attached_document_types:readonly string[]; readonly reference_numbers:string; readonly expected_outcomes:readonly string[];
   readonly authorizer_position:string; readonly authorization_confirmed:boolean;
 }
-export interface ClientTrainingRequest { readonly id:string; readonly training_request_number:string; readonly client_id:string; readonly facility_id:string; readonly facility_name:string|null; readonly status:string; readonly request_origin:"CLIENT_SELF_SERVICE"|"OGI_ASSISTED"; readonly received_via:string|null; readonly external_requester_name:string|null; readonly external_requester_role:string|null; readonly requested_by_user_id:string; readonly created_at:string; readonly updated_at:string; readonly details:Record<string,unknown>; }
+export interface ClientTrainingRequest { readonly id:string; readonly training_request_number:string; readonly operational_evidence_record_id:string; readonly client_id:string; readonly facility_id:string; readonly facility_name:string|null; readonly status:string; readonly request_origin:"CLIENT_SELF_SERVICE"|"OGI_ASSISTED"; readonly received_via:string|null; readonly external_requester_name:string|null; readonly external_requester_role:string|null; readonly requested_by_user_id:string; readonly created_at:string; readonly updated_at:string; readonly details:Record<string,unknown>; }
 export interface ClientTrainingRequestListResponse { readonly requests:readonly ClientTrainingRequest[]; }
 
 export interface EligibleTrainingInstructor {
@@ -325,6 +325,12 @@ export interface TrainingEnrollment {
   };
   readonly client: TrainingEnrollmentClientSummary | null;
   readonly training_session: TrainingEnrollmentSessionSummary | null;
+  readonly lifecycle_control: {
+    readonly started: boolean;
+    readonly certification_authority_exists: boolean;
+    readonly allowed_action: "CANCELLED" | "WITHDRAWN" | null;
+    readonly blocked_reason: "CERTIFICATION_AUTHORITY" | "ALREADY_INACTIVE" | null;
+  };
   readonly journey_progress?: {readonly attendance:boolean;readonly skills_assessment:string|null;readonly knowledge_assessment:string|null;readonly readiness:string|null;readonly certification:{readonly id:string;readonly business_identifier:string;readonly certification_number:string;readonly certification_level:string;readonly certification_status:string;readonly commercial_evaluation_recorded:boolean;readonly readiness_authority:{readonly f096_evidence:{readonly evidence_record_id:string;readonly lifecycle_state:string;readonly submitted_at:string}|null};readonly digital_credential:{readonly f048_evidence:{readonly evidence_record_id:string;readonly lifecycle_state:string;readonly submitted_at:string;readonly association_status:"BOUND"|"REVIEW_REQUIRED"}|null;readonly issuance:{readonly id:string;readonly issued_at:string}|null}}|null;readonly next_action:"RECORD_ATTENDANCE"|"RECORD_SKILLS_ASSESSMENT"|"RECORD_KNOWLEDGE_ASSESSMENT"|"RECORD_READINESS_DECISION"|"CERTIFICATION_REVIEW"|"BEGIN_F048"|"COMPLETE_F048_REVIEW"|"CREDENTIAL_ASSOCIATION_REVIEW"|"ISSUE_DIGITAL_CREDENTIAL"|"DIGITAL_CREDENTIAL_ISSUED"}|null;
 }
 
@@ -520,6 +526,7 @@ export interface TrainingAttendanceEvidenceWorkspace {
   readonly active_draft: TrainingAttendanceEvidenceRecord | null;
   readonly history: readonly TrainingAttendanceEvidenceRecord[];
   readonly can_create_draft: boolean;
+  readonly create_draft_blocked_reason: "MISSING_PERMISSION" | "ACTIVE_SESSION_DRAFT" | null;
   readonly can_replace_active_draft: boolean;
 }
 
@@ -677,7 +684,7 @@ export function createClientTrainingRequest(body:ClientTrainingRequestInput,idem
 export function updateClientTrainingRequest(id:string,body:ClientTrainingRequestInput){return apiRequest<ClientTrainingRequest>(`/api/v1/training/client-requests/${encodeURIComponent(id)}`,{method:"PUT",body,validate:isClientTrainingRequest});}
 export function submitClientTrainingRequest(id:string,idempotencyKey:string){return apiRequest<ClientTrainingRequest>(`/api/v1/training/client-requests/${encodeURIComponent(id)}/submit`,{method:"POST",headers:{"idempotency-key":idempotencyKey},body:{authorization_confirmed:true},validate:isClientTrainingRequest});}
 
-function isClientTrainingRequest(v:unknown):v is ClientTrainingRequest{return isRecord(v)&&typeof v.id==="string"&&typeof v.training_request_number==="string"&&typeof v.status==="string"&&isRecord(v.details);}
+function isClientTrainingRequest(v:unknown):v is ClientTrainingRequest{return isRecord(v)&&typeof v.id==="string"&&typeof v.training_request_number==="string"&&typeof v.operational_evidence_record_id==="string"&&typeof v.status==="string"&&isRecord(v.details);}
 
 export function listTrainingPrograms() {
   return apiRequest<TrainingProgramAuthorityListResponse>(
@@ -990,8 +997,17 @@ function isTrainingEnrollment(value: unknown): value is TrainingEnrollment {
     isNullableString(value.trainee.email) &&
     (value.client === null || isTrainingEnrollmentClientSummary(value.client)) &&
     (value.training_session === null ||
-      isTrainingEnrollmentSessionSummary(value.training_session))
+      isTrainingEnrollmentSessionSummary(value.training_session)) &&
+    isTrainingEnrollmentLifecycleControl(value.lifecycle_control)
   );
+}
+
+function isTrainingEnrollmentLifecycleControl(value: unknown) {
+  return isRecord(value) &&
+    typeof value.started === "boolean" &&
+    typeof value.certification_authority_exists === "boolean" &&
+    (value.allowed_action === "CANCELLED" || value.allowed_action === "WITHDRAWN" || value.allowed_action === null) &&
+    (value.blocked_reason === "CERTIFICATION_AUTHORITY" || value.blocked_reason === "ALREADY_INACTIVE" || value.blocked_reason === null);
 }
 
 function isTrainingJourneyProjectionV2(value:unknown):value is TrainingJourneyProjectionV2 {
@@ -1161,7 +1177,10 @@ function isTrainingAttendanceEvidenceWorkspace(
       isTrainingAttendanceEvidenceRecord(value.active_draft)) &&
     Array.isArray(value.history) &&
     value.history.every(isTrainingAttendanceEvidenceRecord) &&
-    typeof value.can_create_draft === "boolean"
+    typeof value.can_create_draft === "boolean" &&
+    (value.create_draft_blocked_reason === null ||
+      value.create_draft_blocked_reason === "MISSING_PERMISSION" ||
+      value.create_draft_blocked_reason === "ACTIVE_SESSION_DRAFT")
   );
 }
 

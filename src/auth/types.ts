@@ -25,6 +25,22 @@ export interface RefreshResponse {
 
 export interface PasswordResetRequestResponse { accepted: true }
 export interface PasswordResetConfirmResponse { reset: true }
+export interface PersonnelAccountActivationRequest {
+  token: string;
+  client_employee_number: string;
+  new_password: string;
+  confirm_password: string;
+}
+export interface PersonnelAccountActivationResponse { activated: true }
+export type PersonnelRegistrationActivationRequest = PersonnelAccountActivationRequest;
+export type PersonnelRegistrationActivationResponse = PersonnelAccountActivationResponse;
+export interface ClientPocInvitationActivationRequest {
+  token: string;
+  email: string;
+  new_password: string;
+  confirm_password: string;
+}
+export type ClientPocInvitationActivationResponse = PersonnelAccountActivationResponse;
 
 export interface AuthenticatedSession {
   id: string;

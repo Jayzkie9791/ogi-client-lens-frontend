@@ -14,7 +14,9 @@ import {
   endRegistrationFacilityAssignment,
   listRegistrationFacilityAssignments,
   RegistrationFacilityAssignment,
-  setPrimaryRegistrationFacilityAssignment
+  RegistrationFacilityAssignmentDuty,
+  setPrimaryRegistrationFacilityAssignment,
+  updateRegistrationFacilityAssignment
 } from "./registrationFacilityAssignmentApi";
 import { RegistrationPersonnel } from "./registrationPersonnelApi";
 import { formatRegistrationDate } from "./registrationPresentation";
@@ -28,6 +30,8 @@ const permissions = {
 
 interface AddAssignmentFormState {
   facilityId: string;
+  positionTitle: string;
+  dutyCode: RegistrationFacilityAssignmentDuty | "";
   assignedFrom: string;
   isPrimaryAssignment: boolean;
   notes: string;
@@ -40,6 +44,8 @@ interface EndAssignmentFormState {
 
 const emptyAddForm: AddAssignmentFormState = {
   facilityId: "",
+  positionTitle: "",
+  dutyCode: "",
   assignedFrom: "",
   isPrimaryAssignment: false,
   notes: ""
@@ -157,6 +163,20 @@ export function RegistrationFacilityAssignmentsPanel({
     }
   });
 
+  const positionMutation = useMutation({
+    mutationFn: ({ assignmentId, positionTitle }: { assignmentId: string; positionTitle: string }) =>
+      updateRegistrationFacilityAssignment(staffMember.id, assignmentId, positionTitle),
+    onError: (error) => {
+      setMessage(null);
+      setErrorMessage(facilityAssignmentErrorMessage(error));
+    },
+    onSuccess: () => {
+      setErrorMessage(null);
+      setMessage("Facility Assignment position updated.");
+      void queryClient.invalidateQueries({ queryKey: assignmentQueryKey });
+    }
+  });
+
   if (!canView) {
     return null;
   }
@@ -239,6 +259,10 @@ export function RegistrationFacilityAssignmentsPanel({
           onEndFormChange={setEndForm}
           onOpenEndForm={openEndForm}
           onSetPrimary={(assignmentId) => primaryMutation.mutate(assignmentId)}
+          onUpdatePosition={(assignment) => {
+            const positionTitle = window.prompt("Position for this Facility assignment", assignment.position_title ?? "")?.trim();
+            if (positionTitle) positionMutation.mutate({ assignmentId: assignment.id, positionTitle });
+          }}
           onSubmitEnd={submitEndAssignment}
           primaryMutationPending={primaryMutation.isPending}
         />
@@ -275,6 +299,7 @@ function FacilityAssignmentHistory({
   onEndFormChange,
   onOpenEndForm,
   onSetPrimary,
+  onUpdatePosition,
   onSubmitEnd,
   primaryMutationPending
 }: {
@@ -288,6 +313,7 @@ function FacilityAssignmentHistory({
   onEndFormChange: (formState: EndAssignmentFormState) => void;
   onOpenEndForm: (assignmentId: string) => void;
   onSetPrimary: (assignmentId: string) => void;
+  onUpdatePosition: (assignment: RegistrationFacilityAssignment) => void;
   onSubmitEnd: (
     event: FormEvent<HTMLFormElement>,
     assignmentId: string
@@ -325,18 +351,20 @@ function FacilityAssignmentHistory({
                       value={displayCode(assignment.assignment_status)}
                     />
                     <MetadataItem
+                      label="Position"
+                      value={assignment.position_title ?? "Not specified"}
+                    />
+                    <MetadataItem
+                      label="Governed duty"
+                      value={assignment.duty_code === null ? "Unclassified" : displayCode(assignment.duty_code)}
+                    />
+                    <MetadataItem
                       label="Assigned from"
                       value={formatRegistrationDate(assignment.assigned_from)}
                     />
                     <MetadataItem
                       label="Assigned to"
                       value={assignment.assigned_to ? formatRegistrationDate(assignment.assigned_to) : "Currently active"}
-                    />
-                    <MetadataItem
-                      label="Primary"
-                      value={
-                        assignment.is_primary_assignment ? "Primary" : "Not primary"
-                      }
                     />
                     <MetadataItem
                       label="Notes"
@@ -347,7 +375,7 @@ function FacilityAssignmentHistory({
                 <div className="flex flex-wrap gap-2 sm:justify-end">
                   {assignment.is_primary_assignment ? (
                     <span className="inline-flex rounded-component border border-border bg-surface px-3 py-2 text-sm font-semibold text-text-primary">
-                      Primary
+                      Primary Facility Assignment
                     </span>
                   ) : null}
                   {canSetPrimary ? (
@@ -357,6 +385,15 @@ function FacilityAssignmentHistory({
                       variant="secondary"
                     >
                       Set Primary
+                    </Button>
+                  ) : null}
+                  {canEnd ? (
+                    <Button
+                      disabled={endMutationPending}
+                      onClick={() => onUpdatePosition(assignment)}
+                      variant="secondary"
+                    >
+                      Update Position
                     </Button>
                   ) : null}
                   {canEnd ? (
@@ -453,6 +490,8 @@ function AddFacilityAssignmentForm({
   );
   const canSubmit =
     formState.facilityId.trim().length > 0 &&
+    formState.positionTitle.trim().length > 0 &&
+    formState.dutyCode !== "" &&
     formState.assignedFrom.trim().length > 0;
 
   return (
@@ -482,6 +521,30 @@ function AddFacilityAssignmentForm({
                 {facility.facility_name}
               </option>
             ))}
+          </select>
+        </label>
+        <label className="block text-sm font-semibold text-text-primary">
+          Position
+          <input
+            className={inputClassName}
+            onChange={(event) =>
+              onChange({ ...formState, positionTitle: event.currentTarget.value })
+            }
+            required
+            value={formState.positionTitle}
+          />
+        </label>
+        <label className="block text-sm font-semibold text-text-primary">
+          Governed duty
+          <select
+            className={inputClassName}
+            onChange={(event) => onChange({ ...formState, dutyCode: event.currentTarget.value as AddAssignmentFormState["dutyCode"] })}
+            required
+            value={formState.dutyCode}
+          >
+            <option value="">Select a duty</option>
+            <option value="OPERATIONAL_LIFEGUARD">Operational lifeguard</option>
+            <option value="OTHER_DUTY">Other duty</option>
           </select>
         </label>
         <label className="block text-sm font-semibold text-text-primary">
@@ -536,7 +599,7 @@ function AddFacilityAssignmentForm({
 function MetadataItem({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <dt className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+      <dt className="text-xs font-bold uppercase tracking-wide text-text-muted">
         {label}
       </dt>
       <dd className="mt-1 break-words text-text-primary">{value}</dd>
@@ -547,6 +610,8 @@ function MetadataItem({ label, value }: { label: string; value: string }) {
 function buildCreateAssignmentRequest(formState: AddAssignmentFormState) {
   return {
     facility_id: formState.facilityId,
+    position_title: formState.positionTitle.trim(),
+    duty_code: formState.dutyCode as RegistrationFacilityAssignmentDuty,
     assigned_from: formState.assignedFrom,
     ...(formState.isPrimaryAssignment ? { is_primary_assignment: true } : {}),
     ...optionalNotes(formState.notes)
@@ -570,7 +635,7 @@ function assignmentFacilityLabel(
   assignment: RegistrationFacilityAssignment,
   facilityNameById: Map<string, string>
 ) {
-  return facilityNameById.get(assignment.facility_id) ?? assignment.facility_id;
+  return facilityNameById.get(assignment.facility_id) ?? "Facility name unavailable";
 }
 
 function displayCode(value: string) {

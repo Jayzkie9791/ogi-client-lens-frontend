@@ -53,7 +53,7 @@ async function requestOnce<T>(
   const response = await fetch(buildUrl(path), {
     method: options.method ?? "GET",
     headers: buildHeaders(options),
-    body: options.body === undefined ? undefined : JSON.stringify(options.body)
+    body: options.body === undefined ? undefined : options.body instanceof FormData ? options.body : JSON.stringify(options.body)
   });
 
   if (
@@ -145,7 +145,7 @@ function buildHeaders(options: ApiRequestOptions<unknown>) {
   const headers = new Headers(options.headers);
   headers.set("Accept", "application/json");
 
-  if (options.body !== undefined) {
+  if (options.body !== undefined && !(options.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
   }
 

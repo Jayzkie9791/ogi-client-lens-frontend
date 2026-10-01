@@ -6,7 +6,7 @@ import { isApiError } from "../api/errors";
 import { routes } from "../app/routePaths";
 import { Button } from "../ui/components/Button";
 import { Surface } from "../ui/components/Surface";
-import { auditQueryKeys, listAuditTemplates, listEligibleAuditFacilities, startAudit, StartAuditCommand } from "./auditRiskApi";
+import { auditQueryKeys, listAuditTemplates, listEligibleAuditAppointments, listEligibleAuditFacilities, startAudit, StartAuditCommand } from "./auditRiskApi";
 import { displayCode } from "./auditRiskTypes";
 
 interface AuditStartPanelProps {
@@ -25,6 +25,7 @@ export function AuditStartPanel({ onClose }: AuditStartPanelProps) {
   const queryClient = useQueryClient();
   const [intentKey, setIntentKey] = useState(createIdempotencyKey);
   const [facilityId, setFacilityId] = useState("");
+  const [appointmentId, setAppointmentId] = useState("");
   const [templateId, setTemplateId] = useState("");
   const [submittedAttempt, setSubmittedAttempt] = useState<FrozenAttempt | null>(null);
   const submittedAttemptRef = useRef<FrozenAttempt | null>(null);
@@ -41,6 +42,12 @@ export function AuditStartPanel({ onClose }: AuditStartPanelProps) {
     queryFn: listAuditTemplates,
     retry: false
   });
+  const appointmentsQuery = useQuery({
+    queryKey: auditQueryKeys.eligibleAppointments(facilityId),
+    queryFn: () => listEligibleAuditAppointments(facilityId),
+    enabled: facilityId !== "",
+    retry: false
+  });
   const mutation = useMutation({
     mutationFn: (attempt: FrozenAttempt) => startAudit(attempt.command, attempt.key),
     onSuccess: (audit) => {
@@ -48,7 +55,12 @@ export function AuditStartPanel({ onClose }: AuditStartPanelProps) {
       void queryClient.invalidateQueries({ queryKey: auditQueryKeys.lists });
       navigate(routes.auditDetailPath(audit.id));
     },
-    onError: (error) => setFailure(classifyStartFailure(error)),
+    onError: (error) => {
+      if (isApiError(error) && error.status === 409) {
+        void queryClient.invalidateQueries({ queryKey: auditQueryKeys.eligibleAppointments(facilityId) });
+      }
+      setFailure(classifyStartFailure(error));
+    },
     onSettled: () => {
       requestPendingRef.current = false;
     }
@@ -56,13 +68,14 @@ export function AuditStartPanel({ onClose }: AuditStartPanelProps) {
 
   const facilities = facilitiesQuery.data?.facilities ?? [];
   const templates = templatesQuery.data ?? [];
+  const appointments = appointmentsQuery.data?.appointments ?? [];
   const frozen = submittedAttempt !== null;
-  const canSubmit = facilityId !== "" && templateId !== "" && facilities.length > 0 && templates.length > 0 && !mutation.isPending;
+  const canSubmit = facilityId !== "" && appointmentId !== "" && templateId !== "" && facilities.length > 0 && appointments.length > 0 && templates.length > 0 && !mutation.isPending;
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!canSubmit || submittedAttemptRef.current || requestPendingRef.current) return;
-    const attempt = { key: intentKey, command: { templateId, facilityId } };
+    const attempt = { key: intentKey, command: { templateId, facilityId, appointmentId } };
     submittedAttemptRef.current = attempt;
     requestPendingRef.current = true;
     setSubmittedAttempt(attempt);
@@ -91,19 +104,30 @@ export function AuditStartPanel({ onClose }: AuditStartPanelProps) {
       <form aria-labelledby="start-audit-heading" className="space-y-4" onSubmit={submit}>
         <div className="relative border-b border-blue-100 bg-blue-50 px-5 py-4 before:absolute before:inset-y-0 before:left-0 before:w-1 before:bg-accent-red">
           <h2 className="text-lg font-semibold text-primary-navy" id="start-audit-heading">Start Audit</h2>
-          <p className="mt-1 text-sm text-text-muted">Choose an eligible Facility and active Audit template. The server will assign the governed Audit reference.</p>
+          <p className="mt-1 text-sm text-text-muted">Choose the Facility, your exact active Audit Appointment, and the Audit template. The appointment-owned Audit Number will identify this audit effort.</p>
         </div>
 
-        <div className="grid gap-5 px-5 md:grid-cols-2">
+        <div className="grid gap-5 px-5 lg:grid-cols-3">
           <SelectorField
             disabled={frozen || mutation.isPending || facilitiesQuery.isLoading || facilitiesQuery.isError || facilities.length === 0}
             label="Eligible Facility"
             state={selectorState(facilitiesQuery, facilities.length, "Facilities")}
             value={facilityId}
-            onChange={setFacilityId}
+            onChange={(value) => { setFacilityId(value); setAppointmentId(""); }}
             options={facilities.map((facility) => ({
               value: facility.id,
               label: `${facility.name} · ${facility.business_identifier} · ${facility.client.name}`
+            }))}
+          />
+          <SelectorField
+            disabled={frozen || mutation.isPending || facilityId === "" || appointmentsQuery.isLoading || appointmentsQuery.isError || appointments.length === 0}
+            label="Audit Appointment"
+            state={facilityId === "" ? "Select a Facility first." : selectorState(appointmentsQuery, appointments.length, "Audit Appointments")}
+            value={appointmentId}
+            onChange={setAppointmentId}
+            options={appointments.map((appointment) => ({
+              value: appointment.id,
+              label: `${appointment.audit_number} · ${appointment.appointment_identifier} · ${displayCode(appointment.profile)}`
             }))}
           />
           <SelectorField
@@ -173,10 +197,11 @@ function selectorState(query: { isLoading: boolean; isError: boolean; error: unk
 
 function classifyStartFailure(error: unknown): { kind: FailureKind; message: string } {
   if (!isApiError(error) || error.status >= 500) return { kind: "AMBIGUOUS", message: "The Audit start outcome is uncertain." };
+  if (error.status === 409 && (error.code === "AUDIT_EXECUTION_APPOINTMENT_ALREADY_BOUND" || error.code === "AUDIT_EXECUTION_APPOINTMENT_INELIGIBLE")) return { kind: "DEFINITIVE", message: "The selected Audit Appointment is no longer available." };
   if (error.status === 409) return { kind: "DEFINITIVE", message: "This Audit intent conflicts with a previously submitted command." };
   if (error.status === 400 || error.status === 422) return { kind: "DEFINITIVE", message: "The Audit command was rejected as invalid." };
   if (error.status === 403 || error.status === 401) return { kind: "DEFINITIVE", message: "You are not authorized to start this Audit." };
-  if (error.status === 404) return { kind: "DEFINITIVE", message: "The selected Facility or template is unavailable." };
+  if (error.status === 404) return { kind: "DEFINITIVE", message: "The selected Facility, Audit Appointment, or template is unavailable." };
   return { kind: "AMBIGUOUS", message: "The Audit start outcome is uncertain." };
 }
 
