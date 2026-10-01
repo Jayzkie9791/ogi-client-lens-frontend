@@ -1,3 +1,5 @@
+import { humanizeDisplayCode } from "../ui/displayText";
+
 interface WorkflowLabelInput {
   label: string;
   to: string;
@@ -47,15 +49,9 @@ export function displayWorkflowActionLabel(transition: WorkflowLabelInput) {
 }
 
 export function displayReviewAuthority(authorityCode: string) {
-  return humanizeCode(authorityCode)
-    .replace(/\bOets\b/g, "OETS")
-    .replace(/\bOgi\b/g, "OGI");
+  return humanizeCode(authorityCode);
 }
 
 function humanizeCode(value: string) {
-  return value
-    .split(/[_\s-]+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
-    .join(" ");
+  return humanizeDisplayCode(value);
 }

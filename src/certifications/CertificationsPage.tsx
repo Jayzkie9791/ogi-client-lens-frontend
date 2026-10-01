@@ -1,4 +1,4 @@
-import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 
@@ -7,6 +7,7 @@ import { isApiError } from "../api/errors";
 import { useAuth } from "../auth/useAuth";
 import { Button } from "../ui/components/Button";
 import { Surface } from "../ui/components/Surface";
+import { humanizeDisplayCode } from "../ui/displayText";
 import { DigitalCertificateModal } from "../credentials/DigitalCertificateModal";
 import {
   CredentialsCertificationEndorsementProjection,
@@ -203,6 +204,7 @@ export function CertificationsPage() {
     useState<string | null>(null);
   const [digitalCertificateIssuanceId, setDigitalCertificateIssuanceId] =
     useState<string | null>(null);
+  const digitalCertificateTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const credentialsQuery = useQuery({
     queryKey: ["credentials", "certifications-workspace"],
@@ -233,7 +235,7 @@ export function CertificationsPage() {
   }, [registryEntries, searchParams]);
 
   useEffect(() => {
-    if (!selectedEntry || createMode) return;
+    if (!selectedEntry || createMode || digitalCertificateIssuanceId) return;
 
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -243,7 +245,7 @@ export function CertificationsPage() {
 
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [createMode, selectedEntry]);
+  }, [createMode, digitalCertificateIssuanceId, selectedEntry]);
   const selectedDetailQueryKey = [
     "credentials-personnel",
     selectedEntry?.staffMemberId,
@@ -739,9 +741,10 @@ export function CertificationsPage() {
                 issuanceHistory={issuanceHistoryQuery.data?.issuances ?? []}
                 issuanceHistoryError={issuanceHistoryQuery.error}
                 issuanceHistoryLoading={issuanceHistoryQuery.isLoading}
-                onViewDigitalCertificate={() => {
+                onViewDigitalCertificate={(trigger) => {
                   const currentIssuance = issuanceHistoryQuery.data?.issuances[0];
                   if (currentIssuance) {
+                    digitalCertificateTriggerRef.current = trigger;
                     setDigitalCertificateIssuanceId(currentIssuance.id);
                   }
                 }}
@@ -757,6 +760,7 @@ export function CertificationsPage() {
           <DigitalCertificateModal
             issuanceId={digitalCertificateIssuanceId}
             onClose={() => setDigitalCertificateIssuanceId(null)}
+            returnFocusElement={digitalCertificateTriggerRef.current}
           />
         ) : null}
       </section>
@@ -1000,7 +1004,7 @@ function CertificationDetailPanel({
   issuanceHistoryLoading: boolean;
   recentIssuedCredentialId: string | null;
   onSubmitEndorsement: (event: FormEvent<HTMLFormElement>) => void;
-  onViewDigitalCertificate: () => void;
+  onViewDigitalCertificate: (trigger: HTMLButtonElement) => void;
 }) {
   if (loading) {
     return (
@@ -1041,7 +1045,7 @@ function CertificationDetailPanel({
           <StatusBadge value={certification.certification_status} />
           {!issuanceHistoryLoading && !issuanceHistoryError && issuanceHistory.length > 0 ? (
             <Button
-              onClick={onViewDigitalCertificate}
+              onClick={(event) => onViewDigitalCertificate(event.currentTarget)}
               variant="secondary"
             >
               View Digital Certificate
@@ -2788,10 +2792,7 @@ function formatDate(value: string | null) {
 }
 
 function displayCode(value: string) {
-  return value
-    .split("_")
-    .map((part) => `${part.slice(0, 1)}${part.slice(1).toLowerCase()}`)
-    .join(" ");
+  return humanizeDisplayCode(value);
 }
 
 function yesNo(value: boolean) {

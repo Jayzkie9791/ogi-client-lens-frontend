@@ -1,3 +1,5 @@
+import { humanizeDisplayCode } from "../ui/displayText";
+
 export const auditStatuses = [
   "DRAFT",
   "IN_PROGRESS",
@@ -211,7 +213,7 @@ export function isAuditEligibleFacilityList(value: unknown): value is AuditEligi
 }
 
 export function displayCode(value: string) {
-  return value.toLowerCase().split("_").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
+  return humanizeDisplayCode(value);
 }
 
 export function formatDateTime(value: string) {

@@ -8,6 +8,7 @@ import { routes } from "../app/routePaths";
 import { useAuth } from "../auth/useAuth";
 import { Button } from "../ui/components/Button";
 import { Surface } from "../ui/components/Surface";
+import { humanizeDisplayCode } from "../ui/displayText";
 import { narrowOetsDefinition } from "./definitionGuards";
 import { isOetsDeveloperDiagnosticsEnabled } from "./developerDiagnostics";
 import {
@@ -2018,11 +2019,7 @@ function formatDateValue(value: string) {
   );
 }
 function humanizeCode(value: string) {
-  return value
-    .split(/[_\s-]+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
-    .join(" ");
+  return humanizeDisplayCode(value);
 }
 
 function readNonEmptyString(value: unknown) {

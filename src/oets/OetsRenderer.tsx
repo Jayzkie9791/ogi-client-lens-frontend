@@ -5,6 +5,7 @@ import { Link } from "react-router-dom";
 
 import { Button } from "../ui/components/Button";
 import { Surface } from "../ui/components/Surface";
+import { normalizeDisplayAcronyms } from "../ui/displayText";
 import {
   assembleEvidencePayload,
   createEvidenceStateFromPayload,
@@ -829,11 +830,11 @@ function OetsFieldControl({
         <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-component border border-transparent bg-blue-50/30 px-3 py-2 text-primary-navy hover:border-blue-200 hover:bg-blue-50 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60" htmlFor={id}>
           {renderControl(field, id, value, readOnly, onChange, authorityId)}
           <span className="font-semibold">
-            {field.label}
+            {normalizeDisplayAcronyms(field.label)}
             {field.required ? <span className="ml-1 text-state-error" aria-label="required">*</span> : null}
           </span>
         </label>
-        {field.description ? <span className="mt-1 block text-xs text-text-muted">{field.description}</span> : null}
+        {field.description ? <span className="mt-1 block text-xs text-text-muted">{normalizeDisplayAcronyms(field.description)}</span> : null}
         {authority ? <span className="mt-1 block text-xs font-medium text-primary-blue" id={authorityId}>{fieldAuthorityMessage(authority)}</span> : null}
         <ValidationMessages messages={localErrors} />
         {developerDiagnostics ? <ValidationMessages messages={errors} /> : errors?.length ? <span className="mt-2 block text-sm font-semibold text-state-error" role="alert">Review this field.</span> : null}
@@ -847,7 +848,7 @@ function OetsFieldControl({
       {renderControl(field, id, value, readOnly, onChange, authorityId)}
       {field.description ? (
         <span className="mt-1 block text-xs text-text-muted">
-          {field.description}
+          {normalizeDisplayAcronyms(field.description)}
         </span>
       ) : null}
       {authority ? <span className="mt-1 block text-xs font-medium text-primary-blue" id={authorityId}>{fieldAuthorityMessage(authority)}</span> : null}
@@ -876,7 +877,7 @@ function ValidationMessages({ messages }: { messages?: string[] }) {
 function FieldLabel({ field }: { field: OetsField }) {
   return (
     <span className="mb-2 block font-semibold text-primary-navy">
-      {field.label}
+      {normalizeDisplayAcronyms(field.label)}
       {field.required ? (
         <span className="ml-1 text-state-error" aria-label="required">
           *
@@ -906,7 +907,7 @@ function renderControl(
           disabled={readOnly}
           id={id}
           onChange={(event) => onChange(event.target.value || null)}
-          placeholder={field.placeholder}
+          placeholder={field.placeholder ? normalizeDisplayAcronyms(field.placeholder) : undefined}
           rows={3}
           value={stringValue}
         />
@@ -970,7 +971,7 @@ function renderInput(
       max={numeric ? maximum : undefined}
       min={numeric ? minimum : undefined}
       onChange={(event) => onChange(event.target.value || null)}
-      placeholder={field.placeholder}
+      placeholder={field.placeholder ? normalizeDisplayAcronyms(field.placeholder) : undefined}
       step={numeric ? (field.field_type === "NUMBER" ? 1 : "any") : undefined}
       type={type}
       value={value}
@@ -1050,7 +1051,7 @@ function renderSelect(
       <option value="">Select...</option>
       {orderedOptions(field).map((option) => (
         <option key={option.value} value={option.value}>
-          {option.label}
+          {normalizeDisplayAcronyms(option.label)}
         </option>
       ))}
     </select>
@@ -1073,7 +1074,7 @@ function renderMultiSelect(
 
   return (
     <fieldset aria-describedby={describedBy} aria-labelledby={`${id}-label`} className="grid gap-2 rounded-component border-2 border-[#9db3ca] bg-[#f3f7fc] p-3 shadow-sm sm:grid-cols-2" id={id}>
-      <legend className="sr-only" id={`${id}-label`}>{field.label}</legend>
+      <legend className="sr-only" id={`${id}-label`}>{normalizeDisplayAcronyms(field.label)}</legend>
       {orderedOptions(field).map((option) => {
         const checked = selectedValues.includes(option.value);
         return (
@@ -1085,7 +1086,7 @@ function renderMultiSelect(
               onChange={() => onChange(checked ? selectedValues.filter((item) => item !== option.value) : [...selectedValues, option.value])}
               type="checkbox"
             />
-            <span>{option.label}</span>
+            <span>{normalizeDisplayAcronyms(option.label)}</span>
           </label>
         );
       })}
@@ -1129,7 +1130,7 @@ function renderRadioGroup(
               onChange={() => onChange(option.value)}
               type="radio"
             />
-            {option.label}
+            {normalizeDisplayAcronyms(option.label)}
           </label>
         );
       })}
@@ -1146,7 +1147,7 @@ function UnsupportedField({
 }) {
   return (
     <div className="rounded-component border border-state-warning bg-elevated p-3 text-sm">
-      <p className="font-semibold text-text-primary">{field.label}</p>
+      <p className="font-semibold text-text-primary">{normalizeDisplayAcronyms(field.label)}</p>
       <p className="mt-1 text-text-muted">
         {reason} Field code: {field.field_code}.
       </p>

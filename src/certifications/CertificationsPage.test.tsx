@@ -1907,7 +1907,7 @@ describe("Certification workspace frontend", () => {
     const digitalCertificateButton = await screen.findByRole("button", {
       name: "View Digital Certificate"
     });
-    const backgroundRoot = digitalCertificateButton.closest("[data-testid='certifications-workspace']") ?? document.body.firstElementChild;
+    const backgroundRoot = document.body.firstElementChild;
     expect(backgroundRoot).not.toBeNull();
     const backgroundElement = backgroundRoot as HTMLElement;
     backgroundElement.inert = true;

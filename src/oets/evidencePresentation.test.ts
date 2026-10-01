@@ -19,6 +19,12 @@ describe("evidence presentation", () => {
     );
   });
 
+  it("normalizes ISI trademark casing in governed section metadata",()=>{
+    expect(formatEvidenceSectionTitle("Incident Severity Index (Isi™)")).toBe(
+      "Incident Severity Index (ISI™)",
+    );
+  });
+
   it("does not alter unrelated section titles", () => {
     expect(formatEvidenceSectionTitle("Operational Skills Assessment")).toBe(
       "Operational Skills Assessment",

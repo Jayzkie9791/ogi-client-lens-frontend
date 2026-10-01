@@ -7,6 +7,7 @@ import {
   useState,
 } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { humanizeDisplayCode } from "../ui/displayText";
 
 import {
   listRegistrationClients,
@@ -1730,10 +1731,5 @@ function Summary({ label: term, value }: { label: string; value: string }) {
 }
 
 function formatTrainingType(value: TrainingType | "") {
-  return value
-    ? value
-        .split("_")
-        .map((word) => word[0] + word.slice(1).toLowerCase())
-        .join(" ")
-    : "Not confirmed";
+  return value ? humanizeDisplayCode(value) : "Not confirmed";
 }

@@ -7,6 +7,7 @@ import { useAuth } from "../auth/useAuth";
 import { isApiError } from "../api/errors";
 import { Button } from "../ui/components/Button";
 import { Surface } from "../ui/components/Surface";
+import { humanizeDisplayCode } from "../ui/displayText";
 import {
   displayLifecycleStatus,
   displayReviewAuthority
@@ -446,10 +447,6 @@ function formatQueueDate(value: string) {
 }
 
 function humanizeTemplateCode(value: string) {
-  return value
-    .replace(/^OGI_/, "")
-    .replace(/_/g, " ")
-    .replace(/\bF(\d{1,3})\b/, (_, digits: string) => `F-${digits.padStart(3, "0")}`)
-    .toLowerCase()
-    .replace(/\b\w/g, (character) => character.toUpperCase());
+  return humanizeDisplayCode(value.replace(/^OGI_/, ""))
+    .replace(/\bF(\d{1,3})\b/, (_, digits: string) => `F-${digits.padStart(3, "0")}`);
 }

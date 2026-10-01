@@ -1392,7 +1392,7 @@ describe("Registration Training frontend", () => {
     expect(coverage).not.toHaveTextContent("Incident Documentation");
     const focus = screen.getByRole("combobox", { name: /Primary Session Focus/ });
     expect(within(focus).queryByRole("option", { name: "Technical Rescue" })).not.toBeInTheDocument();
-    expect(within(focus).getByRole("option", { name: "Cpr Aed" })).toBeInTheDocument();
+    expect(within(focus).getByRole("option", { name: "CPR AED" })).toBeInTheDocument();
     expect(screen.queryByText("Trainee Records")).not.toBeInTheDocument();
     await user.type(screen.getByLabelText("Starts"), "2026-09-01T08:00");
     await user.selectOptions(screen.getByLabelText("Facility"), trainingFacility.id);

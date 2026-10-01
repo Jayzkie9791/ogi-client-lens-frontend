@@ -6,6 +6,7 @@ import { isApiError } from "../../api/errors";
 import { useAuth } from "../../auth/useAuth";
 import { Button } from "../../ui/components/Button";
 import { Surface } from "../../ui/components/Surface";
+import { humanizeDisplayCode } from "../../ui/displayText";
 import { routes } from "../routePaths";
 import {
   listOetsTemplateCatalog,
@@ -286,11 +287,7 @@ function purposeFromTitle(title: string) {
 }
 
 function humanizeCode(value: string) {
-  return value
-    .replace(/[_-]+/g, " ")
-    .trim()
-    .toLocaleLowerCase()
-    .replace(/\b\w/g, (character) => character.toLocaleUpperCase());
+  return humanizeDisplayCode(value);
 }
 
 function CatalogErrorState({ error }: { error: Error }) {

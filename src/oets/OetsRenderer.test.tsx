@@ -2600,7 +2600,7 @@ describe("Generic OETS renderer", () => {
     expect(screen.getByLabelText("Email Field")).toHaveAttribute("type", "email");
     expect(screen.getByLabelText("Phone Field")).toHaveAttribute("type", "tel");
     expect(screen.getByLabelText("Time Field")).toHaveAttribute("type", "time");
-    expect(screen.getByLabelText("Url Field")).toHaveAttribute("type", "url");
+    expect(screen.getByLabelText("URL Field")).toHaveAttribute("type", "url");
     expect(
       screen.getByText(/Governed attestation metadata is not configured/)
     ).toBeInTheDocument();

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { Button } from "../ui/components/Button";
+import { normalizeDisplayAcronyms } from "../ui/displayText";
 import {
   AttestationPurpose,
   AttestationSignerMode,
@@ -70,7 +71,7 @@ export function GovernedAttestationControl({
     if (containment) {
       return (
         <div className="rounded-component border border-amber-300 bg-amber-50 p-4 text-sm">
-          <p className="font-semibold text-text-primary">{field.label}</p>
+          <p className="font-semibold text-text-primary">{normalizeDisplayAcronyms(field.label)}</p>
           <p className="mt-1 font-semibold text-amber-900">Governed artifact deferred</p>
           <p className="mt-1 text-text-muted">{containment.reason}</p>
           <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-text-muted">
@@ -81,7 +82,7 @@ export function GovernedAttestationControl({
     }
     return (
       <div className="rounded-component border border-border bg-elevated p-3 text-sm">
-        <p className="font-semibold text-text-primary">{field.label}</p>
+        <p className="font-semibold text-text-primary">{normalizeDisplayAcronyms(field.label)}</p>
         <p className="mt-1 text-text-muted">
           Governed attestation metadata is not configured for this historical template field.
         </p>
@@ -92,7 +93,7 @@ export function GovernedAttestationControl({
   return (
     <fieldset className="space-y-3 rounded-component border border-border bg-elevated p-4">
       <legend className="px-1 font-semibold text-text-primary">
-        {field.label}{field.required ? " *" : ""}
+        {normalizeDisplayAcronyms(field.label)}{field.required ? " *" : ""}
       </legend>
       <div className="space-y-1 text-sm">
         <p className="font-semibold text-text-primary">Attestation statement</p>
@@ -104,7 +105,7 @@ export function GovernedAttestationControl({
       </div>
 
       {matching.length ? (
-        <div className="space-y-2" aria-label={`${field.label} attestation history`}>
+        <div className="space-y-2" aria-label={`${normalizeDisplayAcronyms(field.label)} attestation history`}>
           {[...matching].reverse().map((item) => (
             <AttestationSnapshot item={item} key={item.id} />
           ))}

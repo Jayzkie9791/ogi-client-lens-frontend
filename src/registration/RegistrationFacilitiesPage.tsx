@@ -9,6 +9,7 @@ import { Button } from "../ui/components/Button";
 import { Surface } from "../ui/components/Surface";
 import { RecordAccordion } from "../ui/components/RecordAccordion";
 import { WorkspaceShell } from "../ui/components/WorkspaceShell";
+import { humanizeDisplayCode } from "../ui/displayText";
 import {
   listRegistrationClients,
   RegistrationClient
@@ -756,10 +757,7 @@ function clientLabel(clientId: string, clientNameById: Map<string, string>) {
 }
 
 function displayCode(value: string) {
-  return value
-    .split("_")
-    .map((part) => `${part.slice(0, 1)}${part.slice(1).toLowerCase()}`)
-    .join(" ");
+  return humanizeDisplayCode(value);
 }
 
 function nullableText(value: string) {

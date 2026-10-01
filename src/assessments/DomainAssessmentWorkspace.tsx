@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Button } from "../ui/components/Button";
 import { Link } from "react-router-dom";
 import { routes } from "../app/routePaths";
+import { humanizeDisplaySentence } from "../ui/displayText";
 
 import {
   approveDomainReview,
@@ -212,7 +213,7 @@ export function EligibleEvidenceChoices({ busy, candidates, formCode, selectedId
 
 function message(error: unknown) { return error instanceof Error ? error.message : "The governed Domain Assessment action failed."; }
 function reviewStorageKey(assessmentId: string) { return `client-lens:domain-assessment-review:${assessmentId}`; }
-function humanizeState(value: string) { return value.toLowerCase().replaceAll("_", " ").replace(/^./, (letter) => letter.toUpperCase()); }
+function humanizeState(value: string) { return humanizeDisplaySentence(value); }
 export function shortEvidenceReference(value: string) { return value.length <= 8 ? value : `…${value.slice(-8)}`; }
 export function describeDomainCandidate(formCode: string, candidate: DomainCandidate) {
   const lifecycle = candidate.lifecycleState ? humanizeState(candidate.lifecycleState) : humanizeState(candidate.sourceKind);

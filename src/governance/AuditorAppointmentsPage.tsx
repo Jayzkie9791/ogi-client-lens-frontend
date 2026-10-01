@@ -7,6 +7,7 @@ import type { RegistrationClient } from "../registration/registrationClientApi";
 import type { RegistrationFacility } from "../registration/registrationFacilityApi";
 import { listRegistrationPersonnel, type RegistrationPersonnel } from "../registration/registrationPersonnelApi";
 import { Button } from "../ui/components/Button";
+import { humanizeDisplayCode } from "../ui/displayText";
 import { RecordAccordion } from "../ui/components/RecordAccordion";
 import { WorkflowContentCard, WorkflowModal } from "../ui/components/WorkflowModal";
 import { WorkspaceShell } from "../ui/components/WorkspaceShell";
@@ -61,5 +62,5 @@ function Field({label,children}:{label:string;children:ReactNode}){return <label
 function Fact({label,value}:{label:string;value:string}){return <div><p className="text-xs font-bold uppercase tracking-wide text-primary-blue">{label}</p><p className="mt-1 text-sm font-medium text-primary-navy">{value}</p></div>}
 function Status({value}:{value:string}){const tone=value==="ACTIVE"?"border-emerald-300 bg-emerald-50 text-emerald-800":value==="PENDING"?"border-amber-300 bg-amber-50 text-amber-800":"border-slate-300 bg-slate-50 text-slate-700";return <span className={`w-fit rounded-full border px-3 py-1 text-xs font-bold ${tone}`}>{friendly(value)}</span>}
 function Unavailable(){return <div className="rounded-panel border border-amber-300 bg-amber-50 p-6"><h2 className="font-semibold text-primary-navy">Auditor Appointments is not available yet</h2><p className="mt-2 text-sm text-text-muted">The page is installed, but the current database or session does not yet expose the appointment service. Deploy the approved migration and refresh the session permissions.</p></div>}
-function friendly(value:string){return value.toLowerCase().replaceAll("_"," ").replace(/(^|\s)\S/g,c=>c.toUpperCase())}
+function friendly(value:string){return humanizeDisplayCode(value)}
 function dateLabel(value:string){const d=new Date(value.length===10?`${value}T00:00:00`:value);return Number.isNaN(d.valueOf())?value:new Intl.DateTimeFormat(undefined,{dateStyle:"medium"}).format(d)}

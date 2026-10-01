@@ -41,6 +41,11 @@ export function PersonnelRegistrationPage() {
     void queryClient.invalidateQueries({ queryKey: ["personnel-registration-intent"] });
     queryClient.setQueryData(["latest-registered-personnel"], personnelId);
   };
+  const cancelled = () => {
+    setMode(null);
+    setMessage("Personnel registration cancelled.");
+    void queryClient.invalidateQueries({ queryKey: ["personnel-registration-intent"] });
+  };
 
   return <RegistrationWorkspaceShell
     description="Create Personnel records through the authorized registration workflow."
@@ -51,7 +56,7 @@ export function PersonnelRegistrationPage() {
     {message ? <Surface role="status"><p className="font-semibold text-text-primary">{message}</p><Link className="mt-3 inline-flex font-semibold text-primary-blue underline" to={routes.personnelMasterlist}>Open Personnel Masterlist</Link></Surface> : null}
     {canInviteNewLifeguard ? <Surface><InviteLifeguardPanel clients={clients} initialClientId={auth.session?.clientId ?? clients[0]?.id ?? ""} /></Surface> : null}
     {!mode ? <Surface><h2 className="text-lg font-semibold text-primary-navy">Choose a registration action</h2><p className="mt-2 text-sm leading-6 text-text-muted">Registration creates a Personnel record. Existing Personnel records are reviewed and maintained in the Workforce masterlist.</p></Surface> : null}
-    {mode === "CLIENT" ? <ClientPersonnelRegistrationWizard clients={clients} initialClientId={auth.session?.clientId ?? clients[0]?.id ?? ""} onCancel={() => setMode(null)} onComplete={(personnel) => finish(personnel.id, "Personnel registration completed successfully.")} /> : null}
+    {mode === "CLIENT" ? <ClientPersonnelRegistrationWizard clients={clients} initialClientId={auth.session?.clientId ?? clients[0]?.id ?? ""} onCancelled={cancelled} onClose={() => setMode(null)} onComplete={(personnel) => finish(personnel.id, "Personnel registration completed successfully.")} /> : null}
     {mode === "OGI" ? <OgiPersonnelCreatePanel onCancel={() => setMode(null)} onCreated={(personnel) => finish(personnel.id, "OGI Personnel registration completed successfully.")} /> : null}
   </RegistrationWorkspaceShell>;
 }

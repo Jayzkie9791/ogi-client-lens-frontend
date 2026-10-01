@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
 import { isApiError } from "../api/errors";
+import { humanizeDisplayCode } from "../ui/displayText";
 import { routes } from "../app/routePaths";
 import { useAuth } from "../auth/useAuth";
 import { createCertificationFromReadiness } from "../certifications/certificationsApi";
@@ -3629,11 +3630,7 @@ function formatDateTime(value: string | null) {
 }
 
 function humanizeCode(value: string) {
-  return value
-    .toLowerCase()
-    .split("_")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
+  return humanizeDisplayCode(value);
 }
 
 function nullableText(value: string) {

@@ -1,13 +1,13 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ClientPersonnelRegistrationWizard } from "./ClientPersonnelRegistrationWizard";
 
 const api = vi.hoisted(() => ({
-  open: vi.fn(), save: vi.fn(), facilities: vi.fn(), createPersonnel: vi.fn(),
+  open: vi.fn(), save: vi.fn(), cancel: vi.fn(), facilities: vi.fn(), createPersonnel: vi.fn(),
   updatePersonnel: vi.fn(), assignments: vi.fn(), createAssignment: vi.fn()
 }));
-vi.mock("./personnelRegistrationJourneyApi", () => ({ openPersonnelRegistrationIntent: api.open, savePersonnelRegistrationIntent: api.save }));
+vi.mock("./personnelRegistrationJourneyApi", () => ({ cancelPersonnelRegistrationIntent: api.cancel, openPersonnelRegistrationIntent: api.open, savePersonnelRegistrationIntent: api.save }));
 vi.mock("./registrationFacilityApi", () => ({ listRegistrationFacilities: api.facilities }));
 vi.mock("./registrationPersonnelApi", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./registrationPersonnelApi")>()),
@@ -33,7 +33,7 @@ function renderSavedReview(savedDraft: Record<string, unknown>) {
   api.open.mockResolvedValue({ id: "intent-1", personnel_id: null, client_id: "client-1", status: "IN_PROGRESS", current_step: "REVIEW", draft: savedDraft, version: 1, completed_at: null, created_at: "", updated_at: "" });
   const onComplete = vi.fn();
   render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-    <ClientPersonnelRegistrationWizard clients={[{ id: "client-1", organization_name: "Client One", status: "ACTIVE", created_at: "", updated_at: "" }]} initialClientId="client-1" onCancel={vi.fn()} onComplete={onComplete} />
+    <ClientPersonnelRegistrationWizard clients={[{ id: "client-1", organization_name: "Client One", status: "ACTIVE", created_at: "", updated_at: "" }]} initialClientId="client-1" onCancelled={vi.fn()} onClose={vi.fn()} onComplete={onComplete} />
   </QueryClientProvider>);
   return onComplete;
 }
@@ -44,7 +44,38 @@ beforeEach(() => {
   api.assignments.mockResolvedValue({ assignments: [] });
   api.createPersonnel.mockResolvedValue(person);
   api.createAssignment.mockResolvedValue({ id: "assignment-1" });
+  api.cancel.mockResolvedValue({ id: "intent-1", personnel_id: null, client_id: "client-1", status: "CANCELLED", current_step: "PERSONNEL_TYPE", draft, version: 2, completed_at: null, created_at: "", updated_at: "" });
   api.save.mockImplementation(async (_id, input) => ({ id: "intent-1", personnel_id: input.personnel_id ?? null, client_id: "client-1", status: "IN_PROGRESS", current_step: input.current_step, draft: input.draft, version: input.version + 1, completed_at: null, created_at: "", updated_at: "" }));
+});
+
+afterEach(()=>vi.restoreAllMocks());
+
+describe("Personnel registration exit lifecycle", () => {
+  it("cancels an in-progress intent only after confirmation", async () => {
+    api.open.mockResolvedValue({ id: "intent-1", personnel_id: null, client_id: "client-1", status: "IN_PROGRESS", current_step: "PERSONNEL_TYPE", draft, version: 1, completed_at: null, created_at: "", updated_at: "" });
+    const onCancelled=vi.fn(), onClose=vi.fn();
+    vi.spyOn(window,"confirm").mockReturnValue(true);
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <ClientPersonnelRegistrationWizard clients={[{ id: "client-1", organization_name: "Client One", status: "ACTIVE", created_at: "", updated_at: "" }]} initialClientId="client-1" onCancelled={onCancelled} onClose={onClose} onComplete={vi.fn()} />
+    </QueryClientProvider>);
+
+    fireEvent.click(await screen.findByRole("button",{name:"Cancel registration"}));
+    await waitFor(()=>expect(onCancelled).toHaveBeenCalledTimes(1));
+    expect(api.cancel).toHaveBeenCalledWith("intent-1",1);
+    expect(api.save).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("keeps cancellation inert when confirmation is declined", async () => {
+    api.open.mockResolvedValue({ id: "intent-1", personnel_id: null, client_id: "client-1", status: "IN_PROGRESS", current_step: "PERSONNEL_TYPE", draft, version: 1, completed_at: null, created_at: "", updated_at: "" });
+    vi.spyOn(window,"confirm").mockReturnValue(false);
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <ClientPersonnelRegistrationWizard clients={[{ id: "client-1", organization_name: "Client One", status: "ACTIVE", created_at: "", updated_at: "" }]} initialClientId="client-1" onCancelled={vi.fn()} onClose={vi.fn()} onComplete={vi.fn()} />
+    </QueryClientProvider>);
+
+    fireEvent.click(await screen.findByRole("button",{name:"Cancel registration"}));
+    expect(api.cancel).not.toHaveBeenCalled();
+  });
 });
 
 describe("IS-1B saved Personnel registration duty revalidation", () => {

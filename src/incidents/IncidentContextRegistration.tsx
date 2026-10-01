@@ -2,6 +2,7 @@ import {type FormEvent,type ReactNode,useState} from "react";
 import {useMutation} from "@tanstack/react-query";
 import {isApiError} from "../api/errors";
 import {Button} from "../ui/components/Button";
+import {humanizeDisplayCode} from "../ui/displayText";
 import {createIncident,incidentCategories,incidentSeverities,incidentTypes,type CreateIncidentRequest,type CreatedIncident} from "./incidentApi";
 
 export function IncidentContextRegistration({facilityId,disabled,onCreated}:{readonly facilityId:string;readonly disabled:boolean;readonly onCreated:(incident:CreatedIncident)=>void}){
@@ -25,4 +26,4 @@ const control="mt-2 min-h-10 w-full rounded-component border border-border bg-wh
 function Field({label,children}:{label:string;children:ReactNode}){return <label className="text-sm font-semibold text-primary-navy">{label}{children}</label>}
 function Select({label,value,values,set}:{label:string;value:string;values:readonly string[];set:(value:string)=>void}){return <Field label={label}><select className={control} value={value} onChange={(e)=>set(e.currentTarget.value)}>{values.map((item)=><option key={item} value={item}>{friendly(item)}</option>)}</select></Field>}
 function Check({label,checked,set}:{label:string;checked:boolean;set:(value:boolean)=>void}){return <label className="flex items-center gap-2 text-sm text-primary-navy"><input checked={checked} type="checkbox" onChange={(e)=>set(e.currentTarget.checked)}/>{label}</label>}
-function friendly(value:string){return value.toLowerCase().split("_").map((part)=>part.charAt(0).toUpperCase()+part.slice(1)).join(" ");}
+function friendly(value:string){return humanizeDisplayCode(value);}

@@ -1,3 +1,5 @@
+import { humanizeDisplayCode } from "../ui/displayText";
+
 export function formatRegistrationDateTime(value: string | null | undefined) {
   if (!value) {
     return "Not recorded";
@@ -50,8 +52,5 @@ export function formatRegistrationDate(value: string | null | undefined) {
 }
 
 export function displayRegistrationCode(value: string) {
-  return value
-    .split("_")
-    .map((part) => `${part.slice(0, 1)}${part.slice(1).toLowerCase()}`)
-    .join(" ");
+  return humanizeDisplayCode(value);
 }

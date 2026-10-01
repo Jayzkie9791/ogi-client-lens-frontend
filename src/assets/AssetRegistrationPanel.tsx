@@ -2,6 +2,7 @@ import { type FormEvent,type ReactNode,useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { isApiError } from "../api/errors";
 import { Button } from "../ui/components/Button";
+import { humanizeDisplayCode } from "../ui/displayText";
 import { assetCategories,createAsset,type AssetCategory,type AssetRegistryRecord } from "./assetRegistryApi";
 
 const initial={name:"",category:"RESCUE_EQUIPMENT" as AssetCategory,subtype:"",manufacturer:"",model:"",serial:"",location:"",custodian:"",serviceDate:""};
@@ -18,4 +19,4 @@ export function AssetRegistrationPanel({facilityId,disabled=false,onCreated}:{re
 }
 const control="mt-2 min-h-10 w-full rounded-component border border-border bg-white px-3 py-2 text-sm";
 function Field({label,children}:{label:string;children:ReactNode}){return <label className="text-sm font-semibold text-primary-navy">{label}{children}</label>}
-function friendly(value:string){return value.toLowerCase().split("_").map(part=>part.charAt(0).toUpperCase()+part.slice(1)).join(" ");}
+function friendly(value:string){return humanizeDisplayCode(value);}

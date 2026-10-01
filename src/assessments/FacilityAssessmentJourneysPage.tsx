@@ -16,6 +16,7 @@ import { WorkspaceShell } from "../ui/components/WorkspaceShell";
 import { AssetFormCompleteness, calculateFacilityOri, EquipmentInspectionProgramsFormCompleteness, EquipmentInspectionProgramsJourneyFormCode, getEquipmentInspectionProgramsFormCompleteness, CertificationFormCompleteness, FacilityEnvironmentalSafetyFormCompleteness, FacilityWorkforceAuthority, FindingFormCompleteness, getAssetFormCompleteness, getCertificationFormCompleteness, getCurrentFacilityOri, getDomainAssessmentDetail, getF081AssetFormCompleteness, getF083FindingFormCompleteness, getFacilityEnvironmentalSafetyFormCompleteness, getFacilityOriHistory, getFacilityOriReadiness, getFacilityWorkforceAuthority, getIncidentFormCompleteness, getPersonnelFormCompleteness, getPublicSafetySystemsFormCompleteness, getTrainingCompetencyFormCompleteness, IncidentFormCompleteness, OriReadiness, OriReadinessSource, OriResult, PersonnelFormCompleteness, PublicSafetySystemsJourneyFormCode, TrainingCompetencyFormCompleteness, TrainingCompetencyJourneyFormCode } from "./facilityAssessmentApi";
 import { DomainAssessmentWorkspace } from "./DomainAssessmentWorkspace";
 import { AssetApplicabilityPanel } from "../assets/AssetApplicabilityPanel";
+import { humanizeDisplayCode } from "../ui/displayText";
 
 type AssetJourneyFormCode="F081"|"F082"|"F084"|"F085"|"F086"|"F087"|"F088"|"F089";
 
@@ -513,7 +514,7 @@ function templateMatchesFormCode(template: OetsTemplateCatalogItem, formCode: st
     || new RegExp(`(?:^|_)F0*${Number(digits)}(?:_|$)`, "i").test(template.template_code);
 }
 
-function humanize(value: string) { return value.toLowerCase().replaceAll("_", " ").replace(/^./, (letter) => letter.toUpperCase()); }
+function humanize(value: string) { return humanizeDisplayCode(value); }
 
 function currentLocalDate() {
   const now = new Date();

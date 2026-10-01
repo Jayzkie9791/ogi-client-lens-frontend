@@ -12,6 +12,7 @@ import { listRecentTrainingRegistrations, TrainingEnrollment } from "../../train
 import { Button } from "../../ui/components/Button";
 import { Surface } from "../../ui/components/Surface";
 import { WorkspaceShell } from "../../ui/components/WorkspaceShell";
+import { humanizeDisplayCode } from "../../ui/displayText";
 
 interface OverviewAction {
   description: string;
@@ -292,7 +293,8 @@ function formatOverviewDate(value: string) {
 }
 
 function humanizeCode(value: string) {
-  return value.replace(/^OGI_/, "").replaceAll("_", " ").replace(/\bF(\d{1,3})\b/, (_, digits: string) => `F-${digits.padStart(3, "0")}`).toLowerCase().replace(/\b\w/g, (character) => character.toUpperCase());
+  return humanizeDisplayCode(value.replace(/^OGI_/, ""))
+    .replace(/\bF(\d{1,3})\b/, (_, digits: string) => `F-${digits.padStart(3, "0")}`);
 }
 
 function AuthorizationContext({ session }: { session: AuthenticatedSession }) {

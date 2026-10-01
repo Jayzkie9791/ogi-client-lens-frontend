@@ -1,24 +1,14 @@
+import { humanizeDisplayCode, normalizeDisplayAcronyms } from "../ui/displayText";
+
 export function humanizeEvidenceTemplateCode(value: string) {
-  return normalizeEvidenceAcronyms(value
-    .replace(/^OGI_/, "")
-    .split("_")
-    .map((part) => (/^F\d+$/.test(part) ? part : `${part.charAt(0)}${part.slice(1).toLowerCase()}`))
-    .join(" "));
+  return humanizeDisplayCode(value.replace(/^OGI_/, ""));
 }
 
 export function formatEvidenceSectionTitle(value: string) {
-  return normalizeEvidenceAcronyms(value)
-    .replace(/\bOcs™/g, "OCS™")
-    .replace(/\bOks™/g, "OKS™");
+  return normalizeEvidenceAcronyms(value);
 }
 
-function normalizeEvidenceAcronyms(value: string) {
-  return value
-    .replace(/\bArmaa\b/gi, "ARMAA")
-    .replace(/\bOdis\b/gi, "ODIS")
-    .replace(/\bAri\b/gi, "ARI")
-    .replace(/\bOgi\b/gi, "OGI");
-}
+const normalizeEvidenceAcronyms = normalizeDisplayAcronyms;
 
 export function evidenceSectionGuidance(sectionCode: string) {
   const f003Domains = new Set(["OPERATIONAL_GOVERNANCE", "LIFEGUARD_OPERATIONS", "EMERGENCY_PREPAREDNESS", "FACILITY_OPERATIONS", "EQUIPMENT_READINESS", "TRAINING_COMPLIANCE", "DOCUMENTATION_COMPLIANCE", "INCIDENT_MANAGEMENT", "CORRECTIVE_ACTION_MANAGEMENT", "ENVIRONMENTAL_RISK_MANAGEMENT"]);

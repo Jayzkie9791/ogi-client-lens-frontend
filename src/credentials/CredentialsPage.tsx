@@ -8,6 +8,7 @@ import { CertificationWorkspaceTabs } from "../certifications/CertificationWorks
 import { useAuth } from "../auth/useAuth";
 import { Button } from "../ui/components/Button";
 import { Surface } from "../ui/components/Surface";
+import { humanizeDisplayCode } from "../ui/displayText";
 import {
   credentialsCertificationStatuses,
   CredentialsCertificationStatus,
@@ -660,10 +661,7 @@ function formatDate(value: string | null) {
 }
 
 function displayCode(value: string) {
-  return value
-    .split("_")
-    .map((part) => `${part.slice(0, 1)}${part.slice(1).toLowerCase()}`)
-    .join(" ");
+  return humanizeDisplayCode(value);
 }
 
 function yesNo(value: boolean) {

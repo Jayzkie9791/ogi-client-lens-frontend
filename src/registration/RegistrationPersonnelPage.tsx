@@ -10,6 +10,7 @@ import { listTrainingEnrollments, listTrainingTrainees, TrainingEnrollment } fro
 import { Button } from "../ui/components/Button";
 import { Surface } from "../ui/components/Surface";
 import { WorkspaceShell } from "../ui/components/WorkspaceShell";
+import { humanizeDisplayCode } from "../ui/displayText";
 import { RecordAccordion } from "../ui/components/RecordAccordion";
 import {
   listRegistrationClients,
@@ -1051,10 +1052,7 @@ function personnelAffiliation(staffMember: RegistrationPersonnel): "CLIENT" | "O
 }
 
 function displayCode(value: string) {
-  return value
-    .split("_")
-    .map((part) => `${part.slice(0, 1)}${part.slice(1).toLowerCase()}`)
-    .join(" ");
+  return humanizeDisplayCode(value);
 }
 
 function nullableText(value: string) {

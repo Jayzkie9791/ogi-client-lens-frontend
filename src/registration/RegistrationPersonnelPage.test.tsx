@@ -613,6 +613,8 @@ describe("Registration Personnel frontend", () => {
           staff_member_id: createdStaffMember.id,
           facility_id: facilityB.id,
           assignment_status: "ACTIVE",
+          position_title: "Lifeguard",
+          duty_code: "OPERATIONAL_LIFEGUARD",
           assigned_from: "2026-06-01",
           assigned_to: null,
           is_primary_assignment: true,
