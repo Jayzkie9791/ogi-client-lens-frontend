@@ -42,6 +42,8 @@ const FacilityTeamPage = lazy(() => import("../authorized-workforce/FacilityTeam
 const FacilityTeamMemberPage = lazy(() => import("../authorized-workforce/FacilityTeamPage").then((module) => ({ default: module.FacilityTeamMemberPage })));
 const FacilityTeamCertificatePage = lazy(() => import("../authorized-workforce/FacilityTeamPage").then((module) => ({ default: module.FacilityTeamCertificatePage })));
 const InserviceWorkspacePage = lazy(() => import("../inservice/InserviceWorkspacePage").then((module) => ({ default: module.InserviceWorkspacePage })));
+const ExecutivePresentationPage = lazy(() => import("../executive-findings/ExecutivePresentationPage").then((module) => ({ default: module.ExecutivePresentationPage })));
+const ExecutivePresentationAuthoringPage = lazy(() => import("../executive-presentation/ExecutivePresentationAuthoringPage").then((module) => ({ default: module.ExecutivePresentationAuthoringPage })));
 
 function lazyRoute(element: ReactNode) {
   return <Suspense fallback={<p role="status">Loading workspace.</p>}>{element}</Suspense>;
@@ -73,6 +75,14 @@ export const appRoutes: RouteObject[] = [
     path: routes.home,
     element: <RequireAuth />,
     children: [
+      {
+        path: "operational-risk-index/:ariResultId/presentation",
+        element: lazyRoute(<ExecutivePresentationPage />)
+      },
+      {
+        path: "operational-risk-index/:ariResultId/presentation/author",
+        element: lazyRoute(<ExecutivePresentationAuthoringPage />)
+      },
       {
         element: <AppShell />,
         children: [

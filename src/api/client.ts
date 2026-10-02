@@ -14,6 +14,12 @@ interface ApiRequestOptions<T> {
   validate: (value: unknown) => value is T;
 }
 
+export interface ApiResponse<T> {
+  data: T;
+  headers: Headers;
+  status: number;
+}
+
 interface ApiBlobRequestOptions {
   auth?: boolean;
   cache?: RequestCache;
@@ -36,6 +42,37 @@ export async function apiRequest<T>(
   options: ApiRequestOptions<T>
 ): Promise<T> {
   return requestOnce(path, options, false);
+}
+
+export async function apiRequestWithMetadata<T>(
+  path: string,
+  options: ApiRequestOptions<T>
+): Promise<ApiResponse<T>> {
+  return requestWithMetadataOnce(path, options, false);
+}
+
+async function requestWithMetadataOnce<T>(
+  path: string,
+  options: ApiRequestOptions<T>,
+  didRetry: boolean
+): Promise<ApiResponse<T>> {
+  const response = await fetch(buildUrl(path), {
+    method: options.method ?? "GET",
+    headers: buildHeaders(options),
+    body: options.body === undefined ? undefined : options.body instanceof FormData ? options.body : JSON.stringify(options.body)
+  });
+
+  if (response.status === 401 && options.auth !== false && !didRetry && authRuntime) {
+    const token = await refreshAccessTokenSingleFlight();
+    if (token) return requestWithMetadataOnce(path, options, true);
+    authRuntime.onAuthFailure();
+  }
+  if (!response.ok) throw await normalizeError(response);
+  const payload = await readJson(response);
+  if (!options.validate(payload)) {
+    throw new ApiError({ code: "MALFORMED_RESPONSE", message: "The server returned an unexpected response.", status: response.status, details: payload });
+  }
+  return { data: payload, headers: response.headers, status: response.status };
 }
 
 export async function apiBlobRequest(

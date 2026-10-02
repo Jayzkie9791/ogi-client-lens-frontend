@@ -44,6 +44,12 @@ export const routes = {
   facilityTeamCertificatePath: (issuanceId: string) =>
     `/workbench/workforce/facility-team/certificates/${encodeURIComponent(issuanceId)}`,
   facilityAssessmentJourneys: "/workbench/assessments/facility-journeys",
+  operationalRiskIndexPresentation: "/operational-risk-index/:ariResultId/presentation",
+  operationalRiskIndexPresentationPath: (ariResultId: string) =>
+    `/operational-risk-index/${encodeURIComponent(ariResultId)}/presentation`,
+  operationalRiskIndexPresentationAuthoring: "/operational-risk-index/:ariResultId/presentation/author",
+  operationalRiskIndexPresentationAuthoringPath: (ariResultId: string) =>
+    `/operational-risk-index/${encodeURIComponent(ariResultId)}/presentation/author`,
   personnelProfilePath: (staffMemberId: string) =>
     `/workbench/workforce/personnel?personnel=${encodeURIComponent(staffMemberId)}`,
   registrationTraining: "/workbench/training/trainees",
