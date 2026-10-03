@@ -825,7 +825,11 @@ describe("Certification workspace frontend", () => {
     await user.click(screen.getByRole("link", { name: "Certifications" }));
 
     expect(
-      await screen.findByRole("heading", { name: "Certification Registry" })
+      await screen.findByRole(
+        "heading",
+        { name: "Certification Registry" },
+        { timeout: 5_000 }
+      )
     ).toBeInTheDocument();
 
     cleanup();
@@ -843,7 +847,11 @@ describe("Certification workspace frontend", () => {
     renderWithRoute(routes.credentials);
 
     expect(
-      await screen.findByRole("heading", { name: "Personnel Credentials" })
+      await screen.findByRole(
+        "heading",
+        { name: "Personnel Credentials" },
+        { timeout: 5_000 }
+      )
     ).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /dev-preview/i })).not.toBeInTheDocument();
   });

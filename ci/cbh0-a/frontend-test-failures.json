@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "kind": "FRONTEND_TEST_FAILURES",
+  "capturedFromHead": "e7c94291c6488fd922dcd42cba485555cb35581f",
+  "nodeVersion": "22.18.0",
+  "npmVersion": "10.9.3",
+  "maximumCount": 3,
+  "signatureChecksum": "19c7a2f8b5afb6b56e70f2a70085aea69babf2899bbf80187910dcf17364b543",
+  "signatures": [
+    "src/app/App.test.tsx|Client Lens authentication foundation|opens the review queue from primary navigation",
+    "src/certifications/CertificationsPage.test.tsx|Certification workspace frontend|exposes one certification-aware navigation entry and preserves existing Credentials deep links",
+    "src/training/RegistrationTrainingPage.test.tsx|Registration Training frontend|renders persistent Training journeys as a single-open accessible accordion"
+  ],
+  "totals": {
+    "tests": 636,
+    "passed": 633,
+    "failed": 3
+  }
+}

@@ -3,7 +3,19 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "packageManager": "npm@10.9.3",
+  "engines": {
+    "node": ">=22.18.0 <23",
+    "npm": ">=10.9.3 <11"
+  },
   "scripts": {
+    "cbh:toolchain": "node scripts/ci/verify-toolchain.mjs",
+    "cbh:ratchet:test": "node --test scripts/ci/cbh-ratchet-core.node-tests.mjs scripts/ci/current-ratchet-normalizers.node-tests.mjs",
+    "cbh:ratchet:verify": "node scripts/ci/verify-baselines.mjs",
+    "cbh:protected": "vitest run --configLoader runner src/assessments/FacilityAssessmentJourneysPage.test.tsx src/oets/OetsRenderer.test.tsx src/executive-findings/ExecutivePresentationPage.test.tsx src/executive-presentation/ExecutivePresentationAuthoringPage.test.tsx src/executive-presentation/executivePresentationPagination.test.ts",
+    "cbh:ratchet:current:test": "node scripts/ci/run-current-ratchet.mjs frontend-tests",
+    "cbh:ratchet:current:lint": "node scripts/ci/run-current-ratchet.mjs frontend-lint",
+    "cbh:ratchet:current": "npm run cbh:ratchet:current:test && npm run cbh:ratchet:current:lint",
     "dev": "vite --configLoader runner",
     "build": "tsc -p tsconfig.json && vite build --configLoader runner",
     "typecheck": "tsc --noEmit -p tsconfig.json",

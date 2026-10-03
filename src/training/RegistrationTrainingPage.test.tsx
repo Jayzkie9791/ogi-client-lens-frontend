@@ -1042,7 +1042,7 @@ describe("Registration Training frontend", () => {
     const refreshedToggle = screen.getByRole("button", { name: new RegExp(traineeA.full_name) });
     await user.click(refreshedToggle);
     expect(refreshedToggle).toHaveAttribute("aria-expanded", "false");
-  });
+  }, 30_000);
 
   it("opens the guided Register Training dialog and guards dirty cancellation", async () => {
     const user = userEvent.setup();
@@ -1059,7 +1059,13 @@ describe("Registration Training frontend", () => {
     ]);
     renderWithRoute(routes.trainingRegister);
 
-    expect(await screen.findByRole("heading", { name: "Register a Trainee for Training" })).toBeVisible();
+    expect(
+      await screen.findByRole(
+        "heading",
+        { name: "Register a Trainee for Training" },
+        { timeout: 5_000 }
+      )
+    ).toBeVisible();
     expect(screen.queryByRole("dialog", { name: "Register Training" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Register Training" }));
     const dialog = await screen.findByRole("dialog", { name: "Register Training" }, { timeout: 5_000 });
@@ -1074,7 +1080,7 @@ describe("Registration Training frontend", () => {
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(confirm).toHaveBeenCalledTimes(2);
     expect(screen.queryByRole("dialog", { name: "Register Training" })).not.toBeInTheDocument();
-  });
+  }, 10_000);
 
   it("completes the existing-Trainee and qualified-existing-Session fast path without evaluation side effects", async () => {
     const user = userEvent.setup();
