@@ -40,7 +40,7 @@ export function AppShell() {
       { label: "Certifications", to: routes.certifications, permission: "view_certification" }, { label: "Credentials", to: routes.credentials, permission: "view_staff_member" }
     ] },
     { label: "Governance", items: [
-      { label: "Auditor Appointments", to: routes.auditorAppointments, permission: appointmentPermission(auth) }, { label: "Operations", to: routes.operations, permission: "view_operational_evidence", end: true }, { label: "Reviews", to: routes.governanceQueue, permission: "view_operational_evidence" }, { label: "Audit & Risk", to: auditRiskLandingPath(auth), permission: auditRiskPermission(auth) }, { label: "Evidence Records", to: routes.records, permission: "view_operational_evidence" }, { label: "My Drafts", to: routes.myDrafts, permission: "view_operational_evidence" }
+      { label: "Auditor Appointments", to: routes.auditorAppointments, permission: appointmentPermission(auth) }, { label: "Operations", to: routes.operations, permission: "view_operational_evidence", end: true }, { label: "Awaiting My Review", to: routes.canonicalReviewQueue, permission: canonicalReviewPermission(auth) }, { label: "Reviews", to: routes.governanceQueue, permission: "view_operational_evidence" }, { label: "Audit & Risk", to: auditRiskLandingPath(auth), permission: auditRiskPermission(auth) }, { label: "Evidence Records", to: routes.records, permission: "view_operational_evidence" }, { label: "My Drafts", to: routes.myDrafts, permission: "view_operational_evidence" }
     ] },
     { label: "System", items: [{ label: "Administration", to: routes.administration, permission: administrationPermission(auth) }] }
   ];
@@ -121,3 +121,4 @@ function administrationPermission(auth: ReturnType<typeof useAuth>) { return aut
 function personnelRegistrationPermission(auth: ReturnType<typeof useAuth>) { return auth.canUsePermission("create_staff_member") ? "create_staff_member" : "manage_personnel_operational_authorization"; }
 function appointmentPermission(auth: ReturnType<typeof useAuth>) { return auth.canUsePermission("view_audit_appointment") ? "view_audit_appointment" : auditRiskPermission(auth); }
 function inservicePermission(auth: ReturnType<typeof useAuth>) { return auth.canUsePermission("create_training_log") ? "create_training_log" : auth.canUsePermission("approve_inservice_event") ? "approve_inservice_event" : auth.canUsePermission("approve_training_log") ? "approve_training_log" : "evaluate_inservice_monthly_result"; }
+function canonicalReviewPermission(auth:ReturnType<typeof useAuth>){return auth.canUsePermission("view_operational_evidence")?"review_operational_assessment":"canonical_review_unavailable";}

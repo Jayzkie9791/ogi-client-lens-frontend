@@ -28,7 +28,8 @@ describe("durable evidence return context", () => {
     ["GOVERNANCE_QUEUE", "governance-queue", "/workbench/governance/queue", "Back to Governance Queue"],
     ["WORKBENCH", "workbench", "/workbench", "Back to Workbench"],
     ["RECORDS", "records", "/workbench/operations/records", "Back to Records"],
-    ["MY_DRAFTS", "my-drafts", "/workbench/operations/my-drafts", "Back to My Drafts"]
+    ["MY_DRAFTS", "my-drafts", "/workbench/operations/my-drafts", "Back to My Drafts"],
+    ["REVIEW_QUEUE", "review-queue", "/workbench/operations/awaiting-review", "Back to Awaiting My Review"]
   ] as const)("round-trips the fixed %s destination", (kind, descriptor, destination, label) => {
     const path = evidencePathWithReturn("record/with spaces", { kind });
     const context = readEvidenceReturnContext(new URL(path, "https://example.test").search);

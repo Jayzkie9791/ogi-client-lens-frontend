@@ -8,7 +8,8 @@ export type EvidenceReturnContext =
   | { readonly kind: "GOVERNANCE_QUEUE" }
   | { readonly kind: "WORKBENCH" }
   | { readonly kind: "RECORDS" }
-  | { readonly kind: "MY_DRAFTS" };
+  | { readonly kind: "MY_DRAFTS" }
+  | { readonly kind: "REVIEW_QUEUE" };
 
 export function readEvidenceReturnContext(search: string): EvidenceReturnContext | null {
   const params = new URLSearchParams(search);
@@ -28,6 +29,7 @@ export function readEvidenceReturnContext(search: string): EvidenceReturnContext
   if (params.get("return") === "workbench") return { kind: "WORKBENCH" };
   if (params.get("return") === "records") return { kind: "RECORDS" };
   if (params.get("return") === "my-drafts") return { kind: "MY_DRAFTS" };
+  if (params.get("return") === "review-queue") return { kind: "REVIEW_QUEUE" };
   return null;
 }
 
@@ -55,6 +57,8 @@ export function returnContextSearch(context: EvidenceReturnContext) {
     params.set("return", "workbench");
   } else if (context.kind === "RECORDS") {
     params.set("return", "records");
+  } else if (context.kind === "REVIEW_QUEUE") {
+    params.set("return", "review-queue");
   } else {
     params.set("return", "my-drafts");
   }
@@ -69,6 +73,7 @@ export function evidenceReturnDestination(context: EvidenceReturnContext) {
   if (context.kind === "WORKBENCH") return routes.workbench;
   if (context.kind === "RECORDS") return routes.records;
   if (context.kind === "MY_DRAFTS") return routes.myDrafts;
+  if (context.kind === "REVIEW_QUEUE") return routes.canonicalReviewQueue;
   const params = new URLSearchParams({ client: context.clientId, facility: context.facilityId });
   if (context.categoryCode) params.set("category", context.categoryCode);
   return `${routes.facilityAssessmentJourneys}?${params.toString()}`;
@@ -82,5 +87,6 @@ export function evidenceReturnLabel(context: EvidenceReturnContext) {
   if (context.kind === "WORKBENCH") return "Back to Workbench";
   if (context.kind === "RECORDS") return "Back to Records";
   if (context.kind === "MY_DRAFTS") return "Back to My Drafts";
+  if (context.kind === "REVIEW_QUEUE") return "Back to Awaiting My Review";
   return "Back to Facility Assessment Journey";
 }

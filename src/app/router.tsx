@@ -23,6 +23,7 @@ import { WorkbenchPage } from "./routes/WorkbenchPage";
 
 const AuditExecutionPage = lazy(() => import("../audit-risk/AuditExecutionPage").then((module) => ({ default: module.AuditExecutionPage })));
 const GovernanceQueuePage = lazy(() => import("../oets/GovernanceQueuePage").then((module) => ({ default: module.GovernanceQueuePage })));
+const CanonicalReviewQueuePage = lazy(() => import("../oets/CanonicalReviewQueuePage").then((module) => ({ default: module.CanonicalReviewQueuePage })));
 const OperationalEvidenceRecordPage = lazy(() => import("../oets/OperationalEvidenceRecordPage").then((module) => ({ default: module.OperationalEvidenceRecordPage })));
 const RuntimeTemplatePage = lazy(() => import("../oets/RuntimeTemplatePage").then((module) => ({ default: module.RuntimeTemplatePage })));
 const CertificationsPage = lazy(() => import("../certifications/CertificationsPage").then((module) => ({ default: module.CertificationsPage })));
@@ -131,6 +132,10 @@ export const appRoutes: RouteObject[] = [
           {
             path: "workbench/operations/my-drafts",
             element: <MyDraftsPage />
+          },
+          {
+            path: "workbench/operations/awaiting-review",
+            element: lazyRoute(<CanonicalReviewQueuePage />)
           },
           {
             path: "workbench/administration",

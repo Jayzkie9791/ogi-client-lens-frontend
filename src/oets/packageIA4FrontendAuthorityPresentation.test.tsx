@@ -11,7 +11,8 @@ const definition: OetsDefinition = {
   sections: [{ section_id: "section-1", section_code: "DETAIL", title: "Detail", sequence: 1, fields: [
     { field_id: "manual", field_code: "MANUAL", label: "Manual", field_type: "TEXT", required: false, readonly: false, visible: true, sequence: 1 },
     { field_id: "calculated", field_code: "CALCULATED", label: "Calculated", field_type: "NUMBER", required: false, readonly: true, visible: true, sequence: 2 },
-    { field_id: "signature", field_code: "SIGNATURE", label: "Signature", field_type: "SIGNATURE", required: false, readonly: true, visible: true, sequence: 3, metadata: { signature_containment: { kind: "DEFERRED_GOVERNED_ARTIFACT", reason: "Not implemented." } } }
+    { field_id: "projected", field_code: "PROJECTED", label: "Projected", field_type: "TEXT", required: false, readonly: false, visible: true, sequence: 3 },
+    { field_id: "signature", field_code: "SIGNATURE", label: "Signature", field_type: "SIGNATURE", required: false, readonly: true, visible: true, sequence: 4, metadata: { signature_containment: { kind: "DEFERRED_GOVERNED_ARTIFACT", reason: "Not implemented." } } }
   ] }]
 };
 
@@ -20,6 +21,7 @@ const authority: OetsFieldAuthorityPresentation = {
   fields: [
     row("manual", "MANUAL", "OPERATOR_RECORDED", "EDITABLE"),
     row("calculated", "CALCULATED", "CALCULATED_BY_SERVER", "READ_ONLY"),
+    row("projected", "PROJECTED", "GOVERNED_CONTEXT_PROJECTION_EFFECTIVE", "READ_ONLY"),
     row("signature", "SIGNATURE", "GOVERNED_ARTIFACT_DEFERRED", "UNAVAILABLE")
   ]
 };
@@ -31,6 +33,8 @@ describe("I-A4 renderer integration", () => {
     expect(screen.getByLabelText("Manual")).toHaveAccessibleDescription("Recorded manually.");
     expect(screen.getByLabelText("Calculated")).toHaveAccessibleDescription("Calculated automatically from governed values in this record.");
     expect(screen.getByLabelText("Calculated")).toHaveValue(null);
+    expect(screen.getByLabelText("Projected")).toBeDisabled();
+    expect(screen.getByLabelText("Projected")).toHaveAccessibleDescription("Provided from the selected governed record.");
   });
 
   it("preserves specialized deferred-artifact presentation without duplicate generic prose", () => {
@@ -40,10 +44,10 @@ describe("I-A4 renderer integration", () => {
   });
 });
 
-function row(fieldId: string, fieldCode: string, reasonCode: "OPERATOR_RECORDED" | "CALCULATED_BY_SERVER" | "GOVERNED_ARTIFACT_DEFERRED", editability: "EDITABLE" | "READ_ONLY" | "UNAVAILABLE") {
+function row(fieldId: string, fieldCode: string, reasonCode: "OPERATOR_RECORDED" | "CALCULATED_BY_SERVER" | "GOVERNED_CONTEXT_PROJECTION_EFFECTIVE" | "GOVERNED_ARTIFACT_DEFERRED", editability: "EDITABLE" | "READ_ONLY" | "UNAVAILABLE") {
   return {
     section_code: "DETAIL", field_id: fieldId, field_code: fieldCode, repeatable: false, visible: true,
-    authority_kind: reasonCode === "OPERATOR_RECORDED" ? "OPERATOR_RECORDED" as const : reasonCode === "CALCULATED_BY_SERVER" ? "SERVER_CALCULATED" as const : "DOWNSTREAM_UNAVAILABLE" as const,
+    authority_kind: reasonCode === "OPERATOR_RECORDED" ? "OPERATOR_RECORDED" as const : reasonCode === "CALCULATED_BY_SERVER" ? "SERVER_CALCULATED" as const : reasonCode === "GOVERNED_CONTEXT_PROJECTION_EFFECTIVE" ? "CONTEXT_PROJECTED" as const : "DOWNSTREAM_UNAVAILABLE" as const,
     authority_state: reasonCode === "GOVERNED_ARTIFACT_DEFERRED" ? "UNAVAILABLE" as const : "EFFECTIVE" as const,
     disposition: "ACTIVE" as const, presentation_editability: editability, reason_code: reasonCode
   };

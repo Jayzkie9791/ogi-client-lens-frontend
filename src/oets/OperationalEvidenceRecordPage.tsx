@@ -58,6 +58,8 @@ import {
   EvidenceAttestation,
   listEvidenceAttestations
 } from "./attestationApi";
+import { CanonicalAttestationPanel } from "./CanonicalAttestationPanel";
+import { canonicalAttestationQueryKey, listCanonicalAttestations } from "./canonicalAttestationApi";
 
 const trainingAssessmentNumberFieldCode = "ASSESSMENT_NUMBER";
 const trainingAssessmentNumberTemplateCodes = new Set([
@@ -175,6 +177,7 @@ export function OperationalEvidenceRecordPage({
   const { recordId: routeRecordId } = useParams();
   const recordId = embeddedRecordId ?? routeRecordId;
   const durableReturnContext = !embeddedRecordId ? readEvidenceReturnContext(location.search) : null;
+  const canonicalReviewMode = durableReturnContext?.kind === "REVIEW_QUEUE";
   const legacyReturnDestination = !embeddedRecordId && !durableReturnContext &&
     (location.state?.returnTo === routes.facilityAssessmentJourneys || location.state?.returnTo === routes.registrationTraining)
     ? (location.state.returnTo as typeof routes.facilityAssessmentJourneys | typeof routes.registrationTraining)
@@ -411,6 +414,13 @@ export function OperationalEvidenceRecordPage({
     queryKey: attestationQueryKey,
     queryFn: () => listEvidenceAttestations(record?.id ?? "")
   });
+  const canReadCanonicalAttestations = auth.canUsePermission("attest_operational_assessment") ||
+    auth.canUsePermission("review_operational_assessment");
+  const canonicalAttestationQuery = useQuery({
+    enabled: Boolean(record?.id && record.lifecycle_state === "DRAFT" && canReadCanonicalAttestations),
+    queryKey: record?.id ? canonicalAttestationQueryKey(record.id) : ["operational-evidence-canonical-attestations", "unavailable"],
+    queryFn: () => listCanonicalAttestations(record?.id ?? "")
+  });
   const draftPayloadMutation = useMutation({
     mutationFn: (payload: OetsEvidencePayload) =>
       updateDraftOperationalEvidencePayload(recordId ?? "", { payload }),
@@ -423,6 +433,9 @@ export function OperationalEvidenceRecordPage({
       );
       void queryClient.invalidateQueries({
         queryKey: ["operational-evidence-attestations", updatedRecord.id]
+      });
+      void queryClient.invalidateQueries({
+        queryKey: canonicalAttestationQueryKey(updatedRecord.id)
       });
       void queryClient.invalidateQueries({ queryKey: ["operational-evidence-record-actions", updatedRecord.id] });
     }
@@ -610,6 +623,7 @@ export function OperationalEvidenceRecordPage({
   const fieldVisibilityPolicy = trainingContextualFieldVisibilityPolicy(record);
   const canEditDraft =
     isDraftRecord &&
+    !canonicalReviewMode &&
     (record.template_provenance.template_code !==
       "OGI_F002_FACILITY_PROFILE_BASELINE_INTELLIGENCE_ASSESSMENT" ||
       record.created_by_user_id === auth.session?.id) &&
@@ -620,14 +634,30 @@ export function OperationalEvidenceRecordPage({
   const f002ReadinessIssues = isF002
     ? readF002ReadinessIssues(record.payload, attestationQuery.data?.attestations ?? [], draftDirty)
     : [];
-  const visibleDirectTransitions = isF002 && f002ReadinessIssues.length > 0
-    ? directTransitions.filter((transition) => transition.trigger !== "FINALIZE_DRAFT")
-    : directTransitions;
+  const currentCanonicalAssessor = canonicalAttestationQuery.data?.attestations.find(
+    (item) => item.role === "ASSESSOR" && item.status === "CURRENT"
+  );
+  const currentCanonicalReviewer = canonicalAttestationQuery.data?.attestations.find(
+    (item) => item.role === "REVIEWER" && item.status === "CURRENT"
+  );
+  const canonicalFinalizationReady = Boolean(
+    currentCanonicalAssessor &&
+    currentCanonicalReviewer &&
+    currentCanonicalAssessor.signer.userId !== currentCanonicalReviewer.signer.userId
+  );
+  const canonicalReadinessKnown = canReadCanonicalAttestations &&
+    !canonicalAttestationQuery.isLoading &&
+    !canonicalAttestationQuery.isError;
+  const visibleDirectTransitions = directTransitions.filter((transition) => {
+    if (transition.trigger !== "FINALIZE_DRAFT") return true;
+    if (isF002 && f002ReadinessIssues.length > 0) return false;
+    return !canonicalReadinessKnown || canonicalFinalizationReady;
+  });
   const canAttestDraft =
-    isDraftRecord && auth.canUsePermission("submit_operational_evidence");
+    isDraftRecord && !canonicalReviewMode && auth.canUsePermission("submit_operational_evidence");
   const canDiscardDraft = isDraftRecord && (
-    record.created_by_user_id === auth.session?.id ||
-    auth.canUsePermission("transition_operational_evidence")
+    !canonicalReviewMode && (record.created_by_user_id === auth.session?.id ||
+    auth.canUsePermission("transition_operational_evidence"))
   );
   const evidenceHeadingId = isDraftRecord
     ? "draft-evidence-heading"
@@ -639,7 +669,7 @@ export function OperationalEvidenceRecordPage({
   const evidenceHeading = isDraftRecord
     ? "Draft Evidence"
     : `${lifecycleLabel} Evidence`;
-  const headerTransitions = draftDirty || draftPayloadMutation.isPending
+  const headerTransitions = canonicalReviewMode || draftDirty || draftPayloadMutation.isPending
     ? []
     : governanceClaimOwnedByAnother
       ? []
@@ -784,6 +814,8 @@ export function OperationalEvidenceRecordPage({
           ) : null}
         </div>
 
+        {canonicalReviewMode ? <div className="rounded-component border border-blue-300 bg-blue-50 px-4 py-3 text-sm text-primary-navy" role="status"><strong>Read-only canonical review.</strong> Verify the exact saved payload below, then record the Reviewer attestation. This workspace does not grant editing, discard, or lifecycle-transition authority.</div> : null}
+
         {record.context ? <ExistingEvidenceContextBanner context={record.context} /> : null}
         {!record.context && record.scope_kind === "TRAINING_SCOPED" && record.training_context ? (
           <TrainingEvidenceContextBanner record={record} />
@@ -797,7 +829,9 @@ export function OperationalEvidenceRecordPage({
                 ? "border-amber-300 bg-amber-50 text-amber-900"
                 : "border-blue-200 bg-blue-50 text-primary-navy"
           }`} data-testid="draft-save-state" role="status">
-            {draftPayloadMutation.isPending
+            {canonicalReviewMode
+              ? "This exact saved Draft payload is presented read-only for canonical review."
+              : draftPayloadMutation.isPending
               ? "Saving Draft… Finalization is unavailable until the server confirms this save."
               : draftPayloadMutation.isError
                 ? "Draft save failed. Your changes remain unsaved; correct the error and try again."
@@ -922,6 +956,18 @@ export function OperationalEvidenceRecordPage({
           submitSuccessMessage="Draft evidence saved."
           submitSuccessLinkLabel={`← ${standaloneReturnLabel}`}
         />
+        {auth.session ? (
+          <CanonicalAttestationPanel
+            canAttest={auth.canUsePermission("attest_operational_assessment")}
+            canOverrideSeparation={auth.canUsePermission("override_operational_assessment_separation")}
+            canReview={auth.canUsePermission("review_operational_assessment")}
+            currentUserId={auth.session.id}
+            draftDirty={draftDirty}
+            draftSavePending={draftPayloadMutation.isPending}
+            onAttested={canonicalReviewMode?(role)=>{if(role==="REVIEWER")navigate(routes.canonicalReviewQueue);}:undefined}
+            record={record}
+          />
+        ) : null}
       </section>
       {isF002 && isDraftRecord ? <F002ReadinessPanel issues={f002ReadinessIssues} loadingAttestations={attestationQuery.isLoading} /> : null}
       {isF002 && !isDraftRecord ? <F002LifecyclePanel lifecycleState={record.lifecycle_state} /> : null}
@@ -933,7 +979,7 @@ export function OperationalEvidenceRecordPage({
         transitions={embeddedRecordId ? [] : headerTransitions}
       />
       <div className="scroll-mt-28" id={embeddedRecordId ? undefined : "embedded-governance-actions"}>
-        {!embeddedRecordId ? governanceReviewActions : null}
+        {!embeddedRecordId && !canonicalReviewMode ? governanceReviewActions : null}
         {shouldLoadReviewConclusions ? (
           <ReviewConclusionPanel
             context={reviewConclusionContext}

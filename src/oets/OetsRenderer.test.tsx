@@ -643,7 +643,7 @@ function governedAttestation(status: "CURRENT" | "STALE" = "CURRENT"): EvidenceA
     section_code_snapshot: "GOVERNED_ATTESTATION", section_instance_index: null,
     attestation_statement_snapshot: "I attest to the exact evidence shown.",
     purpose: "CERTIFICATION", signer_mode: "AUTHENTICATED_SELF_ATTESTATION",
-    subject_name_snapshot: "Server Confirmed Operator", external_subject_role_snapshot: null,
+    subject_name_snapshot: "Server Confirmed Operator", subject_business_identifier_snapshot: null, external_subject_role_snapshot: null,
     actor_user_id: session.id, actor_display_name_snapshot: "Server Confirmed Operator",
     signer_user_id: session.id, signer_display_name_snapshot: "Server Confirmed Operator",
     client_id_snapshot: session.clientId, facility_id_snapshot: session.facilityIds[0],
@@ -2850,34 +2850,24 @@ describe("Generic OETS renderer", () => {
   });
 
   it("submits the rendered template provenance, client context, facility context, and sections only", async () => {
-    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
-    const { calls } = mockFetchQueue([
-      { status: 200, body: { accessToken: "access-token" } },
-      { status: 200, body: session },
-      { status: 200, body: { ...runtimeTemplate, definition_jsonb: definition } },
-      { status: 201, body: evidenceRecord() }
-    ]);
+    const queryClient = createTestQueryClient();
+    queryClient.setQueryData(["oets-runtime-template", runtimeTemplate.template_code], { ...runtimeTemplate, definition_jsonb: definition });
+    const { calls } = mockFetchQueue([{ status: 201, body: evidenceRecord() }]);
     const user = userEvent.setup();
 
-    renderWithRoute("/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE");
+    renderRuntimeTemplatePageWithSession({ initialPath: "/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE", queryClient, currentSession: session });
 
     await user.type(await screen.findByLabelText("Text Field"), "Submitted");
     await user.type(screen.getByLabelText("Number Field"), "5");
     await user.type(screen.getByLabelText("Decimal Field"), "12.5");
-    await user.click(screen.getByRole("button", { name: "Create Audit Draft" }));
+    await user.click(screen.getByRole("button", { name: "Begin Evidence" }));
 
-    expect(
-      await screen.findAllByText("Draft audit created successfully.")
-    ).toHaveLength(2);
-    expect(screen.getByRole("link", { name: "Open Audit" })).toHaveAttribute(
-      "href",
-      "/workbench/evidence/evidence-record-1"
-    );
+    expect(await screen.findByText("Persisted evidence record route")).toBeVisible();
 
     const submitRequest = findRequest(
       calls,
       "POST",
-      "/api/v1/operational-evidence/records"
+      "/api/v1/operational-evidence/records/drafts"
     );
     const requestBody = JSON.parse(String(submitRequest.init?.body));
     expect(requestBody).toMatchObject({
@@ -2934,12 +2924,12 @@ describe("Generic OETS renderer", () => {
       screen.queryByRole("heading", { name: "Newer Runtime Template" })
     ).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Create Audit Draft" }));
+    await user.click(screen.getByRole("button", { name: "Begin Evidence" }));
 
     const requestBody = JSON.parse(String(findRequest(
       calls,
       "POST",
-      "/api/v1/operational-evidence/records"
+      "/api/v1/operational-evidence/records/drafts"
     ).init?.body));
 
     expect(requestBody.template_version_id).toBe(runtimeTemplate.template_version_id);
@@ -2954,30 +2944,27 @@ describe("Generic OETS renderer", () => {
   });
 
   it("omits facility_id when the session has no facility context", async () => {
-    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
-    const { calls } = mockFetchQueue([
-      { status: 200, body: { accessToken: "access-token" } },
-      { status: 200, body: { ...session, facilityIds: [] } },
-      { status: 200, body: { ...runtimeTemplate, definition_jsonb: definition } },
-      { status: 201, body: evidenceRecord({ facility_id: null }) }
-    ]);
+    const queryClient = createTestQueryClient();
+    queryClient.setQueryData(["oets-runtime-template", runtimeTemplate.template_code], { ...runtimeTemplate, definition_jsonb: definition });
+    const { calls } = mockFetchQueue([{ status: 201, body: evidenceRecord({ facility_id: null }) }]);
     const user = userEvent.setup();
 
-    renderWithRoute("/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE");
+    renderRuntimeTemplatePageWithSession({ initialPath: "/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE", queryClient, currentSession: { ...session, facilityIds: [] } });
 
-    await user.click(await screen.findByRole("button", { name: "Create Audit Draft" }));
+    await user.click(await screen.findByRole("button", { name: "Begin Evidence" }));
 
     const requestBody = JSON.parse(String(findRequest(
       calls,
       "POST",
-      "/api/v1/operational-evidence/records"
+      "/api/v1/operational-evidence/records/drafts"
     ).init?.body));
 
     expect(requestBody.facility_id).toBeUndefined();
   });
 
   it("uses an explicitly selected facility when multiple session facilities exist", async () => {
-    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    const queryClient = createTestQueryClient();
+    queryClient.setQueryData(["oets-runtime-template", runtimeTemplate.template_code], { ...runtimeTemplate, definition_jsonb: definition });
     const multiFacilitySession = {
       ...session,
       facilityIds: [
@@ -2985,26 +2972,21 @@ describe("Generic OETS renderer", () => {
         "00000000-0000-4000-8000-000000000202"
       ]
     };
-    const { calls } = mockFetchQueue([
-      { status: 200, body: { accessToken: "access-token" } },
-      { status: 200, body: multiFacilitySession },
-      { status: 200, body: { ...runtimeTemplate, definition_jsonb: definition } },
-      { status: 201, body: evidenceRecord({ facility_id: multiFacilitySession.facilityIds[1] }) }
-    ]);
+    const { calls } = mockFetchQueue([{ status: 201, body: evidenceRecord({ facility_id: multiFacilitySession.facilityIds[1] }) }]);
     const user = userEvent.setup();
 
-    renderWithRoute("/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE");
+    renderRuntimeTemplatePageWithSession({ initialPath: "/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE", queryClient, currentSession: multiFacilitySession });
 
     await user.selectOptions(
       await screen.findByLabelText("Facility context"),
       multiFacilitySession.facilityIds[1]
     );
-    await user.click(screen.getByRole("button", { name: "Create Audit Draft" }));
+    await user.click(screen.getByRole("button", { name: "Begin Evidence" }));
 
     const requestBody = JSON.parse(String(findRequest(
       calls,
       "POST",
-      "/api/v1/operational-evidence/records"
+      "/api/v1/operational-evidence/records/drafts"
     ).init?.body));
 
     expect(requestBody.facility_id).toBe(multiFacilitySession.facilityIds[1]);
@@ -3024,31 +3006,30 @@ describe("Generic OETS renderer", () => {
     expect(
       await screen.findAllByText("You must first select a client before creating an audit draft.")
     ).toHaveLength(2);
-    expect(screen.getByRole("button", { name: "Create Audit Draft" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Begin Evidence" })).toBeDisabled();
     await waitFor(() => {
       expect(calls.some((call) =>
         call.url.includes("/context-requirement?")
       )).toBe(true);
     });
     expect(calls.some((call) =>
-      call.url === "/api/v1/operational-evidence/records" &&
+      call.url === "/api/v1/operational-evidence/records/drafts" &&
       call.init?.method === "POST"
     )).toBe(false);
   });
 
   it("submits OGI bootstrap evidence using explicitly selected client context", async () => {
-    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    const queryClient = createTestQueryClient();
+    queryClient.setQueryData(["oets-runtime-template", runtimeTemplate.template_code], { ...runtimeTemplate, definition_jsonb: definition });
+    const bootstrapSession = { ...session, clientId: null, facilityScopeMode: null, facilityIds: [] };
     const { calls } = mockFetchQueue([
-      { status: 200, body: { accessToken: "access-token" } },
-      { status: 200, body: { ...session, clientId: null, facilityScopeMode: null, facilityIds: [] } },
-      { status: 200, body: { ...runtimeTemplate, definition_jsonb: definition } },
       { status: 200, body: { clients: [clientContext()] } },
       { status: 200, body: { facilities: [] } },
       { status: 201, body: evidenceRecord({ facility_id: null }) }
     ]);
     const user = userEvent.setup();
 
-    renderWithRoute("/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE");
+    renderRuntimeTemplatePageWithSession({ initialPath: "/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE", queryClient, currentSession: bootstrapSession });
 
     await user.selectOptions(
       await screen.findByLabelText("Client context"),
@@ -3057,16 +3038,14 @@ describe("Generic OETS renderer", () => {
     await user.type(await screen.findByLabelText("Text Field"), "Submitted");
     await user.type(screen.getByLabelText("Number Field"), "5");
     await user.type(screen.getByLabelText("Decimal Field"), "12.5");
-    await user.click(screen.getByRole("button", { name: "Create Audit Draft" }));
+    await user.click(screen.getByRole("button", { name: "Begin Evidence" }));
 
-    expect(
-      await screen.findAllByText("Draft audit created successfully.")
-    ).toHaveLength(2);
+    expect(await screen.findByText("Persisted evidence record route")).toBeVisible();
 
     const requestBody = JSON.parse(String(findRequest(
       calls,
       "POST",
-      "/api/v1/operational-evidence/records"
+      "/api/v1/operational-evidence/records/drafts"
     ).init?.body));
     expect(requestBody).toMatchObject({
       client_id: session.clientId,
@@ -3088,7 +3067,8 @@ describe("Generic OETS renderer", () => {
   });
 
   it("disables the submit button while pending and prevents duplicate concurrent requests", async () => {
-    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    const queryClient = createTestQueryClient();
+    queryClient.setQueryData(["oets-runtime-template", runtimeTemplate.template_code], { ...runtimeTemplate, definition_jsonb: definition });
     let resolveSubmit: (response: Response) => void = () => undefined;
     const calls: Array<{ url: string; init?: RequestInit }> = [];
     const user = userEvent.setup();
@@ -3110,40 +3090,29 @@ describe("Generic OETS renderer", () => {
           });
         }
 
-        if (calls.length === 1) {
-          return jsonResponse(200, { accessToken: "access-token" });
-        }
-
-        if (calls.length === 2) {
-          return jsonResponse(200, session);
-        }
-
-        if (calls.length === 3) {
-          return jsonResponse(200, { ...runtimeTemplate, definition_jsonb: definition });
-        }
-
         return new Promise<Response>((resolve) => {
           resolveSubmit = resolve;
         });
       })
     );
 
-    renderWithRoute("/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE");
+    renderRuntimeTemplatePageWithSession({ initialPath: "/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE", queryClient, currentSession: session });
 
-    const button = await screen.findByRole("button", { name: "Create Audit Draft" });
+    const button = await screen.findByRole("button", { name: "Begin Evidence" });
 
     await user.dblClick(button);
 
-    expect(screen.getByRole("button", { name: "Creating..." })).toBeDisabled();
-    expect(calls.filter((call) => call.url.endsWith("/records"))).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Beginning..." })).toBeDisabled();
+    expect(calls.filter((call) => call.url.endsWith("/records/drafts"))).toHaveLength(1);
 
     resolveSubmit(jsonResponse(201, evidenceRecord()));
 
-    expect(await screen.findAllByText("Draft audit created successfully.")).toHaveLength(2);
+    expect(await screen.findByText("Persisted evidence record route")).toBeVisible();
   });
 
   it("uses a synchronous lock so immediate submit activations create only one request", async () => {
-    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    const queryClient = createTestQueryClient();
+    queryClient.setQueryData(["oets-runtime-template", runtimeTemplate.template_code], { ...runtimeTemplate, definition_jsonb: definition });
     let resolveSubmit: (response: Response) => void = () => undefined;
     const calls: Array<{ url: string; init?: RequestInit }> = [];
 
@@ -3164,27 +3133,15 @@ describe("Generic OETS renderer", () => {
           });
         }
 
-        if (calls.length === 1) {
-          return jsonResponse(200, { accessToken: "access-token" });
-        }
-
-        if (calls.length === 2) {
-          return jsonResponse(200, session);
-        }
-
-        if (calls.length === 3) {
-          return jsonResponse(200, { ...runtimeTemplate, definition_jsonb: definition });
-        }
-
         return new Promise<Response>((resolve) => {
           resolveSubmit = resolve;
         });
       })
     );
 
-    renderWithRoute("/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE");
+    renderRuntimeTemplatePageWithSession({ initialPath: "/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE", queryClient, currentSession: session });
 
-    const button = await screen.findByRole("button", { name: "Create Audit Draft" });
+    const button = await screen.findByRole("button", { name: "Begin Evidence" });
 
     act(() => {
       button.click();
@@ -3192,34 +3149,27 @@ describe("Generic OETS renderer", () => {
     });
 
     await waitFor(() =>
-      expect(calls.filter((call) => call.url.endsWith("/records"))).toHaveLength(1)
+      expect(calls.filter((call) => call.url.endsWith("/records/drafts"))).toHaveLength(1)
     );
 
     resolveSubmit(jsonResponse(201, evidenceRecord()));
 
-    expect(await screen.findAllByText("Draft audit created successfully.")).toHaveLength(2);
+    expect(await screen.findByText("Persisted evidence record route")).toBeVisible();
   });
 
   it("does not allow the same successful evidence capture to be submitted again", async () => {
-    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
-    const { calls } = mockFetchQueue([
-      { status: 200, body: { accessToken: "access-token" } },
-      { status: 200, body: session },
-      { status: 200, body: { ...runtimeTemplate, definition_jsonb: definition } },
-      { status: 201, body: evidenceRecord() }
-    ]);
+    const queryClient = createTestQueryClient();
+    queryClient.setQueryData(["oets-runtime-template", runtimeTemplate.template_code], { ...runtimeTemplate, definition_jsonb: definition });
+    const { calls } = mockFetchQueue([{ status: 201, body: evidenceRecord() }]);
     const user = userEvent.setup();
 
-    renderWithRoute("/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE");
+    renderRuntimeTemplatePageWithSession({ initialPath: "/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE", queryClient, currentSession: session });
 
-    await user.click(await screen.findByRole("button", { name: "Create Audit Draft" }));
+    await user.click(await screen.findByRole("button", { name: "Begin Evidence" }));
 
-    expect(await screen.findAllByText("Draft audit created successfully.")).toHaveLength(2);
-    expect(
-      screen.queryByRole("button", { name: "Create Audit Draft" })
-    ).not.toBeInTheDocument();
+    expect(await screen.findByText("Persisted evidence record route")).toBeVisible();
 
-    expect(calls.filter((call) => call.url.endsWith("/records"))).toHaveLength(1);
+    expect(calls.filter((call) => call.url.endsWith("/records/drafts"))).toHaveLength(1);
   });
 
   it("presents template integrity conflicts as form-level stale-template messages", async () => {
@@ -3242,7 +3192,7 @@ describe("Generic OETS renderer", () => {
 
     renderWithRoute("/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE");
 
-    await user.click(await screen.findByRole("button", { name: "Create Audit Draft" }));
+    await user.click(await screen.findByRole("button", { name: "Begin Evidence" }));
 
     expect(
       await within(screen.getByTestId("oets-flow-messages")).findByText(
@@ -3306,7 +3256,7 @@ describe("Generic OETS renderer", () => {
 
     renderWithRoute("/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE");
 
-    await user.click(await screen.findByRole("button", { name: "Create Audit Draft" }));
+    await user.click(await screen.findByRole("button", { name: "Begin Evidence" }));
 
     expect(
       await within(screen.getByTestId("oets-flow-messages")).findByText(
@@ -3366,7 +3316,7 @@ describe("Generic OETS renderer", () => {
 
     renderWithRoute("/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE");
 
-    await user.click(await screen.findByRole("button", { name: "Create Audit Draft" }));
+    await user.click(await screen.findByRole("button", { name: "Begin Evidence" }));
 
     expect(await within(screen.getByTestId("oets-flow-messages")).findByText("The backend rejected this audit. Review the highlighted validation messages.")).toBeInTheDocument();
     expect(screen.queryByText("Conflicting field issue")).not.toBeInTheDocument();
@@ -3421,12 +3371,12 @@ describe("Generic OETS renderer", () => {
       expect(screen.queryByLabelText("Facility context")).not.toBeInTheDocument()
     );
 
-    await user.click(screen.getByRole("button", { name: "Create Audit Draft" }));
+    await user.click(screen.getByRole("button", { name: "Begin Evidence" }));
 
     const requestBody = JSON.parse(String(findRequest(
       calls,
       "POST",
-      "/api/v1/operational-evidence/records"
+      "/api/v1/operational-evidence/records/drafts"
     ).init?.body));
 
     expect(requestBody.facility_id).toBe(changedFacilitySession.facilityIds[0]);
@@ -3461,12 +3411,12 @@ describe("Generic OETS renderer", () => {
 
     renderWithRoute("/workbench/oets/ARBITRARY_RUNTIME_TEMPLATE");
 
-    await user.click(await screen.findByRole("button", { name: "Create Audit Draft" }));
+    await user.click(await screen.findByRole("button", { name: "Begin Evidence" }));
     expect(
       await within(screen.getByTestId("oets-flow-messages")).findByText("You are not authorized to create this audit draft.")
     ).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Create Audit Draft" }));
+    await user.click(screen.getByRole("button", { name: "Begin Evidence" }));
     expect(await within(screen.getByTestId("oets-flow-messages")).findByText("Server failed.")).toBeInTheDocument();
   });
 

@@ -294,7 +294,7 @@ function snapshot(status: "CURRENT" | "STALE"): EvidenceAttestation {
     signature_field_id: field.field_id, signature_field_code_snapshot: field.field_code,
     section_code_snapshot: "CERTIFICATION", section_instance_index: null,
     attestation_statement_snapshot: "I certify.", purpose: "WITNESS",
-    signer_mode: "RECORDED_EXTERNAL_ATTESTATION", subject_name_snapshot: "External Witness",
+    signer_mode: "RECORDED_EXTERNAL_ATTESTATION", subject_name_snapshot: "External Witness", subject_business_identifier_snapshot: null,
     external_subject_role_snapshot: "Witness", actor_user_id: "actor-1",
     actor_display_name_snapshot: "Authenticated Recorder", signer_user_id: null,
     signer_display_name_snapshot: null, client_id_snapshot: "client-1", facility_id_snapshot: null,

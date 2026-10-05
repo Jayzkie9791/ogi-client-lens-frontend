@@ -168,7 +168,7 @@ function AuthorizedFacilityAssessmentJourneysPage() {
         const isOpen = expanded === category.code;
         return <CategoryRow category={category} certificationForms={{F041:f041Query.data??null,F044:f044Query.data??null,F047:f047Query.data??null}} clientId={clientId} facilityId={facilityId} assetForms={{F081:f081Query.data??null,F082:f082Query.data??null,F084:f084Query.data??null,F085:f085Query.data??null,F086:f086Query.data??null,F087:f087Query.data??null,F088:f088Query.data??null,F089:f089Query.data??null}} assetFormErrors={{F081:f081Query.isError,F082:f082Query.isError,F084:f084Query.isError,F085:f085Query.isError,F086:f086Query.isError,F087:f087Query.isError,F088:f088Query.isError,F089:f089Query.isError}} incidentForms={{F063:f063Query.data??null,F064:f064Query.data??null,F065:f065Query.data??null,F066:f066Query.data??null}} incidentFormErrors={{F063:f063Query.isError,F064:f064Query.isError,F065:f065Query.isError,F066:f066Query.isError}} trainingForms={{F022:f022Query.data??null,F023:f023Query.data??null,F024:f024Query.data??null,F025:f025Query.data??null,F027:f027Query.data??null,F090:f090Query.data??null,F091:f091Query.data??null,F092:f092Query.data??null,F093:f093Query.data??null,F095:f095Query.data??null}} trainingFormErrors={{F022:f022Query.isError,F023:f023Query.isError,F024:f024Query.isError,F025:f025Query.isError,F027:f027Query.isError,F090:f090Query.isError,F091:f091Query.isError,F092:f092Query.isError,F093:f093Query.isError,F095:f095Query.isError}} environmentalForms={{F901:f901Query.data??null,F902:f902Query.data??null,F904:f904Query.data??null,F905:f905Query.data??null,F912:f912Query.data??null}} environmentalFormErrors={{F901:f901Query.isError,F902:f902Query.isError,F904:f904Query.isError,F905:f905Query.isError,F912:f912Query.isError}} index={index} isOpen={isOpen} key={category.code} onAssess={() => setAssessmentWorkspace(category)} onOpenForm={setWorkspace} onToggle={() => setExpanded(isOpen ? null : category.code)} source={source} blocker={blocker?.code} templates={templatesQuery.data?.templates ?? []} records={recordsQuery.data?.records ?? []} currentUserId={auth.session?.id ?? ""} personnelForms={personnelFormsQuery.data??null} />;
       })}</div> : null}
-      {workspace ? <AssessmentFormWorkspace assessorName={auth.session?.fullName} clientName={selectedClient?.organization_name ?? "Client"} clientIdentifier={selectedClient?.business_identifier} facilityName={selectedFacility?.facility_name ?? "Facility"} facilityIdentifier={selectedFacility?.business_identifier} facilityType={selectedFacility?.facility_type} clientId={clientId} facilityId={facilityId} workspace={workspace} dirty={workspaceDirty} onDirtyChange={setWorkspaceDirty} onRecordCreated={(recordId) => { setWorkspaceDirty(false); setWorkspace((current) => current ? { ...current, recordId } : null); }} onClose={() => { if (workspaceDirty && !window.confirm("Close this form and discard unsaved changes?")) return; setWorkspaceDirty(false); setWorkspace(null); void Promise.all([queryClient.invalidateQueries({ queryKey: ["operational-evidence-records", "assessment-journey", clientId, facilityId] }),queryClient.invalidateQueries({ queryKey: ["certification-form-completeness", clientId, facilityId] }),queryClient.invalidateQueries({queryKey:["asset-form-completeness",clientId,facilityId]}),queryClient.invalidateQueries({queryKey:["incident-form-completeness",clientId,facilityId]}),queryClient.invalidateQueries({queryKey:["training-competency-form-completeness",clientId,facilityId]}),queryClient.invalidateQueries({queryKey:["facility-environmental-safety-form-completeness",clientId,facilityId]}),queryClient.invalidateQueries({queryKey:["public-safety-systems-form-completeness",clientId,facilityId]})]); }} /> : null}
+      {workspace ? <AssessmentFormWorkspace clientName={selectedClient?.organization_name ?? "Client"} facilityName={selectedFacility?.facility_name ?? "Facility"} clientId={clientId} facilityId={facilityId} workspace={workspace} dirty={workspaceDirty} onDirtyChange={setWorkspaceDirty} onRecordCreated={(recordId) => { setWorkspaceDirty(false); setWorkspace((current) => current ? { ...current, recordId } : null); }} onClose={() => { if (workspaceDirty && !window.confirm("Close this form and discard unsaved changes?")) return; setWorkspaceDirty(false); setWorkspace(null); void Promise.all([queryClient.invalidateQueries({ queryKey: ["operational-evidence-records", "assessment-journey", clientId, facilityId] }),queryClient.invalidateQueries({ queryKey: ["certification-form-completeness", clientId, facilityId] }),queryClient.invalidateQueries({queryKey:["asset-form-completeness",clientId,facilityId]}),queryClient.invalidateQueries({queryKey:["incident-form-completeness",clientId,facilityId]}),queryClient.invalidateQueries({queryKey:["training-competency-form-completeness",clientId,facilityId]}),queryClient.invalidateQueries({queryKey:["facility-environmental-safety-form-completeness",clientId,facilityId]}),queryClient.invalidateQueries({queryKey:["public-safety-systems-form-completeness",clientId,facilityId]})]); }} /> : null}
       {assessmentWorkspace ? <DomainAssessmentWorkspace categoryCode={assessmentWorkspace.code} categoryName={assessmentWorkspace.name} facilityId={facilityId} onClose={() => setAssessmentWorkspace(null)} onFinalized={() => { setAssessmentWorkspace(null); void queryClient.invalidateQueries({ queryKey: ["facility-ori-readiness", clientId, facilityId] }); }} /> : null}
     </div>
   </WorkspaceShell>;
@@ -458,29 +458,7 @@ function StatusBadge({ source, blocker }: { source?: OriReadinessSource; blocker
   return <span className="rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-xs font-bold text-amber-800">{label}</span>;
 }
 
-function AssessmentFormWorkspace({ assessorName, clientName, clientIdentifier, facilityName, facilityIdentifier, facilityType, clientId, facilityId, workspace, dirty, onDirtyChange, onRecordCreated, onClose }: { assessorName?: string; clientName: string; clientIdentifier?: string; facilityName: string; facilityIdentifier?: string; facilityType?: string; clientId: string; facilityId: string; workspace: FormWorkspace; dirty: boolean; onDirtyChange: (dirty: boolean) => void; onRecordCreated: (recordId: string) => void; onClose: () => void }) {
-  const f002FacilityType = mapRegistrationFacilityTypeToF002(facilityType);
-  const scopeInitialFieldValues = useMemo(() => ({
-    ...(clientIdentifier ? {
-      CLIENT_ID: clientIdentifier,
-      CLIENT_NUMBER: clientIdentifier,
-      CLIENT_ORGANIZATION_ID: clientIdentifier
-    } : {}),
-    ...(facilityIdentifier ? {
-      FACILITY_ID: facilityIdentifier,
-      FACILITY_NUMBER: facilityIdentifier
-    } : {}),
-    FACILITY_NAME: facilityName,
-    CLIENT_NAME: clientName,
-    CLIENT_ORGANIZATION: clientName,
-    ORGANIZATION_NAME: clientName,
-    ...(workspace.templateCode === "OGI_F002_FACILITY_PROFILE_BASELINE_INTELLIGENCE_ASSESSMENT" && f002FacilityType
-      ? { FACILITY_TYPE: [f002FacilityType] }
-      : {}),
-    ...(workspace.templateCode === "OGI_F002_FACILITY_PROFILE_BASELINE_INTELLIGENCE_ASSESSMENT" && assessorName
-      ? { ASSESSOR: assessorName, ASSESSMENT_DATE: currentLocalDate() }
-      : {})
-  }), [assessorName, clientIdentifier, clientName, f002FacilityType, facilityIdentifier, facilityName, workspace.templateCode]);
+function AssessmentFormWorkspace({ clientName, facilityName, clientId, facilityId, workspace, dirty, onDirtyChange, onRecordCreated, onClose }: { clientName: string; facilityName: string; clientId: string; facilityId: string; workspace: FormWorkspace; dirty: boolean; onDirtyChange: (dirty: boolean) => void; onRecordCreated: (recordId: string) => void; onClose: () => void }) {
   useEffect(() => {
     const previous = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -497,15 +475,9 @@ function AssessmentFormWorkspace({ assessorName, clientName, clientIdentifier, f
       <div className="flex items-center gap-3"><div className="flex flex-wrap items-center gap-2" id="assessment-journey-form-actions" />{dirty ? <span className="text-xs font-bold uppercase text-state-warning">Unsaved changes</span> : null}<button className="min-h-11 rounded-component border border-primary-blue bg-white px-4 font-semibold text-primary-blue hover:bg-blue-50" onClick={onClose} type="button">← Back to Facility Assessment Journey</button></div>
     </header>
     <main className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
-      <div className="mx-auto max-w-[90rem]">{workspace.recordId ? <OperationalEvidenceRecordPage actionPortalId="assessment-journey-form-actions" embeddedRecordId={workspace.recordId} onDirtyChange={onDirtyChange} onRecordIdentityChange={onRecordCreated} /> : <RuntimeTemplatePage actionPortalId="assessment-journey-form-actions" embeddedTemplateCode={workspace.templateCode} initialClientId={clientId} initialContextId={workspace.contextId} initialFacilityId={facilityId} initialFieldValues={scopeInitialFieldValues} lockInitialContext={Boolean(workspace.contextId)} lockInitialScope onDirtyChange={onDirtyChange} onDraftCreated={onRecordCreated} />}</div>
+      <div className="mx-auto max-w-[90rem]">{workspace.recordId ? <OperationalEvidenceRecordPage actionPortalId="assessment-journey-form-actions" embeddedRecordId={workspace.recordId} onDirtyChange={onDirtyChange} onRecordIdentityChange={onRecordCreated} /> : <RuntimeTemplatePage actionPortalId="assessment-journey-form-actions" embeddedTemplateCode={workspace.templateCode} initialClientId={clientId} initialContextId={workspace.contextId} initialFacilityId={facilityId} lockInitialContext={Boolean(workspace.contextId)} lockInitialScope onDirtyChange={onDirtyChange} onDraftCreated={onRecordCreated} />}</div>
     </main>
   </div>;
-}
-
-function mapRegistrationFacilityTypeToF002(facilityType?: string) {
-  // Only an exact vocabulary match is projected. Other registration types
-  // require an explicit auditor choice because F002 uses a different taxonomy.
-  return facilityType === "WATERPARK" ? "WATERPARK" : null;
 }
 
 function templateMatchesFormCode(template: OetsTemplateCatalogItem, formCode: string) {
@@ -515,13 +487,6 @@ function templateMatchesFormCode(template: OetsTemplateCatalogItem, formCode: st
 }
 
 function humanize(value: string) { return humanizeDisplayCode(value); }
-
-function currentLocalDate() {
-  const now = new Date();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${now.getFullYear()}-${month}-${day}`;
-}
 
 function categoryName(code: string) {
   return categories.find((category) => category.code === code)?.name ?? humanize(code);

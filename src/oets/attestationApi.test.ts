@@ -18,6 +18,7 @@ describe("governed attestation API response guard", () => {
       signer_mode: "RECORDED_EXTERNAL_ATTESTATION",
       assurance: "RECORDED_EXTERNAL_ATTESTATION",
       subject_name_snapshot: "Receiving Provider",
+      subject_business_identifier_snapshot: null,
       external_subject_role_snapshot: "Receiving Provider",
       signer_user_id: null,
       signer_display_name_snapshot: null
@@ -80,6 +81,7 @@ function attestation(overrides: Partial<EvidenceAttestation> = {}): EvidenceAtte
     purpose: "ACKNOWLEDGEMENT",
     signer_mode: "AUTHENTICATED_SELF_ATTESTATION",
     subject_name_snapshot: "Authenticated Operator",
+    subject_business_identifier_snapshot: null,
     external_subject_role_snapshot: null,
     actor_user_id: "actor-1",
     actor_display_name_snapshot: "Authenticated Operator",

@@ -23,7 +23,6 @@ import {
 import { narrowOetsDefinition } from "./definitionGuards";
 import { isOetsDeveloperDiagnosticsEnabled } from "./developerDiagnostics";
 import {
-  createOperationalEvidenceRecord,
   createOperationalEvidenceDraft,
   OperationalEvidenceCreateRequest,
   OperationalEvidenceRecord,
@@ -284,41 +283,10 @@ export function RuntimeTemplatePage({
   // attestations, and lifecycle actions. Keeping embedded forms on the legacy
   // one-shot creation path strands the user on the transient new-form screen
   // after the record has already been created.
-  const requiresPersistedDraft = Boolean(
-    onDraftCreated ||
-    (activeEditingSession && (
-      contextRequirementQuery.data?.required ||
-      hasGovernedSignatureFields(activeEditingSession.definition) ||
-      (resolvedContextQuery.data?.required_fields.length ?? 0) > 0
-    ))
-  );
-  const mutation = useMutation({
-    mutationFn: createOperationalEvidenceRecord,
-    onSuccess(record) {
-      setBackendValidation(null);
-      setFormMessage(null);
-      submitLockedRef.current = false;
-      // Defensive compatibility for an embedded caller that was mounted while
-      // an older request was already in flight.
-      if (onDraftCreated) {
-        onDraftCreated(record.id);
-        return;
-      }
-      setSuccessRecord(record);
-    },
-    onError(error) {
-      setSuccessRecord(null);
-      submitLockedRef.current = false;
-
-      if (isApiError(error)) {
-        handleSubmissionError(error, setFormMessage, setBackendValidation);
-        return;
-      }
-
-      setBackendValidation(null);
-      setFormMessage("Audit draft creation failed. Try again later.");
-    }
-  });
+  // CFAC-4S7: every human-authored evidence flow starts with a persisted Draft.
+  // The canonical Assessor/Reviewer gate is enforced only when that Draft is
+  // finalized, so a one-shot non-Draft create path must never be selected here.
+  const requiresPersistedDraft = true;
   const draftMutation = useMutation({
     mutationFn: createOperationalEvidenceDraft,
     onSuccess(record) {
@@ -573,7 +541,7 @@ export function RuntimeTemplatePage({
         repeatableSectionControls={repeatableSectionControls}
         key={`${activeEditingSession.runtimeTemplate.template_version_id}:${resolvedContextQuery.data?.selected_id ?? "unresolved-context"}`}
         formMessage={formMessage}
-        isSubmitting={mutation.isPending || draftMutation.isPending}
+        isSubmitting={draftMutation.isPending}
         embedded={Boolean(embeddedTemplateCode)}
         onDirtyChange={(dirty) => { setFormDirty(dirty); onDirtyChange?.(dirty); }}
         onSubmit={
@@ -584,11 +552,9 @@ export function RuntimeTemplatePage({
                   payload,
                   clientId: effectiveClientId,
                   facilityId,
-                  isPending: mutation.isPending || draftMutation.isPending,
-                  mutate: requiresPersistedDraft
-                    ? (request) => draftMutation.mutate({ ...request, idempotency_key: draftIdempotencyKeyRef.current })
-                    : (request) => mutation.mutate(request),
-                  idempotencyKey: requiresPersistedDraft ? draftIdempotencyKeyRef.current : undefined,
+                  isPending: draftMutation.isPending,
+                  mutate: (request) => draftMutation.mutate({ ...request, idempotency_key: draftIdempotencyKeyRef.current }),
+                  idempotencyKey: draftIdempotencyKeyRef.current,
                   setBackendValidation,
                   setFormMessage,
                   setSuccessRecord,
@@ -683,12 +649,6 @@ function handleEvidenceSubmit({
       sections: payload.sections
     }
   });
-}
-
-function hasGovernedSignatureFields(definition: OetsDefinition) {
-  return definition.sections.some((section) => section.fields.some((field) =>
-    field.field_type === "SIGNATURE" && Boolean(field.metadata?.governed_attestation)
-  ));
 }
 
 function handleSubmissionError(

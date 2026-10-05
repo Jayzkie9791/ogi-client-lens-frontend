@@ -19,6 +19,7 @@ export const routes = {
   operations: "/workbench/operations",
   records: "/workbench/operations/records",
   myDrafts: "/workbench/operations/my-drafts",
+  canonicalReviewQueue: "/workbench/operations/awaiting-review",
   administration: "/workbench/administration",
   administrationClientPocs: "/workbench/administration/client-pocs",
   registrationClients: "/workbench/registration/clients",

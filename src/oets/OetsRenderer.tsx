@@ -24,6 +24,7 @@ import {
   formatEvidenceSectionTitle,
 } from "./evidencePresentation";
 import { CreateEvidenceAttestationRequest, EvidenceAttestation } from "./attestationApi";
+import { isF048CredentialOfficerNumberProjection, projectF048CredentialOfficerNumber } from "./f048CredentialOfficerProjection";
 import { OetsProgressNavigator } from "./OetsProgressNavigator";
 import {
   deriveOetsProgress,
@@ -1180,6 +1181,9 @@ function projectGovernedAttestationValue(
   attestations: readonly EvidenceAttestation[],
   sectionInstanceIndex: number | null
 ) {
+  if (isF048CredentialOfficerNumberProjection(field)) {
+    return projectF048CredentialOfficerNumber(attestations,sectionInstanceIndex);
+  }
   const projection = readGovernedAttestationProjection(field);
   if (!projection) return fallback;
   const current = attestations.find(
@@ -1194,8 +1198,9 @@ function projectGovernedAttestationValue(
 }
 
 function isGovernedAttestationProjection(field: OetsField) {
-  return readGovernedAttestationProjection(field) !== null;
+  return isF048CredentialOfficerNumberProjection(field)||readGovernedAttestationProjection(field) !== null;
 }
+
 
 function readGovernedAttestationProjection(field: OetsField): {
   sourceSignatureFieldId: string;

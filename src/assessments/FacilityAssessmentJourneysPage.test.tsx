@@ -295,7 +295,12 @@ describe("FacilityAssessmentJourneysPage", () => {
     await user.click(await screen.findByRole("button", { name: "Start form →" }));
     expect(screen.getByRole("dialog", { name: "Client and Facility Information" })).toBeInTheDocument();
     expect(screen.getAllByLabelText("Mock canonical form field")).toHaveLength(1);
-    expect(runtimeTemplateSpy).toHaveBeenLastCalledWith(expect.objectContaining({ initialFieldValues: expect.objectContaining({ CLIENT_ID: "CLIENT-2026-000016", CLIENT_NUMBER: "CLIENT-2026-000016", CLIENT_ORGANIZATION_ID: "CLIENT-2026-000016", CLIENT_NAME: "Braven Resorts", CLIENT_ORGANIZATION: "Braven Resorts", FACILITY_ID: "FACILITY-2026-000017", FACILITY_NUMBER: "FACILITY-2026-000017", FACILITY_TYPE: ["WATERPARK"], ASSESSOR: "Maria Hannah Khrisna Depacaquivo", ASSESSMENT_DATE: expect.any(String) }) }));
+    expect(runtimeTemplateSpy).toHaveBeenLastCalledWith(expect.objectContaining({
+      initialClientId: "client-1",
+      initialFacilityId: "facility-1",
+      lockInitialScope: true
+    }));
+    expect(runtimeTemplateSpy.mock.lastCall?.[0]).not.toHaveProperty("initialFieldValues");
     expect(screen.queryByText("Unsaved changes")).not.toBeInTheDocument();
     await user.type(screen.getByLabelText("Mock canonical form field"), "changed");
     expect(screen.getByText("Unsaved changes")).toBeInTheDocument();

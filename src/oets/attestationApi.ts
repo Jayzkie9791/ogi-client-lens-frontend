@@ -28,6 +28,7 @@ export interface EvidenceAttestation {
   purpose: AttestationPurpose;
   signer_mode: AttestationSignerMode;
   subject_name_snapshot: string;
+  subject_business_identifier_snapshot?: string | null;
   external_subject_role_snapshot: string | null;
   actor_user_id: string;
   actor_display_name_snapshot: string;
@@ -97,6 +98,7 @@ function isEvidenceAttestation(value: unknown): value is EvidenceAttestation {
     typeof value.attestation_statement_snapshot === "string" &&
     isPurpose(value.purpose) &&
     typeof value.subject_name_snapshot === "string" &&
+    isNullableString(value.subject_business_identifier_snapshot) &&
     isNullableString(value.external_subject_role_snapshot) &&
     typeof value.actor_user_id === "string" &&
     typeof value.actor_display_name_snapshot === "string" &&
@@ -118,6 +120,7 @@ const evidenceAttestationProperties = [
   "template_checksum", "payload_checksum", "signature_field_id",
   "signature_field_code_snapshot", "section_code_snapshot", "section_instance_index",
   "attestation_statement_snapshot", "purpose", "signer_mode", "subject_name_snapshot",
+  "subject_business_identifier_snapshot",
   "external_subject_role_snapshot", "actor_user_id", "actor_display_name_snapshot",
   "signer_user_id", "signer_display_name_snapshot", "client_id_snapshot",
   "facility_id_snapshot", "lifecycle_state_snapshot", "signed_at", "correlation_id",

@@ -158,7 +158,7 @@ function attestation(): EvidenceAttestation {
     signature_field_id: "field-1", signature_field_code_snapshot: "VALUE",
     section_code_snapshot: "GENERAL", section_instance_index: null,
     attestation_statement_snapshot: "I attest.", purpose: "APPROVAL",
-    signer_mode: "AUTHENTICATED_SELF_ATTESTATION", subject_name_snapshot: "Operator",
+    signer_mode: "AUTHENTICATED_SELF_ATTESTATION", subject_name_snapshot: "Operator", subject_business_identifier_snapshot: null,
     external_subject_role_snapshot: null, actor_user_id: "user-1",
     actor_display_name_snapshot: "Operator", signer_user_id: "user-1",
     signer_display_name_snapshot: "Operator", client_id_snapshot: null,
