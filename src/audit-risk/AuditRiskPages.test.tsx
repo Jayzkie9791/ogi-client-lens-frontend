@@ -144,10 +144,13 @@ describe("Audit workspace read paths", () => {
       responses: [], findings: [], completeness: { is_complete: true, incomplete: [] }, execution_authority: { state: "ACTIVE", mutation_allowed: false, reason: "AUDIT_EXECUTION_BOUND_TO_ANOTHER_AUDITOR", appointment_id: "00000000-0000-4000-8000-000000000902", appointment_identifier: "AUDITOR-APPOINTMENT-2026-000001", audit_number: "AUDIT-2026-000001" }, completion_eligible: false, legacy_history_excluded: true
     };
     const internalSession = { ...session, roles: ["OGI_OFFICER"], permissions: ["view_audit", "create_audit"] };
-    const { calls } = mockRoutes([...authRoutes(internalSession), route(`/api/v1/audits/${auditId}/execution`, execution)]);
+    const executionPath = `/api/v1/audits/${auditId}/execution`;
+    const { calls, waitForCall } = mockRoutes([...authRoutes(internalSession), route(executionPath, execution)]);
+    const executionQueryStarted = waitForCall(executionPath);
     renderRoute(routes.auditExecutionPath(auditId));
+    await executionQueryStarted;
     expect(await screen.findByRole("heading", { name: audit.business_identifier })).toBeInTheDocument();
-    expect(calls).toContain(`/api/v1/audits/${auditId}/execution`);
+    expect(calls).toContain(executionPath);
     expect(screen.queryByRole("button", { name: /Save Section/ })).not.toBeInTheDocument();
   });
 
@@ -198,16 +201,27 @@ function authRoutes(authSession = session): MockRoute[] {
 
 function mockRoutes(routesToMock: MockRoute[]) {
   const calls: string[] = [];
+  const callWaiters = new Map<string, Array<() => void>>();
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = semanticPath(input);
     const method = init?.method ?? "GET";
     calls.push(url);
+    for (const resolve of callWaiters.get(url) ?? []) resolve();
+    callWaiters.delete(url);
     const match = routesToMock.find((candidate) => candidate.url === url && (candidate.method ?? "GET") === method);
     if (!match) throw new Error(`Unexpected fetch call: ${method} ${url}`);
     if (match.response) return match.response();
     return jsonResponse(match.body, match.status ?? 200);
   }));
-  return { calls };
+  return {
+    calls,
+    waitForCall(url: string) {
+      if (calls.includes(url)) return Promise.resolve();
+      return new Promise<void>((resolve) => {
+        callWaiters.set(url, [...(callWaiters.get(url) ?? []), resolve]);
+      });
+    }
+  };
 }
 
 function renderRoute(initialPath: string) {

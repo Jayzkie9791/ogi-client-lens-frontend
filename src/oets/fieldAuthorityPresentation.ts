@@ -5,7 +5,7 @@ import type {
   OetsFieldAuthorityReasonCode
 } from "./types";
 
-const messages: Record<OetsFieldAuthorityReasonCode, string> = {
+export const oetsFieldAuthorityMessages: Readonly<Record<OetsFieldAuthorityReasonCode, string>> = {
   OPERATOR_RECORDED: "Recorded manually.",
   OPERATOR_RECORDED_FORMULA_ABSENT: "Recorded manually; no approved calculation formula is implemented.",
   OPERATOR_RECORDED_SEMANTICS_BLOCKED: "Recorded manually; calculation semantics are not approved.",
@@ -15,15 +15,23 @@ const messages: Record<OetsFieldAuthorityReasonCode, string> = {
   GOVERNED_CONTEXT_PROJECTION_EFFECTIVE: "Provided from the selected governed record.",
   GOVERNED_AGGREGATE_PROJECTION: "Projected from governed source evidence.",
   GENERATED_AT_DRAFT_CREATION: "Generated automatically when this record is created.",
+  GENERATED_TEMPORAL_VALUE: "Generated automatically from the governed date or time authority.",
+  GOVERNED_ASSIGNED_ROLE_PROJECTION: "Provided from the governed assigned role.",
+  STATIC_TEMPLATE_CONTENT: "Fixed content defined by this governed template.",
+  STATIC_CERTIFICATION_TEXT: "Fixed certification text defined by this governed template.",
+  TECHNICAL_ROW_IDENTITY: "Managed automatically as the technical row identifier.",
   CALCULATED_BY_SERVER: "Calculated automatically from governed values in this record.",
   GOVERNED_ATTESTATION_ACTION: "Use the governed attestation action shown for this field.",
   DERIVED_FROM_GOVERNED_ATTESTATION: "Derived from the governed attestation.",
   GOVERNED_ARTIFACT_DEFERRED: "Governed artifact authority is not yet implemented.",
+  DOWNSTREAM_UNAVAILABLE: "Unavailable because the governed downstream value is not available.",
+  RETIRED_STATIC_NOTE: "Retired template note; no entry is permitted.",
+  INTENTIONALLY_UNUSED: "Intentionally unused; no entry is permitted.",
   UNAVAILABLE_POST_ISSUANCE: "Available only after governed issuance."
 };
 
 export function fieldAuthorityMessage(field: OetsFieldAuthorityPresentationField) {
-  return messages[field.reason_code];
+  return oetsFieldAuthorityMessages[field.reason_code];
 }
 
 export function buildFieldAuthorityIndex(

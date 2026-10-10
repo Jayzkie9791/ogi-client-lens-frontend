@@ -11,7 +11,7 @@ export interface SelfProfile {
   phone_number: string | null;
   employment_status: string;
   hire_date: string | null;
-  client: { id: string; organization_name: string };
+  client: { id: string; organization_name: string } | null;
   facilities: Array<{ id: string; assignment_id: string; facility_name: string; position: string | null; is_primary: boolean; assigned_from: string; assigned_to: string | null }>;
 }
 export interface SelfCredentials {
@@ -29,6 +29,6 @@ export function getMyCertificate(issuanceId: string) {
   return apiBlobRequest(`/api/v1/self/credential-issuances/${encodeURIComponent(issuanceId)}/certificate`);
 }
 function isProfile(value: unknown): value is SelfProfile {
-  return isObject(value) && typeof value.id === "string" && typeof value.full_name === "string" && typeof value.employment_status === "string" && isObject(value.client) && typeof value.client.organization_name === "string" && Array.isArray(value.facilities);
+  return isObject(value) && typeof value.id === "string" && typeof value.full_name === "string" && typeof value.employment_status === "string" && (value.client === null || (isObject(value.client) && typeof value.client.organization_name === "string")) && Array.isArray(value.facilities);
 }
 function isObject(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }

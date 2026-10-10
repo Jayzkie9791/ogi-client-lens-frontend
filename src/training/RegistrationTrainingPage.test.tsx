@@ -864,6 +864,7 @@ function renderWithRoute(initialPath: string) {
 
 function mockFetchRoutes(routesToMock: MockRoute[]) {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const callWaiters = new Map<string, Array<() => void>>();
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = readRequestPath(input);
     const method = init?.method ?? "GET";
@@ -872,6 +873,8 @@ function mockFetchRoutes(routesToMock: MockRoute[]) {
     );
 
     calls.push({ url, init });
+    for (const resolve of callWaiters.get(url) ?? []) resolve();
+    callWaiters.delete(url);
 
     if (!route && url === "/api/v1/training/programs" && method === "GET") {
       return new Response(JSON.stringify(programAuthority), {
@@ -922,7 +925,15 @@ function mockFetchRoutes(routesToMock: MockRoute[]) {
 
   vi.stubGlobal("fetch", fetchMock);
 
-  return { calls };
+  return {
+    calls,
+    waitForCall(url: string) {
+      if (calls.some((call) => call.url === url)) return Promise.resolve();
+      return new Promise<void>((resolve) => {
+        callWaiters.set(url, [...(callWaiters.get(url) ?? []), resolve]);
+      });
+    }
+  };
 }
 
 function readRequestPath(input: RequestInfo | URL) {
@@ -1006,7 +1017,7 @@ describe("Registration Training frontend", () => {
       },
       journey_progress: { attendance: false, skills_assessment: null, knowledge_assessment: null, readiness: null, certification: null, next_action: "RECORD_ATTENDANCE" as const }
     };
-    mockFetchRoutes([
+    const { waitForCall } = mockFetchRoutes([
       ...authRoutes(),
       { url: "/api/v1/training/enrollments", responses: [
         { status: 200, body: { enrollments: [historical], next_cursor: null } },
@@ -1019,7 +1030,9 @@ describe("Registration Training frontend", () => {
       journeyProjectionRoute(historical, 2),
       attendanceWorkspaceRoute()
     ]);
+    const enrollmentQueryStarted = waitForCall("/api/v1/training/enrollments");
     const { router } = renderWithRoute(routes.trainingJourneys);
+    await enrollmentQueryStarted;
     const toggle = await screen.findByRole("button", { name: new RegExp(traineeA.full_name) }, { timeout: 5_000 });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     await user.click(toggle);

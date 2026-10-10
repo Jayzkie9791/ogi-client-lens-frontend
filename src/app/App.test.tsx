@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, beforeEach, expect, vi } from "vitest";
@@ -398,12 +398,14 @@ function authHeaders(calls: Array<{ init?: RequestInit }>) {
 
 beforeEach(() => {
   window.sessionStorage.clear();
+  window.localStorage.removeItem("client-lens:sidebar-pinned-open");
 });
 
 afterEach(() => {
   configureApiAuth(null);
   vi.unstubAllGlobals();
   window.sessionStorage.clear();
+  window.localStorage.removeItem("client-lens:sidebar-pinned-open");
 });
 
 describe("Client Lens authentication foundation", () => {
@@ -438,6 +440,100 @@ describe("Client Lens authentication foundation", () => {
     return expect(
       screen.findByRole("img", { name: "Client Lens by OGI Ltd." })
     ).resolves.toHaveAttribute("src", "/brand/client-lens-logo.png");
+  });
+
+  it("keeps the desktop sidebar compact by default and supports preview and persisted pinning", async () => {
+    const user = userEvent.setup();
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: session }
+    ]);
+    renderWithRoute(routes.workbench);
+
+    await screen.findByRole("navigation", { name: "Primary navigation" });
+    const sidebar = screen.getByRole("complementary", { name: "Application sidebar" });
+    expect(sidebar).toHaveAttribute("data-desktop-mode", "collapsed");
+
+    fireEvent.mouseEnter(sidebar);
+    expect(sidebar).toHaveAttribute("data-desktop-mode", "preview");
+    fireEvent.mouseLeave(sidebar);
+    expect(sidebar).toHaveAttribute("data-desktop-mode", "collapsed");
+
+    const workspace = screen.getByRole("button", { name: "Workspace" });
+    await user.click(workspace);
+    expect(sidebar).toHaveAttribute("data-desktop-mode", "preview");
+
+    const pin = screen.getByRole("button", { name: "Pin navigation open" });
+    await user.click(pin);
+    expect(sidebar).toHaveAttribute("data-desktop-mode", "pinned");
+    expect(screen.getByRole("button", { name: "Unpin navigation" })).toHaveAttribute("aria-pressed", "true");
+    expect(window.localStorage.getItem("client-lens:sidebar-pinned-open")).toBe("true");
+
+    fireEvent.mouseLeave(sidebar);
+    expect(sidebar).toHaveAttribute("data-desktop-mode", "pinned");
+    expect(screen.queryByRole("link", { name: "Overview" })).not.toBeInTheDocument();
+  });
+
+  it("dismisses top and upward-opening submenus with the complete desktop navigation region", async () => {
+    const user = userEvent.setup();
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: submitCapableSession }
+    ]);
+    renderWithRoute(routes.workbench);
+
+    await screen.findByRole("navigation", { name: "Primary navigation" });
+    const sidebar = screen.getByRole("complementary", { name: "Application sidebar" });
+
+    fireEvent.mouseEnter(sidebar);
+    await user.click(screen.getByRole("button", { name: "Workspace" }));
+    expect(screen.getByRole("link", { name: "Overview" })).toBeInTheDocument();
+    fireEvent.mouseLeave(sidebar);
+    expect(sidebar).toHaveAttribute("data-desktop-mode", "collapsed");
+    expect(screen.queryByRole("link", { name: "Overview" })).not.toBeInTheDocument();
+
+    fireEvent.mouseEnter(sidebar);
+    const governance = screen.getByRole("button", { name: "Governance" });
+    await user.click(governance);
+    const governancePanel = document.getElementById("sidebar-group-governance");
+    expect(governancePanel).not.toBeNull();
+    expect(screen.getByRole("link", { name: "Operations" })).toBeInTheDocument();
+
+    fireEvent.mouseOut(governance.closest("section")!, { relatedTarget: governancePanel });
+    expect(screen.getByRole("link", { name: "Operations" })).toBeInTheDocument();
+
+    fireEvent.mouseLeave(sidebar);
+    expect(sidebar).toHaveAttribute("data-desktop-mode", "collapsed");
+    expect(screen.queryByRole("link", { name: "Operations" })).not.toBeInTheDocument();
+  });
+
+  it("closes the mobile drawer on outside click, Escape, and navigation", async () => {
+    const user = userEvent.setup();
+    window.sessionStorage.setItem(getRefreshTokenStorageKey(), "refresh-token");
+    mockFetchQueue([
+      { status: 200, body: { accessToken: "access-token" } },
+      { status: 200, body: session }
+    ]);
+    renderWithRoute(routes.workbench);
+
+    const menu = await screen.findByRole("button", { name: "Menu" });
+    const sidebar = screen.getByRole("complementary", { name: "Application sidebar" });
+    await user.click(menu);
+    expect(sidebar).toHaveAttribute("data-mobile-open", "true");
+    await user.click(screen.getAllByRole("button", { name: "Close navigation" })[0]);
+    expect(sidebar).toHaveAttribute("data-mobile-open", "false");
+
+    await user.click(menu);
+    await user.keyboard("{Escape}");
+    expect(sidebar).toHaveAttribute("data-mobile-open", "false");
+    expect(menu).toHaveFocus();
+
+    await user.click(menu);
+    await user.click(screen.getByRole("button", { name: "Workspace" }));
+    await user.click(screen.getByRole("link", { name: "Overview" }));
+    expect(sidebar).toHaveAttribute("data-mobile-open", "false");
   });
 
   it("renders the primary navigation and permission-aware reviews link", async () => {

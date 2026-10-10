@@ -23,4 +23,10 @@ describe("Lifeguard self-service API", () => {
       "/api/v1/self/credential-issuances/issuance-1/certificate"
     ]);
   });
+
+  it("accepts an OGI self profile without Client or Facility ownership", async () => {
+    const profile = { id: "staff-ogi", client_employee_number: null, full_name: "OGI Officer", first_name: null, middle_name: null, last_name: null, email: null, phone_number: null, employment_status: "INACTIVE", hire_date: null, client: null, facilities: [] };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(profile), { status: 200, headers: { "Content-Type": "application/json" } })));
+    await expect(getMyProfile()).resolves.toEqual(profile);
+  });
 });

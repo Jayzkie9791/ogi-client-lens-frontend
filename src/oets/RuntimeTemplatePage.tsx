@@ -4,7 +4,7 @@ import {
   useQuery,
   useQueryClient
 } from "@tanstack/react-query";
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { isApiError } from "../api/errors";
@@ -24,10 +24,12 @@ import { narrowOetsDefinition } from "./definitionGuards";
 import { isOetsDeveloperDiagnosticsEnabled } from "./developerDiagnostics";
 import {
   createOperationalEvidenceDraft,
+  F026ReviewAuthoritySelection,
   OperationalEvidenceCreateRequest,
   OperationalEvidenceRecord,
   OetsDraftCreationResolution
 } from "./evidenceSubmissionApi";
+import { F026ReviewAuthorityPanel } from "./F026ReviewAuthorityPanel";
 import {
   mapBackendValidationDetails,
   OetsValidationSummary
@@ -95,6 +97,8 @@ export function RuntimeTemplatePage({
   const [contextSearchInput, setContextSearchInput] = useState("");
   const [contextSearchQuery, setContextSearchQuery] = useState("");
   const [formDirty, setFormDirty] = useState(false);
+  const [f026ReviewAuthority,setF026ReviewAuthority]=useState<F026ReviewAuthoritySelection>();
+  const updateF026ReviewAuthority=useCallback((selection:F026ReviewAuthoritySelection|undefined)=>setF026ReviewAuthority(selection),[]);
   const contextIsLocked = Boolean(lockInitialContext && initialContextId);
   const scopeIsLocked = Boolean(lockInitialScope && initialClientId);
   const submitLockedRef = useRef(false);
@@ -264,6 +268,7 @@ export function RuntimeTemplatePage({
     setContextSearchInput("");
     setContextSearchQuery("");
     setFormDirty(false);
+    setF026ReviewAuthority(undefined);
   }, [templateCode, effectiveClientId, facilityId, initialContextId]);
   const contextCandidates = useMemo(() => {
     const seen = new Set<string>();
@@ -322,6 +327,7 @@ export function RuntimeTemplatePage({
     navigate({ pathname: routes.evidenceRecordPath(existingContextRecord.evidence_record_id), search: preservedSearch ? `?${preservedSearch}` : "" });
   };
   const successRecordSearch = searchParams.toString();
+  const requiresF026ReviewAuthority=activeEditingSession?.runtimeTemplate.template_code==="OGI_F026_INSTRUCTOR_QUALITY_ASSURANCE_REVIEW"&&activeEditingSession.runtimeTemplate.template_version==="3.3";
 
   if (!templateCode) {
     return (
@@ -515,6 +521,7 @@ export function RuntimeTemplatePage({
           {formDirty ? <p className="mt-2 text-sm text-amber-700">Save or clear your changes before changing evidence context.</p> : null}
         </Surface>
       ) : null}
+      {!readOnly&&requiresF026ReviewAuthority&&effectiveClientId&&facilityId?<F026ReviewAuthorityPanel clientId={effectiveClientId} disabled={formDirty} facilityId={facilityId} onChange={updateF026ReviewAuthority}/>:null}
       {existingContextRecord ? (
         <Surface className="border-blue-300 bg-blue-50/60">
           <p className="font-semibold text-primary-navy">
@@ -559,7 +566,8 @@ export function RuntimeTemplatePage({
                   setFormMessage,
                   setSuccessRecord,
                   submitLockedRef,
-                  context: resolvedContextQuery.data ? { requirement_code: resolvedContextQuery.data.requirement_code, selected_id: resolvedContextQuery.data.selected_id } : undefined
+                  context: resolvedContextQuery.data ? { requirement_code: resolvedContextQuery.data.requirement_code, selected_id: resolvedContextQuery.data.selected_id } : undefined,
+                  f026ReviewAuthority
                 })
         }
         readOnly={readOnly}
@@ -576,7 +584,8 @@ export function RuntimeTemplatePage({
         submitDisabledReason={readSubmissionDisabledReason(
           effectiveClientId,
           successRecord,
-          contextRequirementQuery.data?.required === true && (!resolvedContextQuery.data || existingContextRecordQuery.isLoading)
+          contextRequirementQuery.data?.required === true && (!resolvedContextQuery.data || existingContextRecordQuery.isLoading),
+          requiresF026ReviewAuthority&&!f026ReviewAuthority
         )}
         submitSuccess={
           successRecord
@@ -607,6 +616,7 @@ interface SubmitInput {
   submitLockedRef: { current: boolean };
   idempotencyKey?: string;
   context?: { requirement_code: string; selected_id: string };
+  f026ReviewAuthority?: F026ReviewAuthoritySelection;
 }
 
 function handleEvidenceSubmit({
@@ -620,7 +630,8 @@ function handleEvidenceSubmit({
   setSuccessRecord,
   submitLockedRef,
   idempotencyKey,
-  context
+  context,
+  f026ReviewAuthority
 }: SubmitInput) {
   if (isPending || submitLockedRef.current) {
     return;
@@ -645,6 +656,7 @@ function handleEvidenceSubmit({
     ...(facilityId ? { facility_id: facilityId } : {}),
     ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
     ...(context ? { context } : {}),
+    ...(f026ReviewAuthority ? { f026_review_authority:f026ReviewAuthority } : {}),
     payload: {
       sections: payload.sections
     }
@@ -693,13 +705,16 @@ function handleSubmissionError(
 function readSubmissionDisabledReason(
   clientId: string | null,
   successRecord: OperationalEvidenceRecord | null,
-  contextRequiredButUnresolved = false
+  contextRequiredButUnresolved = false,
+  f026AuthorityRequiredButUnresolved = false
 ) {
   if (successRecord) {
     return "This audit draft has already been created.";
   }
 
   if (contextRequiredButUnresolved) return "Select and verify an eligible evidence context before creating this evidence.";
+
+  if(f026AuthorityRequiredButUnresolved)return "Complete the Instructor QA Review authority selection before creating this evidence.";
 
   return clientId ? null : "You must first select a client before creating an audit draft.";
 }
@@ -739,7 +754,7 @@ function applyContextFieldPolicy(definition: OetsDefinition | undefined, policy:
         return {
           ...field,
           required: field.required || Boolean(requiredFields?.includes(field.field_code)),
-          readonly: field.readonly || (isF002 && (armaaOutputs.has(field.field_code) || intelligenceOutputs.has(field.field_code) || field.field_code === "ASSESSOR" || field.field_code === "ASSESSMENT_DATE" || field.field_code === "DATE" || field.field_code === "DATE_2")) || isApplicableInitialFieldValue(section, field, lockedValues) || authority === "READ_ONLY_DERIVED" || authority === "UNAVAILABLE_POST_ISSUANCE",
+          readonly: field.readonly || (isF002 && (armaaOutputs.has(field.field_code) || intelligenceOutputs.has(field.field_code) || field.field_code === "ASSESSOR" || (field.field_code === "ASSESSMENT_DATE" && definition.template_metadata.version !== "3.6") || field.field_code === "DATE" || field.field_code === "DATE_2")) || isApplicableInitialFieldValue(section, field, lockedValues) || authority === "READ_ONLY_DERIVED" || authority === "UNAVAILABLE_POST_ISSUANCE",
           validation: isF002 && (armaaInputs.has(field.field_code) || intelligenceInputs.has(field.field_code))
             ? { ...field.validation, minimum: 0, maximum: 100 }
             : field.validation,

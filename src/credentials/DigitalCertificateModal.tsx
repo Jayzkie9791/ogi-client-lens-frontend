@@ -1,9 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { isApiError } from "../api/errors";
-import { Button } from "../ui/components/Button";
+import { CertificatePreviewModal } from "./CertificatePreviewModal";
 import { CertificateVisual } from "./CertificatePage";
 import { getCredentialIssuance, getCredentialIssuanceCertificate } from "./credentialsApi";
 
@@ -18,164 +17,16 @@ export function DigitalCertificateModal({
   onClose,
   returnFocusElement
 }: DigitalCertificateModalProps) {
-  const [portalRoot] = useState(() => document.createElement("div"));
   const [certificateRequestId] = useState(() => crypto.randomUUID());
-  const dialogRef = useRef<HTMLDivElement>(null);
-  const onCloseRef = useRef(onClose);
-  const dismissRef = useRef<() => void>(() => onCloseRef.current());
-  onCloseRef.current = onClose;
   const issuanceQuery = useQuery({
     queryKey: ["credential-issuance", issuanceId],
     queryFn: () => getCredentialIssuance(issuanceId),
     retry: false
   });
-  const certificateQuery = useQuery({
-    queryKey: ["credential-certificate", issuanceId, certificateRequestId],
-    queryFn: () => getCredentialIssuanceCertificate(issuanceId, true),
-    retry: false
-  });
-  const certificateUrl = useCertificateObjectUrl(certificateQuery.data?.blob);
-  const certificateFilename = certificateQuery.data?.filename ?? `${issuanceQuery.data?.certification_number_snapshot ?? "digital-certificate"}.pdf`;
-
-  useLayoutEffect(() => {
-    const previouslyFocused = returnFocusElement ?? (
-      document.activeElement instanceof HTMLElement ? document.activeElement : null
-    );
-    const priorOverflow = document.body.style.overflow;
-    const background = Array.from(document.body.children).map((element) => ({
-      element: element as HTMLElement,
-      ariaHidden: element.getAttribute("aria-hidden"),
-      inert: (element as HTMLElement).inert
-    }));
-    portalRoot.dataset.digitalCertificatePortal = "true";
-    document.body.appendChild(portalRoot);
-    for (const item of background) {
-      item.element.inert = true;
-      item.element.setAttribute("aria-hidden", "true");
-    }
-    document.body.style.overflow = "hidden";
-    dialogRef.current?.focus();
-    let restored = false;
-    const restorePage = () => {
-      if (restored) return;
-      restored = true;
-      document.body.style.overflow = priorOverflow;
-      for (const item of background) {
-        item.element.inert = item.inert;
-        if (item.ariaHidden === null) item.element.removeAttribute("aria-hidden");
-        else item.element.setAttribute("aria-hidden", item.ariaHidden);
-      }
-      portalRoot.remove();
-      if (previouslyFocused?.isConnected) previouslyFocused.focus();
-    };
-    dismissRef.current = () => {
-      restorePage();
-      onCloseRef.current();
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        dismissRef.current();
-      }
-    };
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("keydown", closeOnEscape);
-      restorePage();
-      dismissRef.current = () => onCloseRef.current();
-    };
-  }, [portalRoot, returnFocusElement]);
-
-  return createPortal(
-    <div
-      className="fixed inset-0 z-50 bg-canvas"
-    >
-      <div
-        aria-label="Digital Certificate"
-        aria-modal="true"
-        className="flex h-dvh w-full flex-col overflow-hidden bg-surface"
-        ref={dialogRef}
-        role="dialog"
-        tabIndex={-1}
-      >
-        <div className="flex flex-col gap-4 border-b border-border bg-surface px-4 py-3 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:px-6">
-          <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-wide text-primary-blue">
-              Certification Details
-            </p>
-            <h2
-              className="mt-1 text-xl font-semibold text-text-primary"
-            >
-              {issuanceQuery.data?.holder_name_snapshot ?? "Digital Certificate"}
-            </h2>
-            {issuanceQuery.data ? <p className="mt-1 text-sm text-text-muted">{issuanceQuery.data.certification_level_snapshot} · {issuanceQuery.data.program_display_name_snapshot}</p> : null}
-          </div>
-          <div className="flex shrink-0 flex-wrap gap-2">
-            <Button disabled={!certificateUrl} onClick={() => downloadCertificate(certificateUrl, certificateFilename)}>Download PDF</Button>
-            <Button onClick={() => dismissRef.current()} variant="secondary">Close</Button>
-          </div>
-        </div>
-        <div className="min-h-0 flex-1 overflow-auto bg-canvas p-3 sm:p-6">
-          {issuanceQuery.isLoading ? (
-            <p className="text-sm text-text-muted" role="status">
-              Loading digital certificate.
-            </p>
-          ) : issuanceQuery.error ? (
-            <DigitalCertificateError error={issuanceQuery.error} />
-          ) : issuanceQuery.data ? (
-            <CertificateVisual issuance={issuanceQuery.data} showGuides={false} />
-          ) : (
-            <p className="text-sm text-text-muted">
-              The digital certificate was not returned.
-            </p>
-          )}
-        </div>
-      </div>
-    </div>,
-    portalRoot
-  );
-}
-
-function useCertificateObjectUrl(blob: Blob | undefined) {
-  const [objectUrl, setObjectUrl] = useState<string | null>(null);
-  useEffect(() => {
-    if (!blob) { setObjectUrl(null); return undefined; }
-    const nextObjectUrl = URL.createObjectURL(blob);
-    setObjectUrl(nextObjectUrl);
-    return () => URL.revokeObjectURL(nextObjectUrl);
-  }, [blob]);
-  return objectUrl;
-}
-
-function downloadCertificate(objectUrl: string | null, filename: string) {
-  if (!objectUrl) return;
-  const link = document.createElement("a");
-  link.href = objectUrl;
-  link.download = filename;
-  link.click();
-}
-
-function DigitalCertificateError({ error }: { error: Error }) {
-  if (isApiError(error) && error.status === 403) {
-    return (
-      <p className="text-sm text-text-muted">
-        The digital certificate is not available with your current authorization.
-      </p>
-    );
-  }
-
-  if (isApiError(error) && error.status === 404) {
-    return (
-      <p className="text-sm text-text-muted">
-        The digital certificate is unavailable or no longer visible to your current scope.
-      </p>
-    );
-  }
-
-  return (
-    <p className="text-sm text-text-muted">
-      The digital certificate could not be loaded. Try again later.
-    </p>
-  );
+  const error=issuanceQuery.error;
+  const errorMessage=isApiError(error)&&error.status===403?"The digital certificate is not available with your current authorization.":isApiError(error)&&error.status===404?"The digital certificate is unavailable or no longer visible to your current scope.":"The digital certificate could not be loaded. Try again later.";
+  const description = issuanceQuery.data
+    ? `${issuanceQuery.data.holder_name_snapshot} · ${issuanceQuery.data.certification_level_snapshot} · ${issuanceQuery.data.program_display_name_snapshot}`
+    : "Issued certificate document";
+  return <CertificatePreviewModal description={description} errorMessage={errorMessage} heading="Digital Certificate" loadCertificate={()=>getCredentialIssuanceCertificate(issuanceId,true)} onClose={onClose} previewContent={issuanceQuery.data ? <CertificateVisual issuance={issuanceQuery.data} showGuides={false} /> : undefined} queryKey={["credential-certificate",issuanceId,certificateRequestId]} returnFocusElement={returnFocusElement}/>;
 }

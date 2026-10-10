@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -123,6 +123,7 @@ const credentialsListResponse: CredentialsListResponse = {
 
 const anaCredentialsDetail: CredentialsPersonnelDetailProjection = {
   ...anaCredentials,
+  organizational_affiliation: "CLIENT",
   email: "ana.santos@example.test",
   phone_number: "+63 900 000 3001",
   notes: "Credential projection fixture",
@@ -161,6 +162,15 @@ const anaCredentialsDetail: CredentialsPersonnelDetailProjection = {
       previous_authorization_id: null
     }
   ]
+};
+
+const ogiCredentialsDetail: CredentialsPersonnelDetailProjection = {
+  ...anaCredentialsDetail,
+  id: "7c02a783-b134-44dc-a325-bdbec86da723",
+  full_name: "Maria Hannah Khrisna Depacaquivo",
+  organizational_affiliation: "OGI",
+  client: null,
+  facilities: []
 };
 
 const restrictedCredentialsDetail: CredentialsPersonnelDetailProjection = {
@@ -334,22 +344,60 @@ describe("Credentials V1 frontend", () => {
   });
 
   it("renders loading, success, empty, and error states for the personnel-centered list", async () => {
-    mockFetchRoutes([
-      ...authRoutes(),
-      {
-        url: "/api/v1/credentials",
-        responses: [{ status: 200, body: { personnel: [] } }]
+    let settled = false;
+    let resolveCredentialsRequest!: (response: Response) => void;
+    const pendingCredentialsResponse = new Promise<Response>((resolve) => {
+      resolveCredentialsRequest = resolve;
+    });
+    const settleCredentialsRequest = () => {
+      if (settled) return;
+      settled = true;
+      resolveCredentialsRequest(new Response(JSON.stringify({ personnel: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      }));
+    };
+    const firstFetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = readRequestPath(input);
+      const method = init?.method ?? "GET";
+      if (method === "POST" && url === "/api/v1/auth/refresh") {
+        return new Response(JSON.stringify({ accessToken: "access-token" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
       }
-    ]);
+      if (method === "GET" && url === "/api/v1/auth/me") {
+        return new Response(JSON.stringify(credentialsSession), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+      if (method === "GET" && url === "/api/v1/credentials") {
+        return pendingCredentialsResponse;
+      }
+      throw new Error(`Unexpected fetch call: ${method} ${url}`);
+    });
+    vi.stubGlobal("fetch", firstFetchMock);
 
-    renderWithRoute(routes.credentials);
+    try {
+      renderWithRoute(routes.credentials);
 
-    expect(await screen.findByText("Loading personnel credential records.")).toBeInTheDocument();
-    expect(
-      await screen.findByRole("heading", {
-        name: "No personnel credential records are available."
-      })
-    ).toBeInTheDocument();
+      expect(await screen.findByText("Loading personnel credential records.")).toBeInTheDocument();
+      await act(async () => {
+        settleCredentialsRequest();
+      });
+      expect(
+        await screen.findByRole("heading", {
+          name: "No personnel credential records are available."
+        })
+      ).toBeInTheDocument();
+    } finally {
+      if (!settled) {
+        await act(async () => {
+          settleCredentialsRequest();
+        });
+      }
+    }
 
     vi.unstubAllGlobals();
     window.sessionStorage.clear();
@@ -494,6 +542,36 @@ describe("Credentials V1 frontend", () => {
     expect(screen.getByText("Certification records are not available in this projection.")).toBeInTheDocument();
     expect(screen.getByText("Operational Authorization records are not available in this projection.")).toBeInTheDocument();
     expect(screen.queryByText("No qualifications")).not.toBeInTheDocument();
+  });
+
+  it("accepts the truthful nullable-Client detail contract for authorized OGI Personnel", async () => {
+    const { calls } = mockFetchRoutes([{
+      url: `/api/v1/credentials/personnel/${ogiCredentialsDetail.id}`,
+      responses: [{ status: 200, body: ogiCredentialsDetail }]
+    }]);
+
+    const detail = await getPersonnelCredentials(ogiCredentialsDetail.id);
+
+    expect(detail.organizational_affiliation).toBe("OGI");
+    expect(detail.client).toBeNull();
+    expect(calls).toHaveLength(1);
+  });
+
+  it("renders OGI Personnel ownership without manufacturing a Client", async () => {
+    mockFetchRoutes([
+      ...authRoutes(credentialsSession),
+      {
+        url: `/api/v1/credentials/personnel/${ogiCredentialsDetail.id}`,
+        responses: [{ status: 200, body: ogiCredentialsDetail }]
+      }
+    ]);
+
+    renderWithRoute(routes.credentialsPersonnelPath(ogiCredentialsDetail.id));
+
+    expect(await screen.findByRole("heading", { name: ogiCredentialsDetail.full_name })).toBeInTheDocument();
+    expect(screen.getByText("Organization")).toBeInTheDocument();
+    expect(screen.getByText("OGI")).toBeInTheDocument();
+    expect(screen.queryByText("Client")).not.toBeInTheDocument();
   });
 
   it("keeps the Credentials API adapter GET-only and outside Registration, OETS, Assessment, ORI, digital issuance, and Module 6A", async () => {

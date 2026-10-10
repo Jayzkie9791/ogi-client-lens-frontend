@@ -14,6 +14,15 @@ export interface OperationalEvidenceCreateRequest {
   };
   correlation_id?: string;
   context?: { requirement_code: string; selected_id: string };
+  f026_review_authority?: F026ReviewAuthoritySelection;
+}
+
+export interface F026ReviewAuthoritySelection {
+  reviewed_instructor_personnel_id: string;
+  qa_reviewer_appointment_id: string;
+  training_session_id: string | null;
+  review_types: string[];
+  review_date: string;
 }
 
 export interface OperationalEvidenceDraftCreateRequest extends OperationalEvidenceCreateRequest {

@@ -1,0 +1,197 @@
+{
+  "schema_version": "1.0",
+  "artifact": "CLIENT_LENS_FINAL_VERIFIED_UAT_BASELINE",
+  "repository": "frontend",
+  "base_commit": "da77d6745732529f3f9151087199fc2f4186ddf2",
+  "generated_at": "2026-10-10",
+  "file_count": 37,
+  "hash_algorithm": "SHA-256",
+  "scope_note": "Payload allowlist only; this manifest and accompanying governance notes are non-self-referential staging governance artifacts.",
+  "files": [
+    {
+      "path": "src/app/App.test.tsx",
+      "classification": "approved-frontend-uat",
+      "sha256": "92348c02869b35b241a397d6450184cf80cb1299b2517c6cce3d7e7a3b3fc6ff"
+    },
+    {
+      "path": "src/assessments/FacilityAssessmentJourneysPage.cfac7c4a9r2.test.ts",
+      "classification": "approved-frontend-uat",
+      "sha256": "f9ae0fa6b2ce15918c05a3df670343f958a48f0de83926eb97a35858e237a2ed"
+    },
+    {
+      "path": "src/assessments/FacilityAssessmentJourneysPage.tsx",
+      "classification": "approved-frontend-uat",
+      "sha256": "e70296d5c7a69db32f0455293394f41452237b4715ef356ee2449f0bc84b36ce"
+    },
+    {
+      "path": "src/assessments/facilityAssessmentApi.ts",
+      "classification": "approved-frontend-uat",
+      "sha256": "7d5fbc6ad7c42e1b80fcc50dc2a658cdad1f0debb8eaf16eb53e68e56f4e772b"
+    },
+    {
+      "path": "src/audit-risk/AuditRiskPages.test.tsx",
+      "classification": "approved-frontend-infrastructure",
+      "sha256": "45f5f2fdb172f4ca448e2f14835c97270d85758d463e5ec52fe89a86a2305803"
+    },
+    {
+      "path": "src/authorized-workforce/FacilityTeamPage.tsx",
+      "classification": "approved-frontend-uat",
+      "sha256": "c7df1fbd39bc4b1ea18a6faebdbcb7c84939a1331e6e54aa5a26f10391711f42"
+    },
+    {
+      "path": "src/certifications/CertificationsPage.test.tsx",
+      "classification": "approved-credential",
+      "sha256": "c9e2c7e40a6bd13d2d613a6d10ff99739c80a8c3a9ff8b52667a614acf3716d2"
+    },
+    {
+      "path": "src/certifications/CertificationsPage.tsx",
+      "classification": "approved-credential",
+      "sha256": "d48b38d6264ae54b974d091879303eb28efd5ee902a969816952e86b71150609"
+    },
+    {
+      "path": "src/credentials/CertificatePreviewConsumers.test.tsx",
+      "classification": "approved-credential",
+      "sha256": "dcff3f0fddd33a36e7379d9b5b60390dec9eeb84db4c569ae34baacc794488d5"
+    },
+    {
+      "path": "src/credentials/CertificatePreviewModal.test.tsx",
+      "classification": "approved-credential",
+      "sha256": "4750a445d6ca271aa89987e18240342851c21f0b50c0fbf0eb962382903d25b1"
+    },
+    {
+      "path": "src/credentials/CertificatePreviewModal.tsx",
+      "classification": "approved-credential",
+      "sha256": "48a424e3fa8a106ff7068ccbade4295c2bd2bbe08d394898e94562970a3a979d"
+    },
+    {
+      "path": "src/credentials/CredentialsPage.test.tsx",
+      "classification": "approved-credential",
+      "sha256": "314df09cd3209b7fd456ff6c48441793024fe1e72c18df6f3662608d8f076b5d"
+    },
+    {
+      "path": "src/credentials/CredentialsPage.tsx",
+      "classification": "approved-credential",
+      "sha256": "f9c01e5f782dadae37b56edd7aa65d160ca6946f6f3e3437c2dbe50fdfada0e6"
+    },
+    {
+      "path": "src/credentials/DigitalCertificateModal.tsx",
+      "classification": "approved-credential",
+      "sha256": "8f5d342988388d8908e0921bf08d7d17f0301eeb00b1fea03252eaddff48faa5"
+    },
+    {
+      "path": "src/credentials/credentialsApi.ts",
+      "classification": "approved-credential",
+      "sha256": "e8dc8dc9092708dec0183d7348c02ed2e211aa916430dfe014a59b7482a3100e"
+    },
+    {
+      "path": "src/oets/F026ReviewAuthorityPanel.cfac7c4a8.test.ts",
+      "classification": "approved-frontend-uat",
+      "sha256": "9976a60ef812c4db7576ba60512613927b7831ac722d502c92470d82e80e3d43"
+    },
+    {
+      "path": "src/oets/F026ReviewAuthorityPanel.tsx",
+      "classification": "approved-frontend-uat",
+      "sha256": "b40018445b5db05ec0e6f6eda821f63e1c06a356efcb24a0abfff6ae7b224ae1"
+    },
+    {
+      "path": "src/oets/OperationalEvidenceRecordPage.tsx",
+      "classification": "approved-frontend-uat",
+      "sha256": "9bc6d3ca143a4b0d95045d14ddaefc55f31c599badd3aa4ba1c5a10d1a8d61dd"
+    },
+    {
+      "path": "src/oets/OrdinaryPerformerPanel.tsx",
+      "classification": "approved-frontend-uat",
+      "sha256": "eddc9ab2687bda5a3b555a5a725e171a362b2d7742585ab7b6f23a4fe86ad253"
+    },
+    {
+      "path": "src/oets/RuntimeTemplatePage.tsx",
+      "classification": "approved-frontend-uat",
+      "sha256": "94f9cbeb23752e25d8d35b010d2384a8a958cf4f651bbe80b2c849df8eb29f66"
+    },
+    {
+      "path": "src/oets/cfac8cAuthorityPresentation.test.tsx",
+      "classification": "approved-frontend-uat",
+      "sha256": "8f00e69d309857795092d851ff272d1e3c6846bfcfecdafc8f94d449c3bdcda1"
+    },
+    {
+      "path": "src/oets/definitionGuards.ts",
+      "classification": "approved-frontend-uat",
+      "sha256": "7186e06bfb13c1123f71c24506e1f49983e87d23349852924e1155e41a0d2e9f"
+    },
+    {
+      "path": "src/oets/evidenceSubmissionApi.ts",
+      "classification": "approved-frontend-uat",
+      "sha256": "a33c166e7db0f24789dc0b83d257e6183f9fc28820d214894d9f3827769f3425"
+    },
+    {
+      "path": "src/oets/f026ReviewAuthorityApi.ts",
+      "classification": "approved-frontend-uat",
+      "sha256": "8b80300296905264ccc18e5acc46c83617e142cd15fa272bfd0535552da24374"
+    },
+    {
+      "path": "src/oets/fieldAuthorityPresentation.ts",
+      "classification": "approved-frontend-uat",
+      "sha256": "c27c96e4e4316bb20f3a89413c06d1465c5835ffcaf44e70fe0da22cadcf6188"
+    },
+    {
+      "path": "src/oets/ordinaryPerformerApi.ts",
+      "classification": "approved-frontend-uat",
+      "sha256": "b0fe823300878b814fe61bf4afa108cf72cddce23c0d4409c8590da175c5a0b6"
+    },
+    {
+      "path": "src/oets/ordinaryPerformerPresentation.test.ts",
+      "classification": "approved-frontend-uat",
+      "sha256": "bce12e3bd9698fc77c86f874f3c25f707663c6674b4997e14376f902cf6ca034"
+    },
+    {
+      "path": "src/oets/ordinaryPerformerPresentation.ts",
+      "classification": "approved-frontend-uat",
+      "sha256": "069cf8e9e0cda95a3ab361d96e06ef5f75c051a950813e64fe65566f24b235d9"
+    },
+    {
+      "path": "src/oets/types.ts",
+      "classification": "approved-frontend-uat",
+      "sha256": "0a1f65950c95b0b32ee9ecef6911c7b4b9e45d1473bdfb431f5db581c3d787c3"
+    },
+    {
+      "path": "src/registration/PersonnelTrainingCertificationVisibility.test.tsx",
+      "classification": "approved-credential",
+      "sha256": "129fcaff41e4ce718c485ac0107c12a2d715d97853bb83ca623e24b2c47f23a1"
+    },
+    {
+      "path": "src/registration/RegistrationPersonnelPage.tsx",
+      "classification": "approved-frontend-uat",
+      "sha256": "ddde3a7c265639f97ebc27cad35e153458b248b7496050fd370552e5a17bbd28"
+    },
+    {
+      "path": "src/self-service/SelfServicePage.tsx",
+      "classification": "approved-self-identity",
+      "sha256": "2825859b7bdc7850d850a68738d29de9849b1489e21ae9866f33eb81f038442f"
+    },
+    {
+      "path": "src/self-service/selfServiceApi.test.ts",
+      "classification": "approved-self-identity",
+      "sha256": "d8fb700f8c6adf15a50ef1b39e492cfef4cd37a4020f0a6e068b7a48cab273e3"
+    },
+    {
+      "path": "src/self-service/selfServiceApi.ts",
+      "classification": "approved-self-identity",
+      "sha256": "44d77194ed5f8fd0e8372ec42729663315b645bff84c4adf61039b0aeb22c6b9"
+    },
+    {
+      "path": "src/test/setup.ts",
+      "classification": "approved-frontend-infrastructure",
+      "sha256": "08f94d32b53a1e24d1a5f6ce1944781d26d36a73e3d726ca3074f753acbfd585"
+    },
+    {
+      "path": "src/training/RegistrationTrainingPage.test.tsx",
+      "classification": "approved-frontend-infrastructure",
+      "sha256": "a6647cc26a0e9e1aa64228f6c619446d78ef42e9ed472e8d7d3291cc8622dc0c"
+    },
+    {
+      "path": "src/ui/layout/AppShell.tsx",
+      "classification": "approved-frontend-infrastructure",
+      "sha256": "4bc607a96c32ed1fa6e6cddb41628921a0ed870201fe249d910af0811150e189"
+    }
+  ]
+}

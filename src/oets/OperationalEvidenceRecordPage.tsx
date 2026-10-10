@@ -60,6 +60,9 @@ import {
 } from "./attestationApi";
 import { CanonicalAttestationPanel } from "./CanonicalAttestationPanel";
 import { canonicalAttestationQueryKey, listCanonicalAttestations } from "./canonicalAttestationApi";
+import { OrdinaryPerformerPanel } from "./OrdinaryPerformerPanel";
+import { getOrdinaryPerformerBinding, ordinaryPerformerBindingQueryKey } from "./ordinaryPerformerApi";
+import { applyOrdinaryPerformerPresentation, isOrdinaryPerformerSuccessor } from "./ordinaryPerformerPresentation";
 
 const trainingAssessmentNumberFieldCode = "ASSESSMENT_NUMBER";
 const trainingAssessmentNumberTemplateCodes = new Set([
@@ -414,6 +417,12 @@ export function OperationalEvidenceRecordPage({
     queryKey: attestationQueryKey,
     queryFn: () => listEvidenceAttestations(record?.id ?? "")
   });
+  const performerSuccessor = Boolean(record && isOrdinaryPerformerSuccessor(record.template_provenance.template_code, record.template_provenance.template_version));
+  const performerBindingQuery = useQuery({
+    enabled: performerSuccessor && record?.lifecycle_state === "DRAFT",
+    queryKey: ordinaryPerformerBindingQueryKey(record?.id ?? ""),
+    queryFn: () => getOrdinaryPerformerBinding(record?.id ?? "")
+  });
   const canReadCanonicalAttestations = auth.canUsePermission("attest_operational_assessment") ||
     auth.canUsePermission("review_operational_assessment");
   const canonicalAttestationQuery = useQuery({
@@ -615,10 +624,13 @@ export function OperationalEvidenceRecordPage({
 
   const isDraftRecord = record.lifecycle_state === "DRAFT";
   const isDiscardedRecord = record.lifecycle_state === "DISCARDED";
-  const renderedDefinition = applyExistingContextFieldPolicy(
+  const contextDefinition = applyExistingContextFieldPolicy(
     markTrainingAssessmentNumberReadonly(narrowing.definition, record),
     record.context?.field_policy
   );
+  const renderedDefinition = performerSuccessor
+    ? applyOrdinaryPerformerPresentation(contextDefinition, performerBindingQuery.data?.binding ?? null, auth.session?.id)
+    : contextDefinition;
   const repeatableSectionControls = Object.fromEntries((record.context?.repeatable_groups ?? []).flatMap((group) => group.sections.map((section) => [section.section_code, { cardinality: group.cardinality, instance_count: group.instance_count }])));
   const fieldVisibilityPolicy = trainingContextualFieldVisibilityPolicy(record);
   const canEditDraft =
@@ -881,6 +893,8 @@ export function OperationalEvidenceRecordPage({
             {inspectionFindingMutation.error instanceof Error ? inspectionFindingMutation.error.message : "Inspection Finding could not be registered."}
           </div>
         ) : null}
+
+        {performerSuccessor && isDraftRecord ? <OrdinaryPerformerPanel correction={Boolean(record.predecessor_evidence_record_id)} dirty={draftDirty || draftPayloadMutation.isPending} recordId={record.id} /> : null}
 
         <OetsRenderer
           attestationContext={auth.session ? {
@@ -2171,7 +2185,7 @@ function markTrainingAssessmentNumberReadonly(
         ...section,
         fields: section.fields.map((field) => ({
           ...field,
-          readonly: field.readonly || outputs.has(field.field_code) || ["ASSESSOR", "ASSESSMENT_DATE", "DATE", "DATE_2"].includes(field.field_code),
+          readonly: field.readonly || outputs.has(field.field_code) || ["ASSESSOR", "DATE", "DATE_2"].includes(field.field_code) || (field.field_code === "ASSESSMENT_DATE" && definition.template_metadata.version !== "3.6"),
           validation: inputs.has(field.field_code) || intelligenceInputs.has(field.field_code)
             ? { ...field.validation, minimum: 0, maximum: 100 }
             : field.validation

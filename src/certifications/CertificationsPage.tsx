@@ -1056,7 +1056,7 @@ function CertificationDetailPanel({
       </div>
       <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
         <MetadataItem emphasis label="Personnel" value={detail.full_name} />
-        <MetadataItem label="Client" value={detail.client.organization_name} />
+        <MetadataItem label={detail.organizational_affiliation === "OGI" ? "Organization" : "Client"} value={detail.client?.organization_name ?? "OGI"} />
         <MetadataItem emphasis label="Certification number" value={certification.certification_number} />
         <MetadataItem emphasis label="Issue date" value={formatDate(certification.issue_date)} />
         <MetadataItem emphasis label="Expiry date" value={formatDate(certification.expiry_date)} />

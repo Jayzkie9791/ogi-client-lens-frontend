@@ -1,4 +1,4 @@
-import { FocusEvent, ReactNode, useEffect, useState } from "react";
+import { FocusEvent, ReactNode, useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 
 import { routes } from "../../app/routePaths";
@@ -7,13 +7,16 @@ import { useAuth } from "../../auth/useAuth";
 interface SidebarItem { label: string; to: string; permission?: string; end?: boolean }
 interface SidebarGroup { label: string; items: SidebarItem[] }
 
-const sidebarPreferenceKey = "client-lens:sidebar-collapsed";
+const sidebarPreferenceKey = "client-lens:sidebar-pinned-open";
 
 export function AppShell() {
   const auth = useAuth();
   const location = useLocation();
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const sidebarRef = useRef<HTMLElement>(null);
   const [navigationOpen, setNavigationOpen] = useState(false);
-  const [collapsed, setCollapsed] = useState(() => window.localStorage.getItem(sidebarPreferenceKey) === "true");
+  const [pinnedOpen, setPinnedOpen] = useState(() => window.localStorage.getItem(sidebarPreferenceKey) === "true");
+  const [desktopPreviewOpen, setDesktopPreviewOpen] = useState(false);
   const groups: SidebarGroup[] = [
     { label: "Workspace", items: [{ label: "Overview", to: routes.workbench, end: true }] },
     { label: "My Account", items: [
@@ -46,19 +49,61 @@ export function AppShell() {
   ];
   const visibleGroups = groups.map((group) => ({ ...group, items: group.items.filter((item) => !item.permission || auth.canUsePermission(item.permission)) })).filter((group) => group.items.length > 0);
   const activeGroup = activeGroupForPath(location.pathname, visibleGroups);
+  const desktopExpanded = pinnedOpen || desktopPreviewOpen;
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
   const [previewGroup, setPreviewGroup] = useState<string | null>(null);
 
   useEffect(() => { setExpandedGroup(null); setPreviewGroup(null); }, [location.pathname]);
-  useEffect(() => { window.localStorage.setItem(sidebarPreferenceKey, String(collapsed)); }, [collapsed]);
+  useEffect(() => { window.localStorage.setItem(sidebarPreferenceKey, String(pinnedOpen)); }, [pinnedOpen]);
+  useEffect(() => {
+    if (!navigationOpen) return;
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      setNavigationOpen(false);
+      setPreviewGroup(null);
+      setExpandedGroup(null);
+      menuButtonRef.current?.focus();
+    }
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [navigationOpen]);
+  useEffect(() => {
+    const sidebar = sidebarRef.current;
+    if (!sidebar) return;
+    function closeOnPointerLeave() {
+      if (navigationOpen) return;
+      setDesktopPreviewOpen(false);
+      setPreviewGroup(null);
+      setExpandedGroup(null);
+    }
+    sidebar.addEventListener("mouseleave", closeOnPointerLeave);
+    return () => sidebar.removeEventListener("mouseleave", closeOnPointerLeave);
+  }, [navigationOpen]);
 
   function closeNavigation() { setNavigationOpen(false); setPreviewGroup(null); setExpandedGroup(null); }
+  function dismissDesktopNavigation() {
+    if (navigationOpen) return;
+    setDesktopPreviewOpen(false);
+    setPreviewGroup(null);
+    setExpandedGroup(null);
+  }
 
   return <div className="flex min-h-screen bg-canvas text-text-primary">
     {navigationOpen ? <button aria-label="Close navigation" className="fixed inset-0 z-40 bg-primary-navy/45 lg:hidden" onClick={closeNavigation} type="button" /> : null}
-    <aside className={["fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r border-border bg-surface shadow-xl transition-[transform,width] duration-200 lg:sticky lg:top-0 lg:h-screen lg:self-start lg:translate-x-0 lg:shadow-none", navigationOpen ? "translate-x-0" : "-translate-x-full", collapsed ? "lg:w-20" : "lg:w-72"].join(" ")} id="primary-navigation">
+    <div aria-hidden="true" className={["hidden shrink-0 transition-[width] duration-200 lg:block", pinnedOpen ? "lg:w-72" : "lg:w-20"].join(" ")} />
+    <aside
+      aria-label="Application sidebar"
+      className={["fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r border-border bg-surface shadow-xl transition-[transform,width] duration-200 lg:h-screen lg:translate-x-0", navigationOpen ? "translate-x-0" : "-translate-x-full", desktopExpanded ? "lg:w-72" : "lg:w-20", pinnedOpen ? "lg:shadow-none" : "lg:shadow-xl"].join(" ")}
+      data-desktop-mode={pinnedOpen ? "pinned" : desktopPreviewOpen ? "preview" : "collapsed"}
+      data-mobile-open={navigationOpen ? "true" : "false"}
+      id="primary-navigation"
+      onBlur={(event) => closePreviewAfterFocusLeaves(event, dismissDesktopNavigation)}
+      onFocus={() => setDesktopPreviewOpen(true)}
+      onMouseEnter={() => setDesktopPreviewOpen(true)}
+      ref={sidebarRef}
+    >
       <div className="flex min-h-24 shrink-0 items-center justify-between gap-3 border-b border-border px-4">
-        <NavLink aria-label="Client Lens overview" className="min-w-0" onClick={closeNavigation} to={routes.workbench}><img alt="Client Lens by OGI Ltd." className={collapsed ? "h-16 w-auto lg:h-10 lg:w-10 lg:object-cover lg:object-left" : "h-16 w-auto"} src="/brand/client-lens-logo.png" /></NavLink>
+        <NavLink aria-label="Client Lens overview" className="min-w-0" onClick={closeNavigation} to={routes.workbench}><img alt="Client Lens by OGI Ltd." className={desktopExpanded ? "h-16 w-auto" : "h-16 w-auto lg:h-10 lg:w-10 lg:object-cover lg:object-left"} src="/brand/client-lens-logo.png" /></NavLink>
         <button aria-label="Close navigation" className="rounded-component p-2 text-xl text-text-muted hover:bg-elevated lg:hidden" onClick={closeNavigation} type="button">×</button>
       </div>
       <nav aria-label="Primary navigation" className="min-h-0 flex-1 overflow-y-auto px-3 py-4 lg:overflow-visible">
@@ -68,9 +113,9 @@ export function AppShell() {
           const opensUpward = group.label === "Governance" || group.label === "System";
           const panelId = `sidebar-group-${group.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
           return <section className="relative" key={group.label} onBlur={(event) => closePreviewAfterFocusLeaves(event, () => setPreviewGroup(null))} onFocus={() => setPreviewGroup(group.label)} onMouseEnter={() => setPreviewGroup(group.label)} onMouseLeave={() => setPreviewGroup(null)}>
-            <button aria-controls={panelId} aria-expanded={isOpen} className={["relative flex min-h-12 w-full items-center gap-3 rounded-component border-l-4 px-3 text-left text-sm font-bold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-focus", isActiveGroup || isOpen ? "border-sidebar-active bg-sidebar-active-bg text-sidebar-active" : "border-transparent text-sidebar-parent hover:bg-sidebar-parent-active", collapsed ? "lg:justify-center lg:px-2" : ""].join(" ")} onClick={() => { setPreviewGroup(null); setExpandedGroup((current) => current === group.label ? null : group.label); }} title={collapsed ? group.label : undefined} type="button">
-              <span className={isActiveGroup ? "rounded-component bg-white/80" : ""}><GroupIcon group={group.label} /></span><span className={collapsed ? "lg:sr-only" : ""}>{group.label}</span><Chevron className={["ml-auto transition-transform", isOpen ? "rotate-180" : "", collapsed ? "lg:hidden" : ""].join(" ")} />
-              {isActiveGroup && collapsed ? <span aria-hidden="true" className="absolute right-1 hidden h-2 w-2 rounded-full bg-primary-blue lg:block" /> : null}
+            <button aria-controls={panelId} aria-expanded={isOpen} className={["relative flex min-h-12 w-full items-center gap-3 rounded-component border-l-4 px-3 text-left text-sm font-bold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-focus", isActiveGroup || isOpen ? "border-sidebar-active bg-sidebar-active-bg text-sidebar-active" : "border-transparent text-sidebar-parent hover:bg-sidebar-parent-active", desktopExpanded ? "" : "lg:justify-center lg:px-2"].join(" ")} onClick={() => { setPreviewGroup(null); setExpandedGroup((current) => current === group.label ? null : group.label); }} title={desktopExpanded ? undefined : group.label} type="button">
+              <span className={isActiveGroup ? "rounded-component bg-white/80" : ""}><GroupIcon group={group.label} /></span><span className={desktopExpanded ? "" : "lg:sr-only"}>{group.label}</span><Chevron className={["ml-auto transition-transform", isOpen ? "rotate-180" : "", desktopExpanded ? "" : "lg:hidden"].join(" ")} />
+              {isActiveGroup && !desktopExpanded ? <span aria-hidden="true" className="absolute right-1 hidden h-2 w-2 rounded-full bg-primary-blue lg:block" /> : null}
             </button>
             {isOpen ? <div className={["mt-1 bg-[var(--cl-sidebar-flyout-bg)] lg:absolute lg:left-full lg:z-50 lg:mt-0 lg:max-h-[calc(100vh-2rem)] lg:w-[16.5rem] lg:overflow-y-auto lg:rounded-panel lg:border lg:border-[var(--cl-sidebar-flyout-border)] lg:p-3 lg:shadow-xl", opensUpward ? "lg:bottom-0" : "lg:top-0"].join(" ")} id={panelId}>
               <p className="mb-2 hidden px-3 text-xs font-bold uppercase tracking-wide text-sidebar-parent lg:block">{group.label}</p>
@@ -79,10 +124,10 @@ export function AppShell() {
           </section>;
         })}</div>
       </nav>
-      <button aria-label={collapsed ? "Expand navigation" : "Collapse navigation"} className="hidden min-h-12 shrink-0 border-t border-border px-4 text-sm font-semibold text-text-muted hover:bg-elevated hover:text-text-primary lg:block" onClick={() => setCollapsed((current) => !current)} type="button">{collapsed ? "→" : "← Collapse"}</button>
+      <button aria-label={pinnedOpen ? "Unpin navigation" : "Pin navigation open"} aria-pressed={pinnedOpen} className={["hidden min-h-12 shrink-0 items-center gap-3 border-t border-border px-4 text-sm font-semibold text-text-muted hover:bg-elevated hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus lg:flex", desktopExpanded ? "justify-start" : "justify-center"].join(" ")} onClick={() => setPinnedOpen((current) => !current)} type="button"><PinIcon /><span className={desktopExpanded ? "" : "lg:sr-only"}>{pinnedOpen ? "Unpin navigation" : "Pin navigation open"}</span></button>
     </aside>
     <div className="min-w-0 flex-1"><header className="border-b border-border bg-surface"><div className="flex min-h-24 items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
-      <button aria-controls="primary-navigation" aria-expanded={navigationOpen} aria-label="Menu" className="inline-flex h-11 w-11 items-center justify-center rounded-component border border-border text-xl text-primary-navy hover:bg-elevated lg:hidden" onClick={() => setNavigationOpen(true)} type="button">☰</button>
+      <button aria-controls="primary-navigation" aria-expanded={navigationOpen} aria-label="Menu" className="inline-flex h-11 w-11 items-center justify-center rounded-component border border-border text-xl text-primary-navy hover:bg-elevated lg:hidden" onClick={() => setNavigationOpen(true)} ref={menuButtonRef} type="button">☰</button>
       <div className="ml-auto flex flex-wrap items-center justify-end gap-3 text-sm text-text-muted"><span className="text-right"><span className="font-medium text-text-primary">{auth.session?.fullName}</span><span className="ml-2 hidden text-xs sm:inline">{sessionIdentityLabel(auth.session)}</span></span><button className="rounded-component border border-border px-3 py-1.5 font-semibold text-text-primary hover:bg-elevated" onClick={auth.logout} type="button">Log out</button></div>
     </div></header><main className="mx-auto w-full max-w-[100rem] px-4 py-6 sm:px-6 lg:px-8"><Outlet /></main></div>
   </div>;
@@ -96,7 +141,14 @@ function activeGroupForPath(pathname: string, groups: SidebarGroup[]) {
   return null;
 }
 function closePreviewAfterFocusLeaves(event: FocusEvent<HTMLElement>, close: () => void) {
-  if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) close();
+  const region = event.currentTarget;
+  if (event.relatedTarget instanceof Node) {
+    if (!region.contains(event.relatedTarget)) close();
+    return;
+  }
+  queueMicrotask(() => {
+    if (!region.contains(document.activeElement)) close();
+  });
 }
 function GroupIcon({ group }: { group: string }) {
   const paths: Record<string, ReactNode> = {
@@ -114,6 +166,7 @@ function GroupIcon({ group }: { group: string }) {
   return <span aria-hidden="true" className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-component border border-current/20"><svg className="h-5 w-5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" viewBox="0 0 24 24">{paths[group]}</svg></span>;
 }
 function Chevron({ className }: { className: string }) { return <svg aria-hidden="true" className={`h-4 w-4 shrink-0 ${className}`} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></svg>; }
+function PinIcon() { return <svg aria-hidden="true" className="h-5 w-5 shrink-0" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" viewBox="0 0 24 24"><path d="m9 4 6 0 1 5 3 3H5l3-3 1-5Z" /><path d="M12 12v8" /></svg>; }
 function sessionIdentityLabel(session: ReturnType<typeof useAuth>["session"]) { return session?.email ?? session?.username ?? ""; }
 function auditRiskLandingPath(auth: ReturnType<typeof useAuth>) { return auth.canUsePermission("view_audit") ? routes.auditRisk : routes.auditFindings; }
 function auditRiskPermission(auth: ReturnType<typeof useAuth>) { return auth.canUsePermission("view_audit") ? "view_audit" : "view_finding"; }

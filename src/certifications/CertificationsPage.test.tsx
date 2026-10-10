@@ -168,6 +168,7 @@ const credentialsListWithNewCertification: CredentialsListResponse = {
 
 const anaDetail: CredentialsPersonnelDetailProjection = {
   ...anaProjection,
+  organizational_affiliation: "CLIENT",
   email: "ana.santos@example.test",
   phone_number: "+63 900 000 3001",
   notes: "Certification workspace fixture",

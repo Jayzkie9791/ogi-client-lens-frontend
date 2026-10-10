@@ -109,7 +109,9 @@ export interface CredentialsOperationalAuthorizationProjection {
 }
 
 export interface CredentialsPersonnelDetailProjection
-  extends CredentialsPersonnelProjection {
+  extends Omit<CredentialsPersonnelProjection, "client"> {
+  organizational_affiliation: "CLIENT" | "OGI";
+  client: CredentialsClientProjection | null;
   email: string | null;
   phone_number: string | null;
   notes: string | null;
@@ -270,11 +272,23 @@ function isCredentialsListResponse(
 function isCredentialsPersonnelDetailProjection(
   value: unknown
 ): value is CredentialsPersonnelDetailProjection {
-  if (!isRecord(value) || !isCredentialsPersonnelProjection(value)) {
+  if (!isRecord(value)) {
     return false;
   }
 
   return (
+    typeof value.id === "string" &&
+    typeof value.full_name === "string" &&
+    isNullableString(value.hire_date) &&
+    credentialsEmploymentStatuses.includes(value.employment_status as CredentialsEmploymentStatus) &&
+    (value.organizational_affiliation === "CLIENT" || value.organizational_affiliation === "OGI") &&
+    (value.client === null || isCredentialsClientProjection(value.client)) &&
+    ((value.organizational_affiliation === "OGI" && value.client === null) ||
+      (value.organizational_affiliation === "CLIENT" && value.client !== null)) &&
+    Array.isArray(value.facilities) &&
+    value.facilities.every(isCredentialsFacilityProjection) &&
+    Array.isArray(value.qualifications) &&
+    value.qualifications.every(isCredentialsQualificationProjection) &&
     isNullableString(value.email) &&
     isNullableString(value.phone_number) &&
     isNullableString(value.notes) &&

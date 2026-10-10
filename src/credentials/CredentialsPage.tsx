@@ -382,7 +382,10 @@ function CredentialsPersonnelDetail({
             label="Phone"
             value={detail.phone_number ?? "Not specified"}
           />
-          <MetadataItem label="Client" value={detail.client.organization_name} />
+          <MetadataItem
+            label={detail.organizational_affiliation === "OGI" ? "Organization" : "Client"}
+            value={detail.client?.organization_name ?? "OGI"}
+          />
         </dl>
         <div className="mt-4">
           <h3 className="text-sm font-semibold text-text-primary">

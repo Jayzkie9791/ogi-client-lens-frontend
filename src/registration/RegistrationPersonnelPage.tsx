@@ -1,11 +1,13 @@
 import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { isApiError } from "../api/errors";
 import { routes } from "../app/routePaths";
 import { useAuth } from "../auth/useAuth";
 import { DigitalCertificateModal } from "../credentials/DigitalCertificateModal";
+import { getPersonnelCredentials } from "../credentials/credentialsApi";
+import { listCredentialIssuancesByCertification } from "../certifications/credentialIssuanceApi";
 import { listTrainingEnrollments, listTrainingTrainees, TrainingEnrollment } from "../training/trainingApi";
 import { Button } from "../ui/components/Button";
 import { Surface } from "../ui/components/Surface";
@@ -60,6 +62,7 @@ const permissions = {
   ,viewInstructorRegistry: "view_instructor_registry"
   ,manageInstructorRegistry: "manage_instructor_registry"
   ,viewTraining: "view_training"
+  ,linkTrainingPersonnel: "link_training_staff_member"
   ,manageAccountActivation: "manage_personnel_account_activation"
   ,createStaffMember:"create_staff_member"
   ,createFacilityAssignment:"create_facility_assignment"
@@ -88,6 +91,7 @@ export function RegistrationPersonnelPage() {
   const canView = auth.canUsePermission(permissions.view);
   const canViewTraining = auth.canUsePermission(permissions.viewTraining);
   const canRegisterTraining = auth.canUsePermission("create_training_enrollment");
+  const canReconcileTrainee = auth.canUsePermission(permissions.linkTrainingPersonnel);
   const canViewPersonnelCertificates = auth.canUsePermission(permissions.viewCertification);
   const canUpdate = auth.canUsePermission(permissions.update);
   const canDeactivate = auth.canUsePermission(permissions.deactivate);
@@ -315,6 +319,7 @@ export function RegistrationPersonnelPage() {
               canViewFacilityAssignments={canViewFacilityAssignments && (!selectedPersonnelQuery.data || personnelAffiliation(selectedPersonnelQuery.data) === "CLIENT")}
               canViewTraining={canViewTraining}
               canRegisterTraining={canRegisterTraining}
+              canReconcileTrainee={canReconcileTrainee}
               canViewPersonnelCertificates={canViewPersonnelCertificates}
               canManageAccountActivation={canManageAccountActivation}
               clientNameById={clientNameById}
@@ -439,6 +444,7 @@ function PersonnelAccordionSummary({ clientNameById, staffMember }: { clientName
 function PersonnelDetailsPanel({
   canDeactivate,
   canRegisterTraining,
+  canReconcileTrainee,
   canUpdate,
   canViewFacilityAssignments,
   canViewPersonnelCertificates,
@@ -461,6 +467,7 @@ function PersonnelDetailsPanel({
 }: {
   canDeactivate: boolean;
   canRegisterTraining: boolean;
+  canReconcileTrainee: boolean;
   canUpdate: boolean;
   canViewFacilityAssignments: boolean;
   canViewPersonnelCertificates: boolean;
@@ -549,7 +556,7 @@ function PersonnelDetailsPanel({
         </div>
       ) : null}
 
-      {selectedTab === "training" && canViewTraining ? <div aria-labelledby="personnel-training-tab" id="personnel-training-panel" role="tabpanel"><PersonnelTrainingRecords canRegisterTraining={canRegisterTraining} canViewCertificates={canViewPersonnelCertificates} staffMember={staffMember} /></div> : null}
+      {selectedTab === "training" && canViewTraining ? <div aria-labelledby="personnel-training-tab" id="personnel-training-panel" role="tabpanel"><PersonnelTrainingRecords canReconcileTrainee={canReconcileTrainee} canRegisterTraining={canRegisterTraining} canViewCertificates={canViewPersonnelCertificates} staffMember={staffMember} /></div> : null}
       {selectedTab === "records" ? <div aria-labelledby="personnel-records-tab" className="space-y-4" id="personnel-records-panel" role="tabpanel">{personnelAffiliation(staffMember) === "CLIENT" ? <PersonnelRegistrationSummary assignments={assignmentsQuery.data?.assignments ?? []} clientName={clientLabel(staffMember.client_id, clientNameById)} facilities={registrationFacilitiesQuery.data?.facilities ?? []} intent={journeyQuery.data?.intent ?? null} loading={assignmentsQuery.isLoading || journeyQuery.isLoading || registrationFacilitiesQuery.isLoading} staffMember={staffMember} /> : null}{recordsContent}{!recordsContent && personnelAffiliation(staffMember) === "OGI" ? <Surface><p className="text-sm text-text-muted">No governed Personnel records are available with the current authority.</p></Surface> : null}</div> : null}
 
     </div>
@@ -583,7 +590,7 @@ function PersonnelRegistrationSummary({assignments,clientName,facilities,intent,
   </section>;
 }
 
-function PersonnelTrainingRecords({ canRegisterTraining, canViewCertificates, staffMember }: { canRegisterTraining: boolean; canViewCertificates: boolean; staffMember: RegistrationPersonnel }) {
+export function PersonnelTrainingRecords({ canReconcileTrainee, canRegisterTraining, canViewCertificates, staffMember }: { canReconcileTrainee: boolean; canRegisterTraining: boolean; canViewCertificates: boolean; staffMember: RegistrationPersonnel }) {
   const [certificateIssuanceId, setCertificateIssuanceId] = useState<string | null>(null);
   const traineesQuery = useQuery({
     queryKey: ["training-trainees", "personnel", staffMember.id],
@@ -600,17 +607,34 @@ function PersonnelTrainingRecords({ canRegisterTraining, canViewCertificates, st
     retry: false
   });
   const enrollments = enrollmentsQuery.data?.enrollments ?? [];
+  const credentialsQuery = useQuery({
+    queryKey: ["credentials-personnel", staffMember.id, "personnel-training-panel"],
+    queryFn: () => getPersonnelCredentials(staffMember.id),
+    enabled: canViewCertificates,
+    retry: false
+  });
+  const certifications = credentialsQuery.data?.certifications ?? [];
+  const issuanceQueries = useQueries({
+    queries: certifications.map((certification) => ({
+      queryKey: ["credential-issuances", certification.id],
+      queryFn: () => listCredentialIssuancesByCertification(certification.id),
+      enabled: canViewCertificates,
+      retry: false
+    }))
+  });
 
   return <><Surface>
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div><p className="text-xs font-bold uppercase tracking-wide text-primary-blue">Personnel record</p><h3 className="mt-1 text-lg font-semibold text-primary-navy">Training, Certifications, and Credentials</h3><p className="mt-1 text-sm text-text-muted">Enrollment journeys and issued authority linked to this exact Personnel identity.</p></div>
       {canRegisterTraining ? <Button asChild variant="secondary"><Link to={routes.trainingRegister}>Register Training</Link></Button> : null}
     </div>
-    {traineesQuery.isLoading || enrollmentsQuery.isLoading ? <p className="mt-4 text-sm text-text-muted" role="status">Loading Training records…</p> : null}
-    {traineesQuery.isError || enrollmentsQuery.isError ? <p className="mt-4 rounded-component border border-red-200 bg-red-50 p-3 text-sm text-red-900" role="alert">Training records could not be loaded with the current authority.</p> : null}
-    {!traineesQuery.isLoading && !traineesQuery.isError && !trainee ? <div className="mt-4 rounded-component border border-amber-200 bg-amber-50 p-4"><p className="font-semibold text-amber-900">No linked Trainee identity</p><p className="mt-1 text-sm text-amber-900">Link the matching Trainee record before its Training history can appear on this Personnel profile.</p><Button asChild className="mt-3" variant="secondary"><Link to={routes.trainingTrainees}>Open Trainee Reconciliation</Link></Button></div> : null}
-    {trainee && !enrollmentsQuery.isLoading && !enrollmentsQuery.isError && enrollments.length === 0 ? <p className="mt-4 rounded-component border border-dashed border-border p-4 text-sm text-text-muted">The linked Trainee has no active Training registrations.</p> : null}
-    {enrollments.length > 0 ? <ul aria-label="Personnel Training records" className="mt-4 space-y-3">{enrollments.map((enrollment) => { const issuance = enrollment.journey_progress?.certification?.digital_credential.issuance; return <li className="rounded-component border border-border p-4" key={enrollment.id}><div className="flex flex-wrap items-start justify-between gap-3"><div><h4 className="font-semibold text-primary-navy">{enrollment.program.certification_level} · {enrollment.program.display_name}</h4><p className="mt-1 text-sm text-text-muted">{enrollment.training_session?.training_title ?? "Training Session not assigned"} · Enrolled {formatRegistrationDateTime(enrollment.enrolled_at)}</p></div><RegistrationStatusBadge value={personnelTrainingStatus(enrollment)} /></div><div className="mt-3 flex flex-wrap gap-2"><Button asChild><Link to={routes.trainingJourneyPath(enrollment.id)}>{enrollment.journey_progress?.certification ? "View Training Journey" : "Continue Training Journey"}</Link></Button>{canViewCertificates && issuance ? <Button onClick={() => setCertificateIssuanceId(issuance.id)} type="button" variant="secondary">View Certificate</Button> : null}{canViewCertificates && enrollment.journey_progress?.certification && !issuance ? <Button asChild variant="secondary"><Link to={routes.certifications}>View Certification Record</Link></Button> : null}</div></li>; })}</ul> : null}
+    <section aria-labelledby="personnel-training-history-heading" className="mt-5"><h4 className="font-semibold text-primary-navy" id="personnel-training-history-heading">Training history</h4><p className="mt-1 text-sm text-text-muted">Training registrations and journeys require an exact governed Trainee identity link.</p>
+    {traineesQuery.isLoading || enrollmentsQuery.isLoading ? <p className="mt-3 text-sm text-text-muted" role="status">Loading Training records…</p> : null}
+    {traineesQuery.isError || enrollmentsQuery.isError ? <p className="mt-3 rounded-component border border-red-200 bg-red-50 p-3 text-sm text-red-900" role="alert">Training records could not be loaded with the current authority.</p> : null}
+    {!traineesQuery.isLoading && !traineesQuery.isError && !trainee ? <div className="mt-3 rounded-component border border-dashed border-border bg-surface-subtle p-4"><p className="font-semibold text-primary-navy">No linked Training history</p><p className="mt-1 text-sm text-text-muted">This Personnel identity has no governed Trainee link. Certifications remain available independently below.</p>{canReconcileTrainee ? <Button asChild className="mt-3" variant="secondary"><Link to={routes.trainingTrainees}>Open Trainee Reconciliation</Link></Button> : null}</div> : null}
+    {trainee && !enrollmentsQuery.isLoading && !enrollmentsQuery.isError && enrollments.length === 0 ? <p className="mt-3 rounded-component border border-dashed border-border p-4 text-sm text-text-muted">The linked Trainee has no active Training registrations.</p> : null}
+    {enrollments.length > 0 ? <ul aria-label="Personnel Training records" className="mt-3 space-y-3">{enrollments.map((enrollment) => { const issuance = enrollment.journey_progress?.certification?.digital_credential.issuance; return <li className="rounded-component border border-border p-4" key={enrollment.id}><div className="flex flex-wrap items-start justify-between gap-3"><div><h4 className="font-semibold text-primary-navy">{enrollment.program.certification_level} · {enrollment.program.display_name}</h4><p className="mt-1 text-sm text-text-muted">{enrollment.training_session?.training_title ?? "Training Session not assigned"} · Enrolled {formatRegistrationDateTime(enrollment.enrolled_at)}</p></div><RegistrationStatusBadge value={personnelTrainingStatus(enrollment)} /></div><div className="mt-3 flex flex-wrap gap-2"><Button asChild><Link to={routes.trainingJourneyPath(enrollment.id)}>{enrollment.journey_progress?.certification ? "View Training Journey" : "Continue Training Journey"}</Link></Button>{canViewCertificates && issuance ? <Button onClick={() => setCertificateIssuanceId(issuance.id)} type="button" variant="secondary">View Certificate</Button> : null}{canViewCertificates && enrollment.journey_progress?.certification && !issuance ? <Button asChild variant="secondary"><Link to={routes.certifications}>View Certification Record</Link></Button> : null}</div></li>; })}</ul> : null}</section>
+    {canViewCertificates ? <section aria-labelledby="personnel-certifications-heading" className="mt-6 border-t border-border pt-5"><h4 className="font-semibold text-primary-navy" id="personnel-certifications-heading">Certifications</h4><p className="mt-1 text-sm text-text-muted">All Certification records owned by this exact Personnel identity.</p>{credentialsQuery.isLoading ? <p className="mt-3 text-sm text-text-muted" role="status">Loading Certification records…</p> : credentialsQuery.isError ? <p className="mt-3 rounded-component border border-red-200 bg-red-50 p-3 text-sm text-red-900" role="alert">Certification records could not be loaded with the current authority.</p> : certifications.length === 0 ? <p className="mt-3 rounded-component border border-dashed border-border p-4 text-sm text-text-muted">No Personnel-owned Certification records were found.</p> : <ul aria-label="Personnel Certification records" className="mt-3 space-y-3">{certifications.map((certification, index) => { const issuanceQuery = issuanceQueries[index]; const issuance = issuanceQuery?.data?.issuances[0]; return <li className="rounded-component border border-border p-4" key={certification.id}><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-semibold text-primary-navy">{certification.certification_level} · {certification.program?.display_name ?? certification.certification_number}</p><p className="mt-1 text-sm text-text-muted">{certification.certification_number} · {certification.certification_status}</p></div><RegistrationStatusBadge value={certification.certification_status} /></div><div className="mt-3">{issuanceQuery?.isLoading ? <span className="text-sm text-text-muted">Checking digital certificate…</span> : issuanceQuery?.isError ? <span className="text-sm text-red-800">Digital certificate status could not be loaded.</span> : issuance ? <Button onClick={() => setCertificateIssuanceId(issuance.id)} type="button" variant="secondary">View Certificate</Button> : <span className="text-sm text-text-muted">Certification recorded. An issued digital certificate is not available.</span>}</div></li>; })}</ul>}</section> : null}
   </Surface>{certificateIssuanceId ? <DigitalCertificateModal issuanceId={certificateIssuanceId} onClose={() => setCertificateIssuanceId(null)} /> : null}</>;
 }
 
